@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "source_id": "SRC-NIST-PF-2019",
+      "title": "Towards a phase-field benchmark problem set on nucleation",
+      "authors": ["Tamás Pusztai"],
+      "year": 2019,
+      "source_type": "Workshop presentation / technical teaching material",
+      "event": "Phase Field Workshop, April 22–24, 2019",
+      "publisher_or_host": "NIST PFHub",
+      "url": "https://pages.nist.gov/pfhub/docs/Nucleation_new_Tamas.pdf",
+      "access_status": "FULL_TEXT_LOCATED",
+      "supporting_locations": [
+        "PDF text lines 45–64: classical nucleation theory assumptions, spherical free-energy expression, critical radius, and barrier.",
+        "PDF text lines 107–117: nucleation rate sensitivity and stated limits of classical theory."
+      ],
+      "use_note": "Primary source for the equations and the explicit model assumptions used in this candidate card. It is a workshop presentation, not presented here as a peer-reviewed journal article."
+    },
+    {
+      "source_id": "SRC-ACS-CR400544S",
+      "title": "Mechanisms of Nucleation and Growth of Nanoparticles in Solution",
+      "authors": [],
+      "year": 2014,
+      "journal": "Chemical Reviews",
+      "publisher": "American Chemical Society",
+      "doi": "10.1021/cr400544s",
+      "url": "https://doi.org/10.1021/cr400544s",
+      "access_status": "PUBLISHER_PREVIEW_LOCATED",
+      "supporting_locations": [
+        "Publisher search preview gives the surface-plus-volume free-energy expression and the resulting critical-radius relation."
+      ],
+      "use_note": "Corroborating source. Full publisher page was not independently accessible during repository preparation; do not upgrade this record to full-text-verified without a later direct check."
+    }
+  ]
+}
