@@ -15,24 +15,20 @@ if not errorlevel 1 (
     py -3.11 --version >nul 2>nul
     if not errorlevel 1 set "PY_BOOT=py -3.11"
   )
-  if not defined PY_BOOT (
-    py -3.13 --version >nul 2>nul
-    if not errorlevel 1 set "PY_BOOT=py -3.13"
-  )
 )
 if not defined PY_BOOT (
   python --version >nul 2>nul
   if not errorlevel 1 set "PY_BOOT=python"
 )
 if not defined PY_BOOT (
-  echo [ERROR] Python 3.11, 3.12, or 3.13 was not found.
+  echo [ERROR] Python 3.11 or 3.12 was not found.
   echo Install a supported 64-bit Python release, then retry.
   set "RC=1"
   goto :finish
 )
 
 if exist ".venv\Scripts\python.exe" (
-  ".venv\Scripts\python.exe" -c "import sys; raise SystemExit(0 if (3,11) <= sys.version_info[:2] < (3,14) else 1)" >nul 2>nul
+  ".venv\Scripts\python.exe" -c "import sys; raise SystemExit(0 if (3,11) <= sys.version_info[:2] < (3,13) else 1)" >nul 2>nul
   if errorlevel 1 (
     echo [ERROR] Existing .venv uses an unsupported Python. Rename or remove this project-local .venv, then retry.
     set "RC=1"
@@ -45,6 +41,12 @@ if exist ".venv\Scripts\python.exe" (
     set "RC=1"
     goto :finish
   )
+)
+".venv\Scripts\python.exe" -c "import sys; raise SystemExit(0 if (3,11) <= sys.version_info[:2] < (3,13) else 1)" >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Slice A requires Python 3.11 or 3.12. Python 3.13 is not supported by the selected Windows TTS wheel.
+  set "RC=1"
+  goto :finish
 )
 
 echo [2/4] Installing Slice A dependencies into .venv...

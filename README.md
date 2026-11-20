@@ -23,7 +23,7 @@ This is deliberately not the full daily production product. No topic-pool manage
 
 Prerequisites on Windows:
 
-- 64-bit Python 3.11, 3.12, or 3.13.
+- 64-bit Python 3.11 or 3.12.
 - FFmpeg and ffprobe on PATH; the FFmpeg build must include libass (subtitles) and loudnorm.
 - A LaTeX distribution with the standalone and amsmath packages, plus dvisvgm. MiKTeX is the recommended Windows route. The preflight smoke test is noninteractive and does not install missing packages.
 - A Chinese font from the configured list. The preflight checks that its font file exists; actual glyph appearance still requires user inspection.

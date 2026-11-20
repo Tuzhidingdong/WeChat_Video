@@ -133,7 +133,7 @@ def run_preflight(
             "当前 Python 不在项目专用 .venv 中。请先运行 Setup_Slice_A.bat；"
             "不要使用或修改全局 Python。"
         )
-    if not ((3, 11) <= sys.version_info[:2] < (3, 14)):
+    if not ((3, 11) <= sys.version_info[:2] < (3, 13)):
         raise RuntimeError("Slice A 需要 Python 3.11、3.12 或 3.13。")
 
     try:
