@@ -1,0 +1,57 @@
+{
+  "script_id": "CNT-VIDEO-001",
+  "title": "临界晶核：越过自由能垒",
+  "language": "zh-CN",
+  "target_duration_seconds": [55, 65],
+  "speech_units": [
+    {
+      "unit_id": "U01",
+      "raw_text": "晶体为什么有时继续长大，有时刚出现就消失？关键在晶核尺寸。",
+      "display_text": "晶体为什么有时继续长大，有时刚出现就消失？关键在晶核尺寸。",
+      "spoken_text": "晶体为什么有时继续长大，有时刚出现就消失？关键在晶核尺寸。",
+      "claim_ids": ["CNT-04"],
+      "visual_trigger_ids": ["INTRO_QUESTION"]
+    },
+    {
+      "unit_id": "U02",
+      "raw_text": "经典均匀成核理论认为，形成球形晶核要付出界面代价，同时获得体相自由能收益。",
+      "display_text": "经典均匀成核理论认为，形成球形晶核要付出界面代价，同时获得体相自由能收益。",
+      "spoken_text": "经典均匀成核理论认为，形成球形晶核要付出界面代价，同时获得体相自由能收益。",
+      "claim_ids": ["CNT-01"],
+      "visual_trigger_ids": ["SHOW_TWO_TERMS"]
+    },
+    {
+      "unit_id": "U03",
+      "raw_text": "界面代价随半径平方增长，体相收益随半径立方增长。",
+      "display_text": "界面代价随半径平方增长，体相收益随半径立方增长。",
+      "spoken_text": "界面代价随半径平方增长，体相收益随半径立方增长。",
+      "claim_ids": ["CNT-02"],
+      "visual_trigger_ids": ["SHOW_SCALING"]
+    },
+    {
+      "unit_id": "U04",
+      "raw_text": "晶核很小时，界面代价占主导，总自由能上升；晶核变大后，体相收益逐渐占优。",
+      "display_text": "晶核很小时，界面代价占主导，总自由能上升；晶核变大后，体相收益逐渐占优。",
+      "spoken_text": "晶核很小时，界面代价占主导，总自由能上升；晶核变大后，体相收益逐渐占优。",
+      "claim_ids": ["CNT-01", "CNT-02"],
+      "visual_trigger_ids": ["SHOW_FREE_ENERGY_CURVE"]
+    },
+    {
+      "unit_id": "U05",
+      "raw_text": "曲线最高点对应临界半径。低于它，晶核倾向缩小；超过它，继续长大在热力学上更有利。",
+      "display_text": "曲线最高点对应临界半径。低于它，晶核倾向缩小；超过它，继续长大在热力学上更有利。",
+      "spoken_text": "曲线最高点对应临界半径。低于它，晶核倾向缩小；超过它，继续长大在热力学上更有利。",
+      "claim_ids": ["CNT-03", "CNT-04"],
+      "visual_trigger_ids": ["MARK_CRITICAL_RADIUS", "COMPARE_SUB_SUPERCRITICAL"]
+    },
+    {
+      "unit_id": "U06",
+      "raw_text": "这是球形、均匀成核模型的近似结论。真实体系的界面结构、各向异性和扩散动力学，也会影响成核。",
+      "display_text": "这是球形、均匀成核模型的近似结论。真实体系的界面结构、各向异性和扩散动力学，也会影响成核。",
+      "spoken_text": "这是球形、均匀成核模型的近似结论。真实体系的界面结构、各向异性和扩散动力学，也会影响成核。",
+      "claim_ids": ["CNT-05"],
+      "visual_trigger_ids": ["MODEL_LIMITS"]
+    }
+  ],
+  "pronunciation_review_text": "晶核、临界半径、均匀成核、界面能、自由能垒、各向异性。"
+}

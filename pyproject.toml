@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wechat-video-slice-a"
+version = "0.1.0"
+description = "Milestone 1 Slice A: local critical-nucleus science-video production proof"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "manim==0.22.1",
+  "sherpa-onnx>=1.12,<2",
+  "soundfile>=0.12,<1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"

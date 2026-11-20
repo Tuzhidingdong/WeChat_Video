@@ -1,0 +1,5 @@
+# Installed only into the repository-local .venv by Setup_Slice_A.bat.
+# Windows x64 / Python 3.11-3.13. Pin the Manim renderer version for the first proof.
+manim==0.22.1
+sherpa-onnx>=1.12,<2
+soundfile>=0.12,<1

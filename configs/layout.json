@@ -1,0 +1,42 @@
+{
+  "profile_id": "wechat_channels_portrait_slice_a_v1",
+  "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "aspect_ratio": "9:16"
+  },
+  "safe_zones": {
+    "top_reserved_percent": 10,
+    "science_content_top_percent": 10,
+    "science_content_bottom_percent": 68,
+    "subtitle_top_percent": 68,
+    "subtitle_bottom_percent": 78,
+    "bottom_ui_reserved_percent": 22,
+    "left_margin_percent": 5,
+    "right_reserved_percent": 15
+  },
+  "subtitle": {
+    "font_size": 46,
+    "outline": 3,
+    "shadow": 1,
+    "margin_left": 72,
+    "margin_right": 162,
+    "margin_vertical": 500,
+    "max_line_chars": 18,
+    "preferred_fonts": [
+      "Microsoft YaHei",
+      "SimHei",
+      "Noto Sans CJK SC",
+      "Source Han Sans SC"
+    ]
+  },
+  "manim": {
+    "renderer": "cairo",
+    "background_color": "#081321",
+    "foreground_color": "#F4F7FB",
+    "accent_color": "#61D6C8",
+    "secondary_color": "#F3B85B",
+    "danger_color": "#E77A74"
+  }
+}
