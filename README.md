@@ -8,7 +8,7 @@ One local, Windows-first golden path for a critical-nucleus / free-energy-barrie
 
 1. Project-local Python .venv bootstrap; global Python is not modified.
 2. Manim Community Edition scene in portrait 1080×1920 / 30 fps.
-3. Offline English Piper VITS voice (`vits-piper-en_US-lessac-medium`) as the default; the legacy Chinese MeloTTS model is retained for rollback only.
+3. Personal English narration: MeloTTS EN-US base speech converted by OpenVoice V2 using a one-time, project-local speaker embedding extracted from the user's own recording. The legacy Chinese MeloTTS and Piper test voices are retained only for rollback/diagnostics.
 4. Separate raw_text, display_text, and spoken_text per speech unit.
 5. One WAV per speech unit, plus a pronunciation-review WAV.
 6. Measured WAV sample counts and per-chunk ffprobe records.
@@ -32,9 +32,9 @@ Prerequisites on Windows:
 
 Double-click Setup_Slice_A.bat. It reuses .venv and the project-local tools, downloads the official English Piper VITS voice only if missing, then runs preflight. Models are cached under `assets/models/` and ignored by Git. The runtime performs no model downloads and has no online TTS fallback.
 
-The default voice is `vits-piper-en_US-lessac-medium` (English US, single speaker, 22,050 Hz), distributed by sherpa-onnx:
-https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models
-The earlier `vits-melo-tts-zh_en` model remains on disk for rollback but is not selected by default.
+The daily narration voice is the user's personal OpenVoice V2 profile. Setup creates an isolated `.venv-voice` (Python 3.9 + CPU PyTorch) and downloads the OpenVoice V2 converter and MeloTTS EN-US checkpoints into `tools/openvoice/` and `assets/models/melo-en-us/`. One-time enrollment from `my_voice/voice.m4a` writes `private/voice_profile/target_se.pth`; later runs reuse that embedding and never re-extract it. All voice data and caches stay inside this project and are gitignored.
+
+The earlier `vits-melo-tts-zh_en` and `vits-piper-en_US-lessac-medium` models remain on disk for rollback/diagnostics only.
 
 ## Generate the first local review sample
 

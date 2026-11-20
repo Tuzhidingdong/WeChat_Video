@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 import pytest
+import soundfile as sf
 
 from wechat_video.fact_card import (
     FactCardError,
@@ -15,7 +16,7 @@ from wechat_video.model_setup import _model_dir_valid
 from wechat_video.preflight import find_font
 from wechat_video.subtitles import _wrap_text, write_subtitles
 from wechat_video.tooling import model_root
-from wechat_video.tts import LocalTtsError, engine_label, generate_speech_units
+from wechat_video.tts import LocalTtsError, _create_engine, engine_label
 from wechat_video.visual_stages import build_stage_manifest, stage_for_unit
 
 
@@ -138,6 +139,20 @@ def test_default_model_is_piper_english_and_legacy_is_preserved() -> None:
     assert legacy.is_dir() and _model_dir_valid(legacy)
 
 
+def test_personal_voice_profile_registered_and_ab_samples_valid() -> None:
+    profile = ROOT / "private" / "voice_profile"
+    metadata_path = profile / "voice_profile.json"
+    assert metadata_path.is_file()
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata["base_speaker"] == "EN-US"
+    assert len(metadata["fingerprint"]) == 64
+    assert metadata["watermark_preserved"] is True
+    assert (profile / "target_se.pth").is_file()
+    for name in ("ab_base_en_us.wav", "ab_user_voice_en.wav"):
+        info = sf.info(str(profile / name))
+        assert info.frames > 0 and info.samplerate > 0
+
+
 def test_offline_tts_rejects_missing_model_without_fallback(tmp_path: Path) -> None:
     with pytest.raises(LocalTtsError, match="Offline TTS model file missing"):
-        generate_speech_units(tmp_path / "absent_model", [], tmp_path / "audio", "")
+        _create_engine(tmp_path / "absent_model")

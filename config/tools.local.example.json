@@ -35,5 +35,14 @@
     "language": "zh-CN",
     "installed": true,
     "note": "Retained for rollback only; not the default Slice A voice."
+  },
+  "voice": {
+    "runtime": ".venv-voice",
+    "engine": "MeloTTS EN-US -> OpenVoice V2 ToneColorConverter",
+    "base_model": "assets/models/melo-en-us",
+    "converter": "tools/openvoice/checkpoints_v2",
+    "profile": "private/voice_profile",
+    "installed": false,
+    "note": "Personal voice profile is private and never committed."
   }
 }

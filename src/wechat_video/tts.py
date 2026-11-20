@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import importlib.metadata
+import json
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +85,114 @@ def _create_engine(model_root: Path, num_threads: int = 2):
     return sherpa_onnx, sherpa_onnx.OfflineTts(config)
 
 
+def _voice_profile_paths():
+    from .tooling import project_root
+
+    root = project_root()
+    return (
+        root,
+        root / "private" / "voice_profile",
+        root / ".venv-voice" / "python.exe",
+        root / "src" / "wechat_video" / "voice_worker.py",
+    )
+
+
+def _generate_with_personal_voice(
+    units: list[dict[str, Any]],
+    audio_dir: Path,
+    pronunciation_text: str,
+) -> list[dict[str, Any]]:
+    root, profile_dir, voice_python, worker = _voice_profile_paths()
+    profile_json = profile_dir / "voice_profile.json"
+    target_se = profile_dir / "target_se.pth"
+    if not (profile_json.is_file() and target_se.is_file()):
+        raise LocalTtsError(
+            "Personal voice profile is missing; enrollment is required. "
+            "No silent fallback to Piper or another voice is allowed."
+        )
+    if not voice_python.is_file() or not worker.is_file():
+        raise LocalTtsError("Isolated voice runtime is missing (.venv-voice).")
+
+    profile = json.loads(profile_json.read_text(encoding="utf-8"))
+    run_dir = audio_dir.parent
+    script_path = run_dir / "voice_script.json"
+    script_path.write_text(
+        json.dumps(
+            {"speech_units": units, "pronunciation_review_text": pronunciation_text},
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    for key, value in (
+        ("HF_HOME", root / ".cache" / "hf"),
+        ("HF_HUB_CACHE", root / ".cache" / "hf" / "hub"),
+        ("TORCH_HOME", root / ".cache" / "torch"),
+        ("NLTK_DATA", root / ".cache" / "nltk_data"),
+        ("TEMP", root / ".cache" / "temp"),
+        ("TMP", root / ".cache" / "temp"),
+    ):
+        env[str(key)] = str(value)
+
+    command = [
+        str(voice_python), "-X", "utf8", str(worker), "generate",
+        "--script", str(script_path), "--out", str(run_dir),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=str(root),
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=1800,
+        shell=False,
+    )
+    if result.returncode != 0:
+        raise LocalTtsError(f"Personal voice generation failed:\n{result.stdout[-4000:]}")
+
+    manifest = json.loads((run_dir / "voice_generation_manifest.json").read_text(encoding="utf-8"))
+    converted_dir = run_dir / "converted_user_voice"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    results: list[dict[str, Any]] = []
+    for source in manifest["units"]:
+        unit_id = source["unit_id"]
+        final = audio_dir / f"{unit_id}.wav"
+        shutil.copy2(converted_dir / f"{unit_id}.wav", final)
+        info = sf.info(str(final))
+        if info.frames <= 0 or info.samplerate <= 0 or info.channels != 1:
+            raise LocalTtsError(f"{unit_id} converted audio is invalid: {info}")
+        results.append(
+            {
+                "unit_id": unit_id,
+                "audio_file": str(final),
+                "sample_rate": int(info.samplerate),
+                "channels": int(info.channels),
+                "frames": int(info.frames),
+                "duration_seconds": float(info.duration),
+                "tts_engine": "MeloTTS EN-US -> OpenVoice V2 (user voice profile)",
+                "tts_engine_version": profile["model_revision"],
+                "base_speaker": source["base_speaker"],
+                "provider": "cpu",
+                "speed": 1.0,
+                "base_generation_seconds": source["base_generation_seconds"],
+                "conversion_seconds": source["conversion_seconds"],
+                "total_seconds": source["total_seconds"],
+                "voice_profile_fingerprint": profile["fingerprint"],
+            }
+        )
+    review_src = converted_dir / "pronunciation_review.wav"
+    if review_src.is_file():
+        shutil.copy2(review_src, audio_dir / "pronunciation_review.wav")
+    return results
+
+
 def generate_speech_units(
     model_root: Path,
     units: list[dict[str, Any]],
@@ -87,6 +200,8 @@ def generate_speech_units(
     pronunciation_text: str,
 ) -> list[dict[str, Any]]:
     audio_dir.mkdir(parents=True, exist_ok=True)
+    if _voice_profile_paths()[1].joinpath("voice_profile.json").is_file():
+        return _generate_with_personal_voice(units, audio_dir, pronunciation_text)
     sherpa, engine = _create_engine(model_root)
     results: list[dict[str, Any]] = []
 

@@ -23,6 +23,37 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _write_script_markdown(path: Path, script: dict[str, Any]) -> None:
+    lines = [
+        "# Slice A English Script",
+        "",
+        f"- Script ID: {script.get('script_id', '')}",
+        f"- Title: {script.get('title', '')}",
+        f"- Language: {script.get('language', '')}",
+        "",
+    ]
+    for unit in script["speech_units"]:
+        lines.extend(
+            [
+                f"## {unit['unit_id']}",
+                "",
+                f"- Spoken / displayed text: {unit['spoken_text']}",
+                f"- Claim IDs: {', '.join(unit['claim_ids'])}",
+                f"- Visual triggers: {', '.join(unit['visual_trigger_ids'])}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Pronunciation review",
+            "",
+            script.get("pronunciation_review_text", ""),
+            "",
+        ]
+    )
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def _make_logger(run_dir: Path) -> logging.Logger:
     logger = logging.getLogger(f"wechat_video.{run_dir.name}")
     logger.setLevel(logging.INFO)
@@ -103,6 +134,7 @@ def run_slice_a(
     shutil.copy2(card_path, run_dir / "fact_card.json")
     shutil.copy2(source_path, run_dir / "source_record.json")
     shutil.copy2(script_path, run_dir / "script.json")
+    _write_script_markdown(run_dir / "script_en.md", script)
     layout = read_json(project_root / "configs" / "layout.json")
     _write_json(run_dir / "layout_profile.json", layout)
 
@@ -113,7 +145,7 @@ def run_slice_a(
 
     units = script["speech_units"]
     model_root = configured_model_root(project_root)
-    logger.info("Generating %d offline English speech units with sherpa-onnx.", len(units))
+    logger.info("Generating %d English speech units with the personal voice profile.", len(units))
     tts_results = generate_speech_units(
         model_root,
         units,

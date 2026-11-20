@@ -6,7 +6,7 @@
 
 - **Milestone:** 1 — Local video-production proof
 - **Slice:** A — One critical-nucleus / free-energy-barrier sample
-- **Implementation state:** English voice / centered framing / exclusive visual-stage refinement implemented and locally rendered on this branch.
+- **Implementation state:** Personal OpenVoice V2 + MeloTTS EN-US voice enrolled from the user's recording; centered framing and exclusive visual stages implemented and locally rendered on this branch.
 - **Slice A exit condition:** NOT MET — the user must play the newly generated English MP4 and manually accept it.
 - **Next authorized work:** user playback review of English pronunciation, centered composition, visual-stage transitions, scientific claims, and 55–65 s duration; do not begin Slice B.
 
@@ -15,7 +15,7 @@
 - Project-local Python environment bootstrap (Setup_Slice_A.bat).
 - Local-only runtime entry (Run_Slice_A.bat); no runtime package installation or network fallback.
 - Windows preflight for Python venv, Manim, project-local FFmpeg/ffprobe, libass/loudnorm, portable MiKTeX LaTeX/dvisvgm, Latin font, and offline TTS model files.
-- Default English Piper VITS voice (`vits-piper-en_US-lessac-medium`) with CPU-only offline inference; legacy MeloTTS zh_en model retained for rollback only.
+- Default personal English narration: one-time OpenVoice V2 target embedding from `my_voice/voice.m4a`, reused for all speech units; isolated `.venv-voice` (Python 3.9, CPU PyTorch), MeloTTS EN-US base voice; legacy Chinese and Piper voices retained for rollback only.
 - Speech-unit script schema with separate raw/display/spoken forms and claim/visual-trigger links.
 - Per-unit WAV output and independent pronunciation-review WAV.
 - Measured sample counts, per-unit ffprobe metadata, explicit cover, pauses, and global audio timeline.
