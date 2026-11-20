@@ -11,14 +11,22 @@ def _wrap_text(text: str, max_chars: int) -> str:
     lines: list[str] = []
     remaining = text
     while len(remaining) > max_chars:
-        split_at = -1
+        window = remaining[: max_chars + 1]
+        # Prefer CJK punctuation, then a word boundary (space) for English text.
+        cut = -1
+        inclusive = False
         for punctuation in "，。；！？、":
-            candidate = remaining.rfind(punctuation, 0, max_chars + 1)
-            split_at = max(split_at, candidate)
-        if split_at < max_chars // 2:
-            split_at = max_chars
-        lines.append(remaining[: split_at + 1].strip())
-        remaining = remaining[split_at + 1 :].strip()
+            candidate = window.rfind(punctuation)
+            if candidate > cut:
+                cut, inclusive = candidate, True
+        space = window.rfind(" ")
+        if space > max_chars // 2 and (not inclusive or space > cut):
+            cut, inclusive = space, False
+        if cut < max_chars // 2:
+            cut, inclusive = max_chars, False
+        end = cut + 1 if inclusive else cut
+        lines.append(remaining[:end].strip())
+        remaining = remaining[end:].strip()
     if remaining:
         lines.append(remaining)
     return "\n".join(lines)

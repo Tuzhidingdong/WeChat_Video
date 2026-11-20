@@ -5,9 +5,10 @@ import json
 import sys
 from pathlib import Path
 
-from .model_setup import download_model
+from .model_setup import download_chinese_model, download_model
 from .pipeline import run_slice_a
 from .preflight import run_preflight
+from .tooling import describe_tools, tool_path_for_bat
 
 
 def _project_root() -> Path:
@@ -26,8 +27,19 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--project-root", type=Path, default=root)
     preflight.add_argument("--allow-missing-model", action="store_true")
 
-    model = sub.add_parser("download-model", help="Download the official sherpa-onnx MeloTTS zh_en model.")
+    model = sub.add_parser("download-model", help="Download the default English Piper VITS voice.")
     model.add_argument("--project-root", type=Path, default=root)
+    model_zh = sub.add_parser("download-model-zh", help="Download the legacy MeloTTS zh_en rollback voice.")
+    model_zh.add_argument("--project-root", type=Path, default=root)
+
+    sub.add_parser(
+        "tool-path",
+        help="Print project-local tool bin directories for the BAT launchers.",
+    )
+    sub.add_parser(
+        "tools-status",
+        help="Print resolved project-local tool and model status as JSON.",
+    )
 
     run = sub.add_parser("run-slice-a", help="Create one local critical-nucleus sample MP4.")
     run.add_argument("--project-root", type=Path, default=root)
@@ -39,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--script",
         type=Path,
-        default=root / "content" / "sample_script.json",
+        default=root / "content" / "sample_script.en.json",
     )
     run.add_argument("--output-root", type=Path, default=Path("outputs"))
     run.add_argument(
@@ -51,6 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    root = _project_root()
     args = build_parser().parse_args(argv)
     try:
         if args.command == "preflight":
@@ -62,7 +75,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "download-model":
             model_path = download_model(args.project_root.resolve())
-            print(f"Local offline TTS model ready: {model_path}")
+            print(f"Local offline English TTS model ready: {model_path}")
+            return 0
+        if args.command == "download-model-zh":
+            model_path = download_chinese_model(args.project_root.resolve())
+            print(f"Local offline legacy zh TTS model ready: {model_path}")
+            return 0
+        if args.command == "tool-path":
+            print(tool_path_for_bat(root))
+            return 0
+        if args.command == "tools-status":
+            print(json.dumps(describe_tools(root), ensure_ascii=False, indent=2))
             return 0
         if args.command == "run-slice-a":
             run_dir = run_slice_a(

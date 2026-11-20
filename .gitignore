@@ -13,6 +13,14 @@ runtime/
 media/
 *.log
 
+# Project-local tools, caches and machine-specific config
+.cache/
+tools/
+config/tools.local.json
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+
 # Editor / OS
 .vscode/
 .idea/

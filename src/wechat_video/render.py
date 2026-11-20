@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .process import run_checked
+from .tooling import tool_env
 
 
 def render_critical_nucleus_scene(
@@ -67,7 +68,7 @@ print("MANIM_OUTPUT=" + str(candidates[0]))
         encoding="utf-8",
     )
 
-    env = os.environ.copy()
+    env = tool_env(project_root)
     env["WECHAT_VIDEO_SCENE_SPEC"] = str(scene_spec_path.resolve())
     env["WECHAT_VIDEO_MANIM_MEDIA_DIR"] = str(media_dir.resolve())
     package_src = str((project_root / "src").resolve())

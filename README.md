@@ -8,14 +8,16 @@ One local, Windows-first golden path for a critical-nucleus / free-energy-barrie
 
 1. Project-local Python .venv bootstrap; global Python is not modified.
 2. Manim Community Edition scene in portrait 1080×1920 / 30 fps.
-3. Offline Chinese/English sherpa-onnx VITS MeloTTS model (vits-melo-tts-zh_en).
+3. Offline English Piper VITS voice (`vits-piper-en_US-lessac-medium`) as the default; the legacy Chinese MeloTTS model is retained for rollback only.
 4. Separate raw_text, display_text, and spoken_text per speech unit.
 5. One WAV per speech unit, plus a pronunciation-review WAV.
 6. Measured WAV sample counts and per-chunk ffprobe records.
 7. One global audio_timing.json with the explicit 0–1000 ms cover.
-8. Cue-checkpoint-driven Manim events.
-9. One portrait safe-zone profile and hard subtitles (ASS/SRT).
+8. Cue-checkpoint-driven Manim visual stages with mutually exclusive VGroups and a `visual_stage_manifest.json`.
+9. Symmetric portrait safe-zone profile (15% margins each side) and hard subtitles (ASS/SRT) with a Latin font.
 10. FFmpeg normalization, two-pass loudness measurement/application, and final MP4 QA.
+
+The current default production script is `content/sample_script.en.json`; all narration and visible video text are English. The original Chinese script and Fact Card are retained as evidence, not as the default voice path.
 
 This is deliberately not the full daily production product. No topic-pool manager, OpenCode authoring, Google Flow, Edge session, WeChat uploader, upload state machine, or publishing action is included in Slice A.
 
@@ -24,14 +26,15 @@ This is deliberately not the full daily production product. No topic-pool manage
 Prerequisites on Windows:
 
 - 64-bit Python 3.11 or 3.12.
-- FFmpeg and ffprobe on PATH; the FFmpeg build must include libass (subtitles) and loudnorm.
-- A LaTeX distribution with the standalone and amsmath packages, plus dvisvgm. MiKTeX is the recommended Windows route. The preflight smoke test is noninteractive and does not install missing packages.
-- A Chinese font from the configured list. The preflight checks that its font file exists; actual glyph appearance still requires user inspection.
+- Project-local FFmpeg and ffprobe under `tools/ffmpeg/bin` (libass/subtitles and loudnorm required); `config/tools.local.json` is read by the code and BAT launchers.
+- Project-local portable MiKTeX under `tools/miktex-portable` with `latex`, `dvisvgm`, `standalone`, `amsmath`, `amssymb`, `graphicx`, `xcolor`, `preview` installed; automatic package installation is disabled.
+- A Latin font from the configured list (Arial / Segoe UI / Aptos). The preflight checks that the font file exists; actual glyph appearance still requires user inspection.
 
-Double-click Setup_Slice_A.bat. It creates .venv, installs dependencies there, downloads the official sherpa-onnx MeloTTS zh/en model once (about 347 MB uncompressed), then runs preflight. The model is cached under assets/models/ and is ignored by Git. The runtime path performs no model downloads and has no online TTS fallback.
+Double-click Setup_Slice_A.bat. It reuses .venv and the project-local tools, downloads the official English Piper VITS voice only if missing, then runs preflight. Models are cached under `assets/models/` and ignored by Git. The runtime performs no model downloads and has no online TTS fallback.
 
-The sherpa-onnx model is distributed by the upstream project:
+The default voice is `vits-piper-en_US-lessac-medium` (English US, single speaker, 22,050 Hz), distributed by sherpa-onnx:
 https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models
+The earlier `vits-melo-tts-zh_en` model remains on disk for rollback but is not selected by default.
 
 ## Generate the first local review sample
 
@@ -46,6 +49,7 @@ The output is written to a new timestamped folder under outputs/, containing:
 - audio_manifest.json and audio_timing.json
 - narration.wav
 - captions.srt and captions.ass
+- visual_stage_manifest.json
 - environment_report.json, scene_render_manifest.json, and assembly_report.json
 - qa_report.json, review_status.json, REVIEW.md, and run.log
 
@@ -69,8 +73,9 @@ The repository implementation is not proof that every dependency/model works on 
 
 - LaTeX / dvisvgm smoke test on the installed distribution.
 - sherpa-onnx Windows wheel compatibility and actual CPU inference.
-- Mandarin pronunciation of the supplied scientific terms.
-- Actual Chinese font glyph rendering in Manim and FFmpeg/libass.
+- English pronunciation of the scientific terms in `audio/pronunciation_review.wav`.
+- Actual Latin font glyph rendering in Manim and FFmpeg/libass.
+- Visual stage transitions: no previous formula or graph remains when the next stage appears.
 - 55–65 s measured duration and visual/audio synchronization.
 - Phone-screen safe-zone and readability review.
 

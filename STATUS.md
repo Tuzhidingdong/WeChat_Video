@@ -6,21 +6,21 @@
 
 - **Milestone:** 1 — Local video-production proof
 - **Slice:** A — One critical-nucleus / free-energy-barrier sample
-- **Implementation state:** Code path committed for local Windows integration testing
-- **Slice A exit condition:** NOT MET — the local MP4 has not yet been rendered and manually accepted by the user
-- **Next authorized work:** fix Slice A issues exposed by the user's local run; do not begin Slice B.
+- **Implementation state:** English voice / centered framing / exclusive visual-stage refinement implemented and locally rendered on this branch.
+- **Slice A exit condition:** NOT MET — the user must play the newly generated English MP4 and manually accept it.
+- **Next authorized work:** user playback review of English pronunciation, centered composition, visual-stage transitions, scientific claims, and 55–65 s duration; do not begin Slice B.
 
 ## Implemented in this branch
 
 - Project-local Python environment bootstrap (Setup_Slice_A.bat).
 - Local-only runtime entry (Run_Slice_A.bat); no runtime package installation or network fallback.
-- Windows preflight for Python venv, Manim, FFmpeg/ffprobe, libass/loudnorm, LaTeX/dvisvgm, Chinese font, and offline TTS model files.
-- Official sherpa-onnx VITS MeloTTS zh/en model bootstrap and CPU-only offline inference.
+- Windows preflight for Python venv, Manim, project-local FFmpeg/ffprobe, libass/loudnorm, portable MiKTeX LaTeX/dvisvgm, Latin font, and offline TTS model files.
+- Default English Piper VITS voice (`vits-piper-en_US-lessac-medium`) with CPU-only offline inference; legacy MeloTTS zh_en model retained for rollback only.
 - Speech-unit script schema with separate raw/display/spoken forms and claim/visual-trigger links.
 - Per-unit WAV output and independent pronunciation-review WAV.
 - Measured sample counts, per-unit ffprobe metadata, explicit cover, pauses, and global audio timeline.
-- One registered Manim critical-nucleus template with cue checkpoints.
-- Static-camera portrait safe-zone profile for the first proof.
+- One registered Manim critical-nucleus template with mutually exclusive visual stages and `visual_stage_manifest.json`.
+- Static-camera portrait safe-zone profile with symmetric 15% side margins and x=0 centered content.
 - SRT/ASS subtitle generation and relative-path FFmpeg burn-in.
 - Video/audio assembly and mandatory media QA.
 - Candidate Fact Card plus source records and a clear not-for-publication review status.

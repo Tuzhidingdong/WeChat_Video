@@ -14,7 +14,9 @@ from .qa import run_qa
 from .render import render_critical_nucleus_scene
 from .subtitles import write_subtitles
 from .timeline import build_audio_timeline, write_timeline
+from .tooling import model_root as configured_model_root
 from .tts import generate_speech_units
+from .visual_stages import build_stage_manifest
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
@@ -41,7 +43,7 @@ def _build_storyboard(script: dict[str, Any]) -> dict[str, Any]:
         "scene_template": "critical_nucleus_free_energy_barrier",
         "scene_family_count": 1,
         "scene_count": 1,
-        "question": "为什么小晶核可能消失，而超过临界尺寸后更倾向于继续长大？",
+        "question": script.get("title", "Why do some nuclei grow while others dissolve?"),
         "sequence": [
             {
                 "scene_id": "scene_00_cover",
@@ -52,7 +54,7 @@ def _build_storyboard(script: dict[str, Any]) -> dict[str, Any]:
             {
                 "scene_id": "scene_01_energy_competition",
                 "template": "critical_nucleus_free_energy_barrier",
-                "description": "用同一个临界晶核模板呈现界面项、体相项和总自由能曲线。",
+                "description": "One critical-nucleus template presents the competing energy terms, the free-energy curve, and the critical radius.",
             },
         ],
         "cue_checkpoints": [
@@ -107,11 +109,11 @@ def run_slice_a(
     logger.info("Running project-environment preflight.")
     environment = run_preflight(project_root, require_tts_model=True)
     _write_json(run_dir / "environment_report.json", environment)
-    font_family = environment["chinese_font"]["family"]
+    font_family = environment["font_family"]
 
     units = script["speech_units"]
-    model_root = project_root / "assets" / "models" / "vits-melo-tts-zh_en"
-    logger.info("Generating %d offline Mandarin speech units with sherpa-onnx.", len(units))
+    model_root = configured_model_root(project_root)
+    logger.info("Generating %d offline English speech units with sherpa-onnx.", len(units))
     tts_results = generate_speech_units(
         model_root,
         units,
@@ -153,6 +155,12 @@ def run_slice_a(
             }
         )
     _write_json(run_dir / "storyboard.json", storyboard)
+
+    stage_manifest = build_stage_manifest(
+        timeline["speech_units"], units, fps=int(timeline["fps"])
+    )
+    _write_json(run_dir / "visual_stage_manifest.json", stage_manifest)
+    logger.info("Visual stages: %s", ", ".join(s["stage_id"] for s in stage_manifest["stages"]))
 
     subtitle_count = write_subtitles(
         timeline,
@@ -242,7 +250,8 @@ def run_slice_a(
         "2. Inspect final.mp4 on a phone-sized display.",
         "3. Check captions, formula labels, safe-zone margins, and cue synchronization.",
         "4. Confirm the sign convention and model assumptions in fact_card.json.",
-        "5. Do not publish this candidate until the Fact Card and video are approved.",
+        "5. Check visual_stage_manifest.json: each cue has one active stage and no previous formula remains on screen.",
+        "6. Do not publish this candidate until the Fact Card and video are approved.",
         "",
         "This run does not connect to Edge, WeChat, Flow, OpenCode, or any upload endpoint.",
     ]

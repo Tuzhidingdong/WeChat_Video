@@ -12,9 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from .process import ExternalProcessError, run_checked
+from .tooling import resolve_command, tool_env
 
 
 FONT_FILE_HINTS = {
+    "Arial": ("arial.ttf", "arialbd.ttf"),
+    "Segoe UI": ("segoeui.ttf", "seguisb.ttf"),
+    "Aptos": ("aptos.ttf", "aptosb.ttf"),
     "Microsoft YaHei": ("msyh.ttc", "msyh.ttf", "msyhbd.ttc"),
     "SimHei": ("simhei.ttf",),
     "Noto Sans CJK SC": ("NotoSansCJK", "NotoSansSC"),
@@ -42,7 +46,7 @@ def _font_dirs() -> list[Path]:
     return [p for p in dirs if p.exists()]
 
 
-def find_chinese_font(preferred: list[str]) -> tuple[str, str]:
+def find_font(preferred: list[str]) -> tuple[str, str]:
     directories = _font_dirs()
     font_files = [
         path
@@ -76,12 +80,14 @@ def find_chinese_font(preferred: list[str]) -> tuple[str, str]:
             if probe.returncode == 0 and probe.stdout.strip():
                 return family, probe.stdout.strip()
     raise RuntimeError(
-        "未找到可用的中文字体。请安装 Microsoft YaHei、SimHei、Noto Sans CJK SC "
-        "或 Source Han Sans SC，然后重新运行。"
+        "No preferred font was found. Check the layout profile's preferred_fonts list."
     )
 
 
-def _latex_smoke_test(latex: str, dvisvgm: str) -> dict[str, Any]:
+find_chinese_font = find_font  # backwards-compatible alias for legacy callers
+
+
+def _latex_smoke_test(latex: str, dvisvgm: str, root: Path) -> dict[str, Any]:
     tex_source = (
         r"\documentclass[preview]{standalone}" "\n"
         r"\usepackage{amsmath}" "\n"
@@ -96,6 +102,7 @@ def _latex_smoke_test(latex: str, dvisvgm: str) -> dict[str, Any]:
             [latex, "-interaction=nonstopmode", "-halt-on-error", "-no-shell-escape", "smoke.tex"],
             cwd=work,
             timeout_seconds=90,
+            env=tool_env(root),
         )
         dvi = work / "smoke.dvi"
         if not dvi.exists():
@@ -104,6 +111,7 @@ def _latex_smoke_test(latex: str, dvisvgm: str) -> dict[str, Any]:
             [dvisvgm, "--no-fonts", "--output=smoke.svg", "smoke.dvi"],
             cwd=work,
             timeout_seconds=90,
+            env=tool_env(root),
         )
         if not (work / "smoke.svg").exists():
             raise RuntimeError("dvisvgm 命令退出成功，但没有生成 smoke.svg。")
@@ -152,22 +160,29 @@ def run_preflight(
 
     required_tools = {}
     for command in ("ffmpeg", "ffprobe", "latex", "dvisvgm"):
-        path = shutil.which(command)
-        required_tools[command] = path
-        if not path:
+        try:
+            required_tools[command] = resolve_command(command, project_root)
+        except RuntimeError as exc:
             raise RuntimeError(
-                f"未找到 {command}。请按 README 的 Windows 前置条件安装并加入 PATH。"
-            )
+                f"未找到 {command}。请检查项目内工具与 config/tools.local.json。"
+            ) from exc
     report["tools"] = required_tools
 
+    ffmpeg_environment = tool_env(project_root)
     ffmpeg_version = run_checked(
-        ["ffmpeg", "-version"], timeout_seconds=20
+        [required_tools["ffmpeg"], "-version"],
+        timeout_seconds=20,
+        env=ffmpeg_environment,
     ).stdout.splitlines()[0]
     ffprobe_version = run_checked(
-        ["ffprobe", "-version"], timeout_seconds=20
+        [required_tools["ffprobe"], "-version"],
+        timeout_seconds=20,
+        env=ffmpeg_environment,
     ).stdout.splitlines()[0]
     filter_result = run_checked(
-        ["ffmpeg", "-hide_banner", "-filters"], timeout_seconds=30
+        [required_tools["ffmpeg"], "-hide_banner", "-filters"],
+        timeout_seconds=30,
+        env=ffmpeg_environment,
     )
     filter_text = filter_result.stdout + "\n" + filter_result.stderr
     if "subtitles" not in filter_text or "loudnorm" not in filter_text:
@@ -178,7 +193,9 @@ def run_preflight(
     report["ffprobe_version"] = ffprobe_version
     report["checks"]["ffmpeg_ffprobe_libass_loudnorm"] = "PASS"
 
-    latex_report = _latex_smoke_test(required_tools["latex"], required_tools["dvisvgm"])
+    latex_report = _latex_smoke_test(
+        required_tools["latex"], required_tools["dvisvgm"], project_root
+    )
     report.update(latex_report)
     report["checks"]["latex_noninteractive_smoke"] = "PASS"
 
@@ -186,27 +203,29 @@ def run_preflight(
         (project_root / "configs" / "layout.json").read_text(encoding="utf-8")
     )
     preferred = layout["subtitle"]["preferred_fonts"]
-    family, font_path = find_chinese_font(preferred)
+    family, font_path = find_font(preferred)
+    report["font"] = {"family": family, "file": font_path}
+    report["font_family"] = family
+    report["font_file"] = font_path
     report["chinese_font"] = {"family": family, "file": font_path}
+    report["checks"]["font_file_present"] = "PASS"
     report["checks"]["chinese_font_file_present"] = "PASS"
 
-    model_root = project_root / "assets" / "models" / "vits-melo-tts-zh_en"
-    model_files = {
-        "model": model_root / "model.onnx",
-        "lexicon": model_root / "lexicon.txt",
-        "tokens": model_root / "tokens.txt",
-    }
-    missing = [name for name, path in model_files.items() if not path.is_file()]
-    if require_tts_model and missing:
+    from .model_setup import _model_dir_valid
+    from .tooling import model_root as configured_model_root
+
+    model_dir = configured_model_root(project_root)
+    ready = _model_dir_valid(model_dir)
+    if require_tts_model and not ready:
         raise RuntimeError(
-            "本地离线 TTS 模型不完整，缺少："
-            + ", ".join(missing)
-            + "。首次运行请执行 Setup_Slice_A.bat 完成一次性模型下载。"
+            f"Offline TTS model is incomplete at {model_dir}. "
+            "Run Setup_Slice_A.bat once to download the English Piper voice."
         )
-    report["tts_model_root"] = str(model_root)
-    report["checks"]["offline_tts_model"] = "PASS" if not missing else "NOT_READY"
-    if missing:
-        report["warnings"].append("尚未下载 sherpa-onnx MeloTTS 中文/英文模型。")
+    report["tts_model_root"] = str(model_dir)
+    report["tts_model_engine"] = "sherpa-onnx Piper VITS (en-US)"
+    report["checks"]["offline_tts_model"] = "PASS" if ready else "NOT_READY"
+    if not ready:
+        report["warnings"].append("The English Piper offline TTS model is not ready.")
 
     report["checks"]["all_preflight"] = "PASS"
     return report

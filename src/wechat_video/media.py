@@ -3,19 +3,20 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 from pathlib import Path
 from typing import Any
 
 from .process import run_checked
+from .tooling import resolve_command, tool_env
 
 
 def probe_media(path: Path, *, count_frames: bool = False) -> dict[str, Any]:
-    args = ["ffprobe", "-v", "error"]
+    args = [resolve_command("ffprobe"), "-v", "error"]
     if count_frames:
-        args.extend(["-count_frames", "-select_streams", "v:0"])
+        # Count frames without -select_streams: QA needs both video and audio streams.
+        args.append("-count_frames")
     args.extend(["-show_streams", "-show_format", "-of", "json", str(path)])
-    result = run_checked(args, timeout_seconds=90)
+    result = run_checked(args, timeout_seconds=90, env=tool_env())
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
@@ -29,7 +30,7 @@ def _loudnorm_measurement(audio_path: Path, run_dir: Path) -> dict[str, str]:
     null_target = "NUL" if os.name == "nt" else "/dev/null"
     result = run_checked(
         [
-            "ffmpeg", "-hide_banner", "-nostats", "-y",
+            resolve_command("ffmpeg"), "-hide_banner", "-nostats", "-y",
             "-i", str(audio_path),
             "-vn",
             "-af", "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json",
@@ -37,6 +38,7 @@ def _loudnorm_measurement(audio_path: Path, run_dir: Path) -> dict[str, str]:
         ],
         cwd=run_dir,
         timeout_seconds=180,
+        env=tool_env(),
     )
     matches = re.findall(r"\{\s*\"input_i\"[\s\S]*?\}", result.stderr)
     if not matches:
@@ -70,8 +72,8 @@ def assemble_final_video(
     output_mp4: Path,
     run_dir: Path,
 ) -> dict[str, Any]:
-    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
-        raise RuntimeError("FFmpeg / ffprobe 不在 PATH。")
+    ffmpeg_exe = resolve_command("ffmpeg")
+    resolve_command("ffprobe")
 
     measured = _loudnorm_measurement(narration_wav, run_dir)
     loudnorm = (
@@ -108,7 +110,8 @@ def assemble_final_video(
             "-crf", "19",
             "-pix_fmt", "yuv420p",
             "-r", "30",
-            "-fps_mode", "cfr",
+            # -vsync is accepted by both FFmpeg 4.x and 7.x; -fps_mode is 5.x+ only.
+            "-vsync", "cfr",
             "-c:a", "aac",
             "-b:a", "192k",
             "-ar", "44100",

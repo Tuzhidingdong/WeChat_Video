@@ -127,7 +127,7 @@ def run_qa(
         },
         "checks": checks,
         "manual_review_required": [
-            "Listen to every Mandarin speech unit and the pronunciation_review.wav.",
+            "Listen to every English speech unit and the pronunciation_review.wav.",
             "Check all scientific terms, equation labels, and the sign convention for Δg_v.",
             "Inspect the cover, subtitle safe band, and any text near WeChat interface areas.",
             "Check that narration and visual trigger events are synchronized.",
