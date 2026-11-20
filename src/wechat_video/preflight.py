@@ -169,7 +169,7 @@ def run_preflight(
     filter_result = run_checked(
         ["ffmpeg", "-hide_banner", "-filters"], timeout_seconds=30
     )
-    filter_text = filter_result.stdout + "\\n" + filter_result.stderr
+    filter_text = filter_result.stdout + "\n" + filter_result.stderr
     if "subtitles" not in filter_text or "loudnorm" not in filter_text:
         raise RuntimeError(
             "当前 FFmpeg 缺少 subtitles/libass 或 loudnorm filter；请更换包含 libass 的构建。"
