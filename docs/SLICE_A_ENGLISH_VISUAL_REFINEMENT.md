@@ -27,22 +27,28 @@ For the current Slice A sample, switch the spoken and visible video language to 
 - Keep the original Fact Card and source records as the scientific evidence authority. Do not rewrite or weaken claims, assumptions, sign conventions, or source status merely to make the English script fit.
 - The review audio must also be English and cover the technical terms listed in the English script.
 
-### TTS choice
+### TTS and personal voice choice
 
-Do not simply feed English text to the existing Chinese-oriented voice and assume it will sound natural. Migrate the Slice A default to the dedicated offline English Piper VITS voice:
+The user selected: **preserve the user's own voice timbre while speaking standard US English**. Use the official OpenVoice V2 two-stage architecture, not Piper as the primary voice:
 
-- Model: `vits-piper-en_US-lessac-medium`
-- Upstream archive: `https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium.tar.bz2`
-- Expected model files include `en_US-lessac-medium.onnx`, `tokens.txt`, and `espeak-ng-data/`.
-- Configure sherpa-onnx VITS with the model, tokens, and Piper `data_dir`; do not require the MeloTTS lexicon for this model.
-- Keep inference local, CPU-only, and offline. No Edge TTS, network TTS fallback, paid APIs, or extra subscriptions.
-- The current model is documented by sherpa-onnx as an English, single-speaker US male model (Lessac / Blizzard 2013; 22,050 Hz). This is a suitable candidate, not a guarantee of naturalness: produce a pronunciation-review WAV and let the user listen before accepting the voice.
-- Do not delete the previously installed Chinese model. Stop selecting it as the default; retain it locally for rollback until the English voice is accepted.
-- Update the project-local model config and download/preflight logic. Never modify global paths or install locations.
+- Base English voice: MeloTTS with the explicit EN-US speaker ID. This is responsible for US-English pronunciation.
+- Personal timbre: OpenVoice V2 ToneColorConverter, driven by a target speaker embedding extracted once from the user's own natural reference recording.
+- Enrollment: use se_extractor.get_se(reference_audio, tone_color_converter, vad=True), then persist the returned target embedding as a private local profile. A natural Mandarin recording is acceptable; the user must not perform an American accent.
+- Daily generation: generate each English speech unit through MeloTTS EN-US, then convert it using the saved user embedding. Do not re-extract the profile on every run.
+- Retain the official OpenVoice V2 watermark/message behavior. Do not strip or bypass it.
+- Keep the workflow local, CPU-only, and offline after initial model setup. No Edge TTS, network TTS fallback, paid APIs, or extra subscriptions.
+- Do not delete the existing sherpa/MeloTTS Chinese model. Do not use Piper Lessac as the daily personal voice. The earlier Piper proposal is superseded by docs/VOICE_PROFILE_ENGLISH_PLAN.md.
+- Voice similarity and US pronunciation are targets, not guarantees. Require a user listening approval before calling this the user's accepted voice.
+- OpenVoice's standard install documentation is Linux-focused and Windows platform guidance is community-contributed. Verify Windows CPU compatibility in an isolated project-local runtime before changing the daily pipeline.
+- Keep raw voice recordings, speaker embeddings, and clone previews under ignored private/voice_profile/; never commit or upload them.
 
-References:
-- https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/vits.html
-- https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models
+Detailed architecture, one-time enrollment, runtime isolation, model files, CPU feasibility gates, and privacy rules: docs/VOICE_PROFILE_ENGLISH_PLAN.md.
+
+Official references:
+- https://github.com/myshell-ai/OpenVoice
+- https://github.com/myshell-ai/OpenVoice/blob/main/demo_part3.ipynb
+- https://github.com/myshell-ai/OpenVoice/blob/main/docs/USAGE.md
+- https://github.com/myshell-ai/MeloTTS
 
 ## 3. Correct the framing without violating the safe zones
 
@@ -105,7 +111,7 @@ The particle/nucleus graphic is an explanatory illustration, not a claim of a sp
 
 The local Agent must integrate these decisions with the newer local-only work already present in `E:\Agent\WeChat\Video`:
 
-- Piper English model setup, validation, CPU inference, and pronunciation review.
+- OpenVoice V2 + MeloTTS EN-US setup, validation, CPU inference, one-time personal voice enrollment, and pronunciation review.
 - English default script selection.
 - English font detection and ASS subtitle configuration.
 - English-only output validation.
@@ -113,7 +119,7 @@ The local Agent must integrate these decisions with the newer local-only work al
 - Explicit visual-stage transition logic and stage manifest.
 - QA/manual-review text updated from Mandarin/Chinese to English.
 - README and status documentation updated without changing frozen `TASK_PLAN.md`.
-- Keep project-local portable MiKTeX, FFmpeg/ffprobe configuration, previous media compatibility fixes, and local test coverage.
+- Keep project-local portable MiKTeX, FFmpeg/ffprobe configuration, previous media compatibility fixes, local test coverage, and the existing Chinese model.
 
 ## 7. Required tests and evidence
 
@@ -121,8 +127,8 @@ Before reporting success, the Agent must execute real tests in the Windows proje
 
 1. JSON/schema validation for the English script and all claim links.
 2. Unit tests verifying all user-visible script/caption fields contain no CJK characters.
-3. TTS preflight selecting the Piper model from the project-local model path.
-4. Real sherpa-onnx CPU inference for all English speech units and the pronunciation-review text.
+3. Isolated Windows CPU feasibility test for OpenVoice V2 + MeloTTS EN-US, without modifying the existing Manim .venv.
+4. Real MeloTTS EN-US inference and OpenVoice tone-color conversion; after the user provides a recording, extract and reuse the saved private target embedding.
 5. WAV sample-rate/channel/frame-count validation and measured 55–65 second duration check.
 6. Manim render with the actual 1080×1920 project configuration and portable MiKTeX.
 7. Visual-stage manifest assertions: each checkpoint has exactly one active stage; the prior stage is removed before/when the next stage is displayed; no duplicate stage/graph IDs.
