@@ -1,0 +1,73 @@
+{
+  "script_id": "CNT-VIDEO-001-EN",
+  "title": "Why Do Some Nuclei Grow? The Critical Radius",
+  "language": "en-US",
+  "target_duration_seconds": [55, 65],
+  "speech_units": [
+    {
+      "unit_id": "U01",
+      "raw_text": "Why do some tiny crystal nuclei disappear, while others keep growing? The answer is energy competition.",
+      "display_text": "Why do some tiny crystal nuclei disappear, while others keep growing? The answer is energy competition.",
+      "spoken_text": "Why do some tiny crystal nuclei disappear, while others keep growing? The answer is energy competition.",
+      "claim_ids": ["CNT-04"],
+      "visual_trigger_ids": ["INTRO_QUESTION"]
+    },
+    {
+      "unit_id": "U02",
+      "raw_text": "Classical homogeneous nucleation theory describes a spherical nucleus using two terms: a positive surface cost and a negative bulk contribution.",
+      "display_text": "Classical homogeneous nucleation theory describes a spherical nucleus using two terms: a positive surface cost and a negative bulk contribution.",
+      "spoken_text": "Classical homogeneous nucleation theory describes a spherical nucleus using two terms: a positive surface cost and a negative bulk contribution.",
+      "claim_ids": ["CNT-01"],
+      "visual_trigger_ids": ["SHOW_TOTAL_FREE_ENERGY"]
+    },
+    {
+      "unit_id": "U03",
+      "raw_text": "The surface cost scales with area, or radius squared. The bulk contribution scales with volume, or radius cubed.",
+      "display_text": "The surface cost scales with area, or radius squared. The bulk contribution scales with volume, or radius cubed.",
+      "spoken_text": "The surface cost scales with area, or radius squared. The bulk contribution scales with volume, or radius cubed.",
+      "claim_ids": ["CNT-02"],
+      "visual_trigger_ids": ["SHOW_SCALING"]
+    },
+    {
+      "unit_id": "U04",
+      "raw_text": "At small sizes, surface cost dominates, so total free energy rises. As the nucleus grows, bulk gain becomes stronger.",
+      "display_text": "At small sizes, surface cost dominates, so total free energy rises. As the nucleus grows, bulk gain becomes stronger.",
+      "spoken_text": "At small sizes, surface cost dominates, so total free energy rises. As the nucleus grows, bulk gain becomes stronger.",
+      "claim_ids": ["CNT-01", "CNT-02"],
+      "visual_trigger_ids": ["SHOW_FREE_ENERGY_CURVE"]
+    },
+    {
+      "unit_id": "U05",
+      "raw_text": "The free-energy curve reaches a maximum at the critical radius. Below it, shrinking is favored; above it, growth lowers free energy.",
+      "display_text": "The free-energy curve reaches a maximum at the critical radius. Below it, shrinking is favored; above it, growth lowers free energy.",
+      "spoken_text": "The free-energy curve reaches a maximum at the critical radius. Below it, shrinking is favored; above it, growth lowers free energy.",
+      "claim_ids": ["CNT-03", "CNT-04"],
+      "visual_trigger_ids": ["MARK_CRITICAL_RADIUS", "COMPARE_SUB_SUPERCRITICAL"]
+    },
+    {
+      "unit_id": "U06",
+      "raw_text": "The critical radius equals two gamma divided by the bulk driving-force magnitude.",
+      "display_text": "The critical radius equals two gamma divided by the bulk driving-force magnitude.",
+      "spoken_text": "The critical radius equals two gamma divided by the bulk driving-force magnitude.",
+      "claim_ids": ["CNT-03"],
+      "visual_trigger_ids": ["SHOW_CRITICAL_RADIUS_EQUATION"]
+    },
+    {
+      "unit_id": "U07",
+      "raw_text": "The barrier height scales with interfacial energy cubed and inversely with the driving force squared.",
+      "display_text": "The barrier height scales with interfacial energy cubed and inversely with the driving force squared.",
+      "spoken_text": "The barrier height scales with interfacial energy cubed and inversely with the driving force squared.",
+      "claim_ids": ["CNT-03"],
+      "visual_trigger_ids": ["SHOW_BARRIER_EQUATION"]
+    },
+    {
+      "unit_id": "U08",
+      "raw_text": "This model assumes homogeneous nucleation, a spherical nucleus, and an isotropic interface. Real systems also depend on interface structure, anisotropy, transport, and kinetics.",
+      "display_text": "This model assumes homogeneous nucleation, a spherical nucleus, and an isotropic interface. Real systems also depend on interface structure, anisotropy, transport, and kinetics.",
+      "spoken_text": "This model assumes homogeneous nucleation, a spherical nucleus, and an isotropic interface. Real systems also depend on interface structure, anisotropy, transport, and kinetics.",
+      "claim_ids": ["CNT-05"],
+      "visual_trigger_ids": ["MODEL_LIMITS"]
+    }
+  ],
+  "pronunciation_review_text": "Nucleation. Critical radius. Interfacial energy. Bulk driving force. Free-energy barrier. Isotropic interface. Anisotropy."
+}

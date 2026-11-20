@@ -13,22 +13,21 @@
     "subtitle_top_percent": 68,
     "subtitle_bottom_percent": 78,
     "bottom_ui_reserved_percent": 22,
-    "left_margin_percent": 5,
+    "left_margin_percent": 15,
     "right_reserved_percent": 15
   },
   "subtitle": {
-    "font_size": 46,
-    "outline": 3,
+    "font_size": 42,
+    "outline": 2,
     "shadow": 1,
-    "margin_left": 72,
+    "margin_left": 162,
     "margin_right": 162,
     "margin_vertical": 500,
-    "max_line_chars": 18,
+    "max_line_chars": 38,
     "preferred_fonts": [
-      "Microsoft YaHei",
-      "SimHei",
-      "Noto Sans CJK SC",
-      "Source Han Sans SC"
+      "Arial",
+      "Segoe UI",
+      "Aptos"
     ]
   },
   "manim": {
