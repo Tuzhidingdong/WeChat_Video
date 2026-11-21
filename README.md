@@ -55,9 +55,9 @@ The output is written to a new timestamped folder under outputs/, containing:
 - environment_report.json, scene_render_manifest.json, and assembly_report.json
 - qa_report.json, review_status.json, REVIEW.md, and run.log
 
-Run_Slice_A.bat uses --review-sample because the repository's initial Fact Card is a candidate pending your review. The resulting package is explicitly marked NOT_FOR_PUBLICATION_PENDING_USER_FACT_CARD_REVIEW. It is not a Verified Topic Pool entry and must not be uploaded or published. The normal CLI path rejects an unapproved card unless the review-sample flag is explicitly supplied.
+Run_Slice_A.bat uses --review-sample because the repository's initial Fact Card is a candidate pending your review. The resulting package is marked NOT_FOR_PUBLICATION_PENDING_USER_FACT_CARD_REVIEW and the standalone BAT only writes local files. Under the user's standing draft-only authorization, Run_And_Save_Slice_A_Draft.bat may send that exact package to the unpublished draft box after strict QA PASS; it remains a review item and must not be manually published until its scientific content is checked. The normal CLI path rejects an unapproved card unless the review-sample flag is explicitly supplied.
 
-## Saving an approved MP4 as an unpublished Channels draft
+## Saving a QA-passed MP4 as an unpublished Channels draft
 
 The independent development branch feat/milestone-2-channels-draft-uploader adds a local draft-only uploader. It uses a project-owned Edge profile and the visible official Channels Assistant website. It does not depend on or modify WeChat_control.
 
