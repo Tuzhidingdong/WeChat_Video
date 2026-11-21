@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from wechat_video.channels_metadata import build_channels_metadata, validate_channels_metadata
+from wechat_video.channels_metadata import (
+    build_channels_metadata,
+    build_channels_metadata_for_run_dir,
+    validate_channels_metadata,
+)
 from wechat_video.channels_uploader import (
     UploadBlockedError,
     _approval_record,
@@ -221,6 +225,24 @@ def test_channels_metadata_uses_explicit_short_title_and_only_fact_card_text() -
     assert result["source"] == "fact_card_and_script_metadata"
     assert "ignored for facts" not in result["description"]
     validate_channels_metadata(result)
+
+
+def test_run_directory_metadata_uses_complete_output_directory_name(tmp_path: Path) -> None:
+    run_dir = tmp_path / "outputs" / "20261121_195519_critical_nucleus"
+    run_dir.mkdir(parents=True)
+    card = {
+        "fact_card_id": "TEST-CNT-001",
+        "title": "临界晶核自由能",
+        "channels_title": "临界半径如何决定成核",
+        "scientific_question": "为什么小晶核可能消失，而较大的晶核可能继续长大？",
+        "scope": "仅讨论经典均匀成核理论中的球形晶核近似。",
+    }
+    script = {"script_id": "TEST-SCRIPT-001"}
+
+    metadata = build_channels_metadata_for_run_dir(card, script, run_dir)
+
+    assert metadata["job_id"] == run_dir.name
+    assert metadata == build_channels_metadata(card, script, run_dir.name)
 
 
 def test_metadata_rejects_short_title_outside_6_to_16_chars() -> None:
