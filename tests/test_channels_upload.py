@@ -761,6 +761,20 @@ def test_live_description_selector_matches_empty_contenteditable_and_spa_wait_is
     assert any("[contenteditable]" in item for item in description_selectors)
     assert not any("[contenteditable='true']" in item for item in description_selectors)
     assert config["ui_ready_timeout_seconds"] == 15
+    assert config["draft_list_url"] == (
+        "https://channels.weixin.qq.com/platform/post/draftListManager"
+    )
+    assert selectors["draft_list_path"] == "/platform/post/draftListManager"
+    assert selectors["draft_list_frame_path"] == (
+        "/micro/content/post/draftListManager"
+    )
+    assert selectors["draft_list_root_selector"] == (
+        "div.finder-page.DraftListManager"
+    )
+    assert selectors["draft_list_body_selector"].endswith(
+        "div.post-list-body"
+    )
+    assert "draft_row_selectors" not in selectors
 
 
 
