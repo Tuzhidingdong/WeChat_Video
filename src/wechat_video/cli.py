@@ -248,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
                 approved_by=args.approved_by,
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
-            print("Local approval recorded. This exact artifact package is now eligible for draft upload.")
+            print("Optional local review receipt recorded for this exact artifact package.")
             return 0
         if args.command == "channels-upload-latest":
             result = upload_latest_approved_run(args.project_root.resolve())
