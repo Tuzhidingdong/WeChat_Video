@@ -5,6 +5,7 @@
   "draft_list_url": "https://channels.weixin.qq.com/platform/post/draftListManager",
   "edge_executable": null,
   "edge_profile_dir": "runtime/edge-profile",
+  "headless": true,
   "session_file": "runtime/edge_session.json",
   "jobs_dir": "runtime/upload_jobs",
   "approvals_dir": "runtime/approvals",
