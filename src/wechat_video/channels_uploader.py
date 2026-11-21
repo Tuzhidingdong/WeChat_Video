@@ -847,10 +847,83 @@ def _wait_upload_ready(
     )
 
 
+_DRAFT_LIST_DOM_SCAN = r"""(config) => {
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const isVisible = (element) => {
+        if (!element || element.hidden) return false;
+        const rect = element.getBoundingClientRect();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+        for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+            const style = window.getComputedStyle(node);
+            if (style.display === "none" || style.visibility === "hidden" ||
+                style.visibility === "collapse" || Number.parseFloat(style.opacity || "1") === 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+    const query = (selector) => {
+        try {
+            return Array.from(document.querySelectorAll(String(selector || "")));
+        } catch (_) {
+            return [];
+        }
+    };
+    const roots = query(config.root_selector);
+    const activeTabs = query(config.active_tab_selector).filter(isVisible);
+    const headers = query(config.header_selector).filter(isVisible);
+    const containers = query(config.body_selector);
+    const body = containers.length === 1 ? containers[0] : null;
+    const rowTexts = body
+        ? Array.from(body.children)
+            .map((child) => normalize(child.innerText || child.textContent || ""))
+            .filter(Boolean)
+        : [];
+    return {
+        root_count: roots.length,
+        root_visible_count: roots.filter(isVisible).length,
+        active_tab_texts: activeTabs.map((element) => normalize(element.innerText || element.textContent || "")),
+        header_texts: headers.map((element) => normalize(element.innerText || element.textContent || "")),
+        body_count: containers.length,
+        body_visible: body ? isVisible(body) : false,
+        body_child_count: body ? body.children.length : 0,
+        row_texts: rowTexts
+    };
+}"""
+
+
 def _draft_count(text: str) -> int | None:
     """Parse the count from the verified draft-list tab/header label."""
     match = re.search(r"草稿箱\s*[（(]\s*(\d+)\s*[）)]", str(text))
     return int(match.group(1)) if match else None
+
+
+def _draft_list_dom_state(
+    frame: Any,
+    selectors: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Read draft-manager evidence inside its own frame execution context.
+
+    Playwright locators can return zero for live cross-origin iframe DOMs over
+    CDP even while document.querySelectorAll() sees the nodes. Keep the read
+    inside the target frame and return only the small, visible DOM evidence
+    needed for view validation and row matching.
+    """
+    config = {
+        "root_selector": str(selectors.get("draft_list_root_selector") or ""),
+        "active_tab_selector": str(selectors.get("draft_list_active_tab_selector") or ""),
+        "header_selector": str(selectors.get("draft_list_header_selector") or ""),
+        "body_selector": str(selectors.get("draft_list_body_selector") or ""),
+    }
+    if not all(config.values()):
+        return None
+    try:
+        result = frame.evaluate(_DRAFT_LIST_DOM_SCAN, config)
+    except Exception:
+        return None
+    if not isinstance(result, dict):
+        return None
+    return result
 
 
 def _draft_list_view_evidence(
@@ -873,73 +946,60 @@ def _draft_list_view_evidence(
     if parsed_page.path.rstrip("/") != page_path.rstrip("/"):
         return None
 
-    root_selector = str(selectors.get("draft_list_root_selector") or "")
-    active_tab_selector = str(selectors.get("draft_list_active_tab_selector") or "")
-    header_selector = str(selectors.get("draft_list_header_selector") or "")
-    body_selector = str(selectors.get("draft_list_body_selector") or "")
-    if not all((root_selector, active_tab_selector, header_selector, body_selector)):
-        return None
-
     for frame in _frame_contexts(page):
         parsed_frame = urlparse(str(getattr(frame, "url", "")))
         if parsed_frame.hostname != "channels.weixin.qq.com":
             continue
         if parsed_frame.path.rstrip("/") != frame_path.rstrip("/"):
             continue
-        try:
-            roots = frame.locator(root_selector)
-            if roots.count() != 1 or not roots.first.is_visible():
-                continue
-
-            active_tabs = frame.locator(active_tab_selector)
-            active_texts: list[str] = []
-            for index in range(min(active_tabs.count(), 8)):
-                candidate = active_tabs.nth(index)
-                if candidate.is_visible():
-                    active_texts.append(
-                        re.sub(r"\s+", " ", candidate.inner_text(timeout=2_000)).strip()
-                    )
-            active_counts = {
-                count for count in (_draft_count(text) for text in active_texts)
-                if count is not None
-            }
-            if len(active_counts) != 1:
-                continue
-
-            headers = frame.locator(header_selector)
-            header_texts: list[str] = []
-            for index in range(min(headers.count(), 8)):
-                candidate = headers.nth(index)
-                if candidate.is_visible():
-                    header_texts.append(
-                        re.sub(r"\s+", " ", candidate.inner_text(timeout=2_000)).strip()
-                    )
-            header_counts = {
-                count for count in (_draft_count(text) for text in header_texts)
-                if count is not None
-            }
-            if len(header_counts) != 1 or header_counts != active_counts:
-                continue
-
-            containers = frame.locator(body_selector)
-            if containers.count() != 1:
-                continue
-
-            return {
-                "frame": frame,
-                "page_path": parsed_page.path,
-                "frame_path": parsed_frame.path,
-                "active_tab_text": next(
-                    text for text in active_texts if _draft_count(text) is not None
-                ),
-                "header_text": next(
-                    text for text in header_texts if _draft_count(text) is not None
-                ),
-                "draft_count": next(iter(active_counts)),
-                "list_container_present": True,
-            }
-        except Exception:
+        state = _draft_list_dom_state(frame, selectors)
+        if state is None:
             continue
+
+        if state.get("root_count") != 1 or state.get("root_visible_count") != 1:
+            continue
+        if state.get("body_count") != 1:
+            continue
+
+        active_texts = [
+            re.sub(r"\s+", " ", str(text)).strip()
+            for text in state.get("active_tab_texts", [])
+            if _draft_count(str(text)) is not None
+        ]
+        header_texts = [
+            re.sub(r"\s+", " ", str(text)).strip()
+            for text in state.get("header_texts", [])
+            if _draft_count(str(text)) is not None
+        ]
+        active_counts = {
+            count for count in (_draft_count(text) for text in active_texts)
+            if count is not None
+        }
+        header_counts = {
+            count for count in (_draft_count(text) for text in header_texts)
+            if count is not None
+        }
+        if len(active_counts) != 1 or len(header_counts) != 1:
+            continue
+        if active_counts != header_counts or len(active_texts) != 1 or len(header_texts) != 1:
+            continue
+
+        return {
+            "frame": frame,
+            "page_path": parsed_page.path,
+            "frame_path": parsed_frame.path,
+            "active_tab_text": active_texts[0],
+            "header_text": header_texts[0],
+            "draft_count": next(iter(active_counts)),
+            "list_container_present": True,
+            "list_container_visible": bool(state.get("body_visible")),
+            "row_texts": [
+                re.sub(r"\s+", " ", str(item)).strip()
+                for item in state.get("row_texts", [])
+                if str(item).strip()
+            ],
+            "row_child_count": int(state.get("body_child_count") or 0),
+        }
     return None
 
 
@@ -973,47 +1033,37 @@ def _wait_for_draft_list_view(
 def _draft_snapshot(page: Any, selectors: dict[str, Any]) -> dict[str, Any]:
     """Read the actual draft list only after its dedicated view is positively identified."""
     evidence = _wait_for_draft_list_view(page, selectors)
-    frame = evidence["frame"]
-    body_selector = str(selectors["draft_list_body_selector"])
-    container = frame.locator(body_selector).first
-    entries: list[str] = []
-
-    if evidence["draft_count"] > 0:
-        try:
-            if not container.is_visible():
-                raise UploadBlockedError(
-                    "The draft manager reports existing drafts, but its draft-list body is not visible."
+    entries = list(evidence["row_texts"])
+    if evidence["draft_count"] > 0 and not entries:
+        timeout_seconds = max(
+            0, int(selectors.get("draft_list_rows_timeout_seconds", 15))
+        )
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            page.wait_for_timeout(500)
+            refreshed = _draft_list_dom_state(evidence["frame"], selectors)
+            if refreshed is None or refreshed.get("body_count") != 1:
+                continue
+            entries = [
+                re.sub(r"\s+", " ", str(item)).strip()
+                for item in refreshed.get("row_texts", [])
+                if str(item).strip()
+            ]
+            if entries:
+                evidence["list_container_visible"] = bool(
+                    refreshed.get("body_visible")
                 )
-            raw_entries = container.evaluate(
-                "(element) => Array.from(element.children).map((child) => "
-                "String(child.innerText || child.textContent || '').replace(/\\s+/g, ' ').trim())"
-            )
-            if isinstance(raw_entries, list):
-                entries = [
-                    re.sub(r"\s+", " ", str(item)).strip()
-                    for item in raw_entries
-                    if str(item).strip()
-                ]
-        except UploadBlockedError:
-            raise
-        except Exception:
-            entries = []
-
-        if not entries:
-            try:
-                container_text = re.sub(
-                    r"\s+", " ", container.inner_text(timeout=2_000)
-                ).strip()
-            except Exception:
-                container_text = ""
-            if container_text:
-                entries = [container_text]
+                evidence["row_child_count"] = int(
+                    refreshed.get("body_child_count") or 0
+                )
+                break
 
         if not entries:
             raise UploadBlockedError(
                 "The draft manager reports "
-                f"{evidence['draft_count']} draft(s), but no draft-list entries could be read. "
-                "Refusing to treat an unreadable list as empty."
+                f"{evidence['draft_count']} draft(s), but the confirmed draft-list body "
+                "contains no readable rows after waiting. Refusing to treat an unreadable "
+                "list as empty."
             )
 
     return {
@@ -1028,6 +1078,7 @@ def _draft_snapshot(page: Any, selectors: dict[str, Any]) -> dict[str, Any]:
             "active_tab_text": evidence["active_tab_text"],
             "header_text": evidence["header_text"],
             "list_container_present": evidence["list_container_present"],
+            "list_container_visible": evidence["list_container_visible"],
         },
         "draft_count": evidence["draft_count"],
         "entries": entries,
@@ -1039,7 +1090,7 @@ def _matching_draft_entries(
     title: str,
     selectors: dict[str, Any],
 ) -> list[str]:
-    """Match title occurrences in a verified draft view, with legacy strict fallback."""
+    """Match one row per title occurrence in the verified draft-list context."""
     verified_draft_view = (
         snapshot.get("view_type") == "draft_list"
         and snapshot.get("view_verified") is True
@@ -1053,11 +1104,10 @@ def _matching_draft_entries(
         if verified_draft_view:
             # Membership in the independently verified DraftListManager is
             # itself draft-state evidence; row text need not repeat '草稿'.
-            matches.extend([text] * text.count(title))
+            matches.append(text)
         elif any(status in text for status in status_words):
             matches.append(text)
     return matches
-
 
 def _job_path(project_root: Path, config: dict[str, Any], job_id: str) -> Path:
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", job_id):
