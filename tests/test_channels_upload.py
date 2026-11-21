@@ -607,3 +607,69 @@ def test_read_only_inspector_collects_controls_from_direct_frame_dom_inventory()
     assert files[0]["frame_url"] == "https://channels.weixin.qq.com/platform/post/create"
     assert "querySelectorAll" in main.last_evaluate_expression
     assert "input.value" not in main.last_evaluate_expression
+
+
+
+def test_inspector_readiness_aggregates_controls_across_frames() -> None:
+    main = _FakeFrame(
+        "https://channels.weixin.qq.com/platform/post/create",
+        inspection={
+            "ready_state": "complete",
+            "counts": {
+                "buttons_total": 3,
+                "buttons_visible": 3,
+                "textboxes_total": 1,
+                "textboxes_visible": 1,
+                "file_inputs_total": 0,
+                "file_inputs_visible": 0,
+            },
+            "buttons": [{"text": "保存草稿", "aria_label": None}],
+            "textboxes": [{
+                "tag": "input",
+                "placeholder": "填写短标题有机会获得更多流量",
+                "data_placeholder": None,
+                "aria_label": None,
+                "contenteditable": None,
+                "role": None,
+            }],
+            "file_inputs": [],
+        },
+    )
+    child = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create",
+        inspection={
+            "ready_state": "complete",
+            "counts": {
+                "buttons_total": 0,
+                "buttons_visible": 0,
+                "textboxes_total": 1,
+                "textboxes_visible": 1,
+                "file_inputs_total": 1,
+                "file_inputs_visible": 1,
+            },
+            "buttons": [],
+            "textboxes": [{
+                "tag": "div",
+                "placeholder": None,
+                "data_placeholder": "添加描述",
+                "aria_label": None,
+                "contenteditable": "",
+                "role": None,
+            }],
+            "file_inputs": [{
+                "accept": "video/mp4,video/*",
+                "multiple": "multiple",
+                "visible": True,
+            }],
+        },
+    )
+
+    frames, buttons, textboxes, files, controls_ready = _collect_ui_inventory(
+        _FakePage([main, child]), timeout_seconds=0
+    )
+
+    assert controls_ready is True
+    assert len(frames) == 2
+    assert buttons[0]["text"] == "保存草稿"
+    assert any(item.get("data_placeholder") == "添加描述" for item in textboxes)
+    assert files[0]["accept"] == "video/mp4,video/*"
