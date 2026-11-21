@@ -1,8 +1,9 @@
 """Safe, local-only WeChat Channels draft uploader.
 
-This module drives only the visible official Channels Assistant website through a
-project-owned Edge profile and Playwright CDP. It never uses private platform APIs,
-never reads/writes the user's normal Edge profile, and contains no publish action.
+Automated uploads use a project-owned headless Edge profile through Playwright CDP.
+A headed session is reserved for explicit manual QR login. The module never uses
+private platform APIs, never reads/writes the user's normal Edge profile, and
+contains no publish action.
 """
 from __future__ import annotations
 
@@ -170,6 +171,15 @@ def _uses_profile(command: list[str], profile_dir: Path) -> bool:
     return False
 
 
+def _is_headless_command(command: list[str]) -> bool:
+    """Return whether an Edge command line explicitly enables headless mode."""
+    return any(
+        item.strip().strip('"').casefold() == "--headless"
+        or item.strip().strip('"').casefold().startswith("--headless=")
+        for item in command
+    )
+
+
 def _profile_processes(profile_dir: Path) -> list[int]:
     psutil = _load_psutil()
     matches: list[int] = []
@@ -260,6 +270,8 @@ def _validate_existing_session(
     config: dict[str, Any],
     session_path: Path,
     profile_dir: Path,
+    *,
+    expected_headless: bool,
 ) -> tuple[dict[str, Any], str]:
     session = _read_json(session_path)
     if session.get("schema_version") != 1:
@@ -289,6 +301,13 @@ def _validate_existing_session(
         raise UploadBlockedError("CDP listener command line does not contain its recorded port.")
     if "--remote-debugging-address=127.0.0.1" not in joined:
         raise UploadBlockedError("Edge CDP is not explicitly bound to 127.0.0.1.")
+    if bool(session.get("headless", False)) != expected_headless:
+        raise UploadBlockedError("Recorded Edge session headless mode does not match configuration.")
+    if _is_headless_command(details["command_line"]) != expected_headless:
+        mode = "headless" if expected_headless else "headed"
+        raise UploadBlockedError(
+            f"Dedicated Edge process is not running in the required {mode} mode."
+        )
     session["edge_version"] = endpoint["browser_version"]
     session["last_verified_at"] = _now()
     _write_json_atomic(session_path, session)
@@ -305,10 +324,12 @@ def ensure_edge_session(
     project_root: Path,
     *,
     open_url: str | None = None,
+    headless: bool | None = None,
 ) -> tuple[dict[str, Any], str]:
-    """Reuse a fully verified dedicated Edge session, or safely launch one."""
+    """Reuse a verified dedicated Edge session, or launch in the requested mode."""
     project_root = project_root.resolve()
     config, _ = _load_config(project_root)
+    headless_mode = bool(config.get("headless", False) if headless is None else headless)
     profile_dir = _relative_config_path(project_root, config["edge_profile_dir"]).resolve()
     session_path = _relative_config_path(project_root, config["session_file"])
     profile_dir.mkdir(parents=True, exist_ok=True)
@@ -316,7 +337,10 @@ def ensure_edge_session(
 
     if session_path.is_file():
         try:
-            return _validate_existing_session(project_root, config, session_path, profile_dir)
+            return _validate_existing_session(
+                project_root, config, session_path, profile_dir,
+                expected_headless=headless_mode,
+            )
         except UploadBlockedError:
             active = _profile_processes(profile_dir)
             if active:
@@ -343,9 +367,12 @@ def ensure_edge_session(
         "--remote-allow-origins=*",
         "--no-first-run",
         "--no-default-browser-check",
-        "--new-window",
-        open_url or str(config["create_url"]),
     ]
+    if headless_mode:
+        args.append("--headless=new")
+    else:
+        args.append("--new-window")
+    args.append(open_url or str(config["create_url"]))
     creationflags = 0
     if os.name == "nt":
         creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
@@ -376,8 +403,11 @@ def ensure_edge_session(
             joined = " ".join(details["command_line"])
             if f"--remote-debugging-port={port}" not in joined or "--remote-debugging-address=127.0.0.1" not in joined:
                 raise UploadBlockedError("Edge command line does not prove loopback-only CDP.")
+            if _is_headless_command(details["command_line"]) != headless_mode:
+                raise UploadBlockedError("Edge process did not start in the requested browser mode.")
             session = {
                 "schema_version": 1,
+                "headless": headless_mode,
                 "edge_executable": details["executable"],
                 "edge_pid": pid,
                 "process_creation_time": details["creation_time"],
@@ -426,7 +456,10 @@ def open_channels_session(project_root: Path, *, wait_login_seconds: int = 5) ->
     """Open the official creator page in a dedicated Edge profile for manual login."""
     project_root = project_root.resolve()
     config, selectors = _load_config(project_root)
-    session, websocket_url = ensure_edge_session(project_root, open_url=str(config["create_url"]))
+    # Manual QR login needs a visible window. Automated uploads remain headless.
+    session, websocket_url = ensure_edge_session(
+        project_root, open_url=str(config["create_url"]), headless=False
+    )
     playwright, browser, context = _connect_playwright(websocket_url)
     try:
         page = context.new_page()
@@ -443,6 +476,7 @@ def open_channels_session(project_root: Path, *, wait_login_seconds: int = 5) ->
             "session_pid": session["edge_pid"],
             "session_profile": session["user_data_dir"],
             "edge_version": session["edge_version"],
+            "headless": bool(session.get("headless", False)),
             "page_url": page.url,
             "account_verified": verified,
             "manual_login_required": login_required,
@@ -1355,7 +1389,10 @@ def _existing_session_only(project_root: Path) -> tuple[dict[str, Any], str]:
     profile_dir = _relative_config_path(project_root, config["edge_profile_dir"]).resolve()
     if not session_path.is_file():
         raise UploadBlockedError("No recorded dedicated Edge session exists. Run channels-session first.")
-    return _validate_existing_session(project_root, config, session_path, profile_dir)
+    return _validate_existing_session(
+        project_root, config, session_path, profile_dir,
+        expected_headless=bool(config.get("headless", False)),
+    )
 
 
 def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
@@ -1438,7 +1475,7 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
         job["draft_list_url"] = before["url"]
         _save_job(job_path, job)
 
-        create_page.bring_to_front()
+        # The upload page stays in the background; automated Edge is headless.
         video_input = _video_file_input(create_page, selectors)
         job["state"] = "UPLOADING"
         job["upload_started_at"] = _now()
@@ -1510,16 +1547,24 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
             "verified_at": _now(),
             "draft_list_url": after["url"] if after else None,
         }
+        job["save_action"] = {
+            "control": "draft_save",
+            "click_count": int(job.get("save_click_count", 0)),
+            "persistence_confirmation": "unique title match in DraftListManager",
+            "mobile_app_visibility": "not_verified_by_desktop_browser",
+        }
         job["automatic_publication"] = False
         _save_job(job_path, job)
-        draft_page.bring_to_front()
         return {
             "state": job["state"],
             "job_id": job_id,
             "title": metadata["title"],
             "account_name": config["account_name"],
             "verified_draft": job["verified_draft"],
+            "save_action": job["save_action"],
+            "mobile_app_visibility_verified": False,
             "edge_pid": session["edge_pid"],
+            "headless": bool(session.get("headless", config.get("headless", False))),
             "authorization_basis": "standing_user_instruction_draft_only",
             "automatic_publication": False,
         }
@@ -1581,7 +1626,6 @@ def reconcile_upload(project_root: Path, job_id: str) -> dict[str, Any]:
                 "reconciled_read_only": True,
             }
             _save_job(job_path, job)
-            page.bring_to_front()
             return {
                 "state": "DRAFT_SAVED",
                 "job_id": job_id,
