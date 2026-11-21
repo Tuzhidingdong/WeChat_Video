@@ -100,7 +100,7 @@ def test_channels_metadata_uses_explicit_short_title_and_only_fact_card_text() -
 def test_metadata_rejects_short_title_outside_6_to_16_chars() -> None:
     with pytest.raises(ValueError, match="6–16"):
         validate_channels_metadata(
-            {"job_id": "j1", "title": "这个标题长度明显超过十六个字符了", "description": "description"}
+            {"job_id": "j1", "title": "这个标题长度明显超过十六个字符了吧", "description": "description"}
         )
     with pytest.raises(ValueError, match="6–16"):
         validate_channels_metadata(
