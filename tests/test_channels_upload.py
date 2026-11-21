@@ -350,6 +350,7 @@ def test_draft_match_uses_verified_draft_manager_membership_without_row_status_l
 def _draft_list_test_selectors() -> dict:
     return {
         "draft_list_path": "/platform/post/draftListManager",
+        "draft_list_parent_shell_path": "/platform",
         "draft_list_frame_path": "/micro/content/post/draftListManager",
         "draft_list_root_selector": "div.finder-page.DraftListManager",
         "draft_list_active_tab_selector": "li.weui-desktop-tab__nav_current",
@@ -361,8 +362,13 @@ def _draft_list_test_selectors() -> dict:
     }
 
 
-def _make_draft_list_page(*, draft_count: int, entries: list[str] | None = None):
-    main = _FakeFrame("https://channels.weixin.qq.com/platform/post/draftListManager")
+def _make_draft_list_page(
+    *,
+    draft_count: int,
+    entries: list[str] | None = None,
+    parent_path: str = "/platform/post/draftListManager",
+):
+    main = _FakeFrame(f"https://channels.weixin.qq.com{parent_path}")
     root = _FakeElement(text="草稿箱", visible=True)
     active_tab = _FakeElement(text=f"草稿箱 ({draft_count})", visible=True)
     header = _FakeElement(text=f"草稿箱 ({draft_count})", visible=True)
@@ -383,7 +389,7 @@ def _make_draft_list_page(*, draft_count: int, entries: list[str] | None = None)
         locator_unsupported=True,
     )
     page = _FakePage([main, child])
-    page.url = "https://channels.weixin.qq.com/platform/post/draftListManager"
+    page.url = f"https://channels.weixin.qq.com{parent_path}"
     return page
 
 
@@ -402,6 +408,37 @@ def test_draft_snapshot_accepts_verified_zero_count_when_list_body_is_hidden() -
     assert snapshot["view_evidence"]["frame_path"] == (
         "/micro/content/post/draftListManager"
     )
+
+
+
+def test_draft_snapshot_accepts_platform_shell_when_child_frame_proves_draft_manager() -> None:
+    page = _make_draft_list_page(draft_count=0, parent_path="/platform")
+
+    snapshot = _draft_snapshot(page, _draft_list_test_selectors())
+
+    assert snapshot["view_verified"] is True
+    assert snapshot["view_evidence"]["page_path"] == "/platform"
+    assert snapshot["view_evidence"]["page_route_mode"] == (
+        "platform_shell_with_verified_draft_frame"
+    )
+    assert snapshot["view_evidence"]["frame_path"] == (
+        "/micro/content/post/draftListManager"
+    )
+
+
+def test_draft_snapshot_still_rejects_platform_shell_without_dedicated_child_frame() -> None:
+    page = _make_draft_list_page(draft_count=0, parent_path="/platform")
+    page.frames[1].url = "https://channels.weixin.qq.com/micro/content/post/list"
+
+    with pytest.raises(UploadBlockedError, match="dedicated draft manager"):
+        _draft_snapshot(page, _draft_list_test_selectors())
+
+
+def test_draft_snapshot_rejects_unrecognized_parent_route_even_with_draft_child_frame() -> None:
+    page = _make_draft_list_page(draft_count=0, parent_path="/platform/other")
+
+    with pytest.raises(UploadBlockedError, match="dedicated draft manager"):
+        _draft_snapshot(page, _draft_list_test_selectors())
 
 
 def test_draft_snapshot_reads_entries_from_confirmed_draft_list_body() -> None:
