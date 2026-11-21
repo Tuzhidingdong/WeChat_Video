@@ -19,6 +19,7 @@ from .channels_uploader import (
 from .model_setup import download_chinese_model, download_model
 from .pipeline import run_slice_a
 from .preflight import run_preflight
+from .topic_approval import approve_fact_card
 from .tooling import describe_tools, tool_path_for_bat
 
 
@@ -88,6 +89,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Inspect visible Channels UI controls without uploading or saving anything.",
     )
     inspect.add_argument("--project-root", type=Path, default=root)
+
+    approve_card = sub.add_parser(
+        "approve-fact-card",
+        help="Approve one Fact Card/source pair once for future QA-gated draft production.",
+    )
+    approve_card.add_argument("--project-root", type=Path, default=root)
+    approve_card.add_argument(
+        "--card",
+        type=Path,
+        default=root / "fact_cards" / "critical_nucleus_free_energy_candidate.json",
+    )
+    approve_card.add_argument("--approved-by", default=getpass.getuser())
 
     approve = sub.add_parser(
         "approve-run",
@@ -175,6 +188,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "channels-inspect":
             result = inspect_channels_ui(args.project_root.resolve())
             print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "approve-fact-card":
+            result = approve_fact_card(
+                args.project_root.resolve(),
+                args.card,
+                approved_by=args.approved_by,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print("Fact Card/source approved once. Future outputs still require strict QA PASS.")
             return 0
         if args.command == "approve-latest-run":
             result = approve_latest_run(

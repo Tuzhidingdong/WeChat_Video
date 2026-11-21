@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 
 from .channels_metadata import build_channels_metadata, validate_channels_metadata
+from .topic_approval import TopicApprovalError, verify_fact_card_approval
 
 
 class UploadBlockedError(RuntimeError):
@@ -788,18 +789,29 @@ def approve_run(
     config, _ = _load_config(project_root)
     script = _read_json(run_dir / "script.json")
     metadata_path = run_dir / "channels_draft.json"
+    expected_metadata = build_channels_metadata(
+        card,
+        script,
+        run_dir.name,
+        account_name=str(config["account_name"]),
+        tags=list(config.get("default_tags", [])),
+    )
     if metadata_path.is_file():
         metadata = _read_json(metadata_path)
+        if metadata != expected_metadata:
+            raise UploadBlockedError(
+                "channels_draft.json differs from the exact approved Fact Card-derived metadata. "
+                "Do not upload edited copy; update channels_title/Fact Card and explicitly re-approve the card."
+            )
     else:
-        metadata = build_channels_metadata(
-            card,
-            script,
-            run_dir.name,
-            account_name=str(config["account_name"]),
-            tags=list(config.get("default_tags", [])),
-        )
+        metadata = expected_metadata
         _write_json_atomic(metadata_path, metadata)
-    validate_channels_metadata(metadata)
+    validate_channels_metadata(
+        metadata,
+        min_title_chars=int(config.get("title_min_chars", 6)),
+        max_title_chars=int(config.get("title_max_chars", 16)),
+        max_description_chars=int(config.get("description_max_chars", 1000)),
+    )
     approval_phrase = f"APPROVE {fact_card_id}"
     print("\n即将记录本地人工审核批准：")
     print(f"Fact Card：{fact_card_id} — {card.get('title', '')}")
@@ -866,9 +878,23 @@ def _validate_run_for_upload(
         raise UploadBlockedError(
             f"Upload is blocked unless qa_report.json is strict PASS; got {qa.get('overall_status')!r}."
         )
-    approval, _ = _approval_record(project_root, config, run_dir)
-    card = _read_json(run_dir / "fact_card.json")
+    card_path = run_dir / "fact_card.json"
+    source_path = run_dir / "source_record.json"
+    card = _read_json(card_path)
     script = _read_json(run_dir / "script.json")
+    try:
+        approval = verify_fact_card_approval(project_root, card_path, source_path)
+    except TopicApprovalError as exc:
+        raise UploadBlockedError(str(exc)) from exc
+    if approval is None:
+        # Backward-compatible, stricter one-off approval remains available;
+        # daily automation uses a one-time hash-bound Fact Card approval.
+        try:
+            approval, _ = _approval_record(project_root, config, run_dir)
+        except UploadBlockedError as exc:
+            raise UploadBlockedError(
+                "This Fact Card has not been approved. Run approve-fact-card once before daily draft production."
+            ) from exc
     metadata_path = run_dir / "channels_draft.json"
     if metadata_path.is_file():
         metadata = _read_json(metadata_path)
@@ -1193,26 +1219,26 @@ def approve_latest_run(
 
 
 def upload_latest_approved_run(project_root: Path) -> dict[str, Any]:
-    """Upload only the newest locally approved run; never fall back to an unapproved run."""
-    config, _ = _load_config(project_root.resolve())
-    approvals_dir = _relative_config_path(project_root.resolve(), config["approvals_dir"])
-    records = []
-    if approvals_dir.is_dir():
-        for path in approvals_dir.glob("*.json"):
-            try:
-                record = _read_json(path)
-                if record.get("fact_card_approved") is True and record.get("video_accepted") is True:
-                    records.append((str(record.get("approved_at") or ""), path.stem))
-            except UploadBlockedError:
+    """Upload the newest strict-QA-PASS output whose Fact Card has one-time approval."""
+    project_root = project_root.resolve()
+    outputs = project_root / "outputs"
+    config, _ = _load_config(project_root)
+    candidates: list[Path] = []
+    if outputs.is_dir():
+        for run_dir in outputs.iterdir():
+            if not run_dir.is_dir():
                 continue
-    if not records:
+            try:
+                _validate_run_for_upload(project_root, run_dir, config)
+                candidates.append(run_dir)
+            except (UploadBlockedError, TopicApprovalError, FileNotFoundError, ValueError):
+                continue
+    if not candidates:
         raise UploadBlockedError(
-            "No locally approved video exists. Review the Fact Card and MP4, then run approve-latest-run first."
+            "No output has both strict QA PASS and a valid approved Fact Card. "
+            "Approve the Fact Card once with approve-fact-card, then generate a normal (non-review-sample) video."
         )
-    _, job_id = max(records, key=lambda item: item[0])
-    run_dir = (project_root.resolve() / "outputs" / job_id)
-    if not run_dir.is_dir():
-        raise UploadBlockedError(f"Approved run directory is missing: {job_id}.")
+    run_dir = max(candidates, key=lambda item: item.stat().st_mtime)
     return upload_run_to_channels(project_root, run_dir)
 
 

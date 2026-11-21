@@ -26,8 +26,8 @@ The user has assigned all GitHub code development to the ChatGPT developer. The 
 
 - Do not run Slice A production BATs or generate another video.
 - Do not approve a Fact Card or video on the user's behalf.
-- Do not run `Approve_Latest_Run.bat` or create an approval JSON.
-- Do not run `Approve_Latest_Run.bat` or `Save_To_Channels_Draft.bat`; do not upload a video or click any draft-save control. The user must review the Fact Card, video and generated short-title/description and explicitly approve the exact output package first.
+- Do not run `Approve_Fact_Card.bat`, `Approve_Latest_Run.bat` or create any topic/video approval JSON.
+- Do not run `Approve_Fact_Card.bat`, `Approve_Latest_Run.bat` or `Save_To_Channels_Draft.bat`; do not upload a video or click any draft-save control. The user alone approves the scientific Fact Card once and authorizes the first real draft upload.
 - Never click Publish, Send, Schedule, delete or overwrite.
 - Do not upload any MP4, WAV, screenshot, voice recording, speaker embedding, model or cache to GitHub.
 - No coding, no commits, no pushes and no hidden workers.
@@ -43,4 +43,4 @@ Return only:
 - sanitized UI control inventory and any selector mismatch;
 - confirmation that no approval, upload or publication action occurred.
 
-The developer will implement any required code/selector corrections on GitHub. The user retains final content approval, the first real draft-save action and all publish authority.
+The developer will implement any required code/selector corrections on GitHub. The user alone approves the Fact Card once, performs/authorizes the first real draft-save action, reviews the resulting draft and retains all publish authority.

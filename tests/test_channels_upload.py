@@ -10,7 +10,13 @@ from wechat_video.channels_uploader import (
     UploadBlockedError,
     _approval_record,
     _matching_draft_entries,
+    _validate_run_for_upload,
     approve_run,
+)
+from wechat_video.topic_approval import (
+    TopicApprovalError,
+    approve_fact_card,
+    verify_fact_card_approval,
 )
 
 
@@ -62,7 +68,13 @@ def _make_run(root: Path, *, qa_status: str = "PASS") -> Path:
             "channels_title": "临界半径如何决定成核",
             "scientific_question": "为什么界面代价与体相收益会相互竞争？",
             "scope": "仅在本测试定义的模型条件下讨论。",
-            "claims": [{"claim_id": "C1", "statement": "测试事实。"}],
+            "claims": [{
+                "claim_id": "C1",
+                "statement": "测试事实。",
+                "source_ids": ["S1"],
+                "evidence_status": "FULL_TEXT_LOCATED",
+                "caveats": [],
+            }],
             "approval_status": "DRAFT_PENDING_USER_REVIEW",
         },
     )
@@ -163,3 +175,73 @@ def test_warning_or_failed_qa_cannot_be_approved(tmp_path: Path) -> None:
             approved_by="test-user",
             confirmation="APPROVE TEST-001",
         )
+
+
+def test_fact_card_approval_is_one_time_and_hash_bound_to_sources(tmp_path: Path) -> None:
+    run_dir = _make_run(tmp_path)
+    fact_dir = tmp_path / "fact_cards"
+    fact_dir.mkdir(parents=True)
+    card_path = fact_dir / "test_card.json"
+    source_path = fact_dir / "sources.json"
+    import shutil
+
+    shutil.copy2(run_dir / "fact_card.json", card_path)
+    shutil.copy2(run_dir / "source_record.json", source_path)
+
+    with pytest.raises(TopicApprovalError, match="phrase did not match"):
+        approve_fact_card(
+            tmp_path,
+            card_path,
+            approved_by="test-user",
+            confirmation="NO",
+        )
+    approval_file = tmp_path / "runtime" / "topic_approvals" / "TEST-001.json"
+    assert not approval_file.exists()
+
+    record = approve_fact_card(
+        tmp_path,
+        card_path,
+        approved_by="test-user",
+        confirmation="APPROVE FACT CARD TEST-001",
+    )
+    assert approval_file.is_file()
+    assert record["fact_card_sha256"]
+    assert record["source_record_sha256"]
+
+    verified = verify_fact_card_approval(tmp_path, card_path, source_path)
+    assert verified is not None
+    assert verified["approval_type"] == "local_hash_bound"
+
+    source_path.write_text(
+        source_path.read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(TopicApprovalError, match="Source record changed"):
+        verify_fact_card_approval(tmp_path, card_path, source_path)
+
+
+def test_upload_validation_accepts_one_time_topic_approval_without_daily_video_approval(
+    tmp_path: Path,
+) -> None:
+    run_dir = _make_run(tmp_path)
+    fact_dir = tmp_path / "fact_cards"
+    fact_dir.mkdir(parents=True)
+    card_path = fact_dir / "test_card.json"
+    source_path = fact_dir / "sources.json"
+    import shutil
+
+    shutil.copy2(run_dir / "fact_card.json", card_path)
+    shutil.copy2(run_dir / "source_record.json", source_path)
+    approve_fact_card(
+        tmp_path,
+        card_path,
+        approved_by="test-user",
+        confirmation="APPROVE FACT CARD TEST-001",
+    )
+
+    config = json.loads((tmp_path / "config" / "channels_upload.json").read_text(encoding="utf-8"))
+    metadata, qa, approval = _validate_run_for_upload(tmp_path, run_dir, config)
+    assert metadata["title"] == "临界半径如何决定成核"
+    assert qa["overall_status"] == "PASS"
+    assert approval["approval_type"] == "local_hash_bound"
+    assert not (tmp_path / "runtime" / "approvals" / f"{run_dir.name}.json").exists()

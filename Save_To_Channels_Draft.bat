@@ -13,9 +13,10 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 echo.
-echo Uploading the newest explicitly approved, QA-passed video as an UNPUBLISHED draft.
-echo The uploader will verify the account and reconcile the draft list.
-echo It will never click Publish or Send.
+echo Uploading the newest strict-QA-PASS video whose Fact Card has been approved once.
+echo It will be saved as an UNPUBLISHED draft; the user alone publishes manually.
+echo The uploader verifies the account, snapshots the draft list and saves once.
+echo It never clicks Publish, Send, Schedule, Delete or Overwrite.
 ".venv\Scripts\python.exe" -X utf8 -m wechat_video.cli channels-upload-latest
 set "RC=%ERRORLEVEL%"
 
@@ -24,7 +25,7 @@ if "%RC%"=="0" (
   echo [OK] A new unpublished draft was read back from the draft list.
 ) else (
   echo.
-  echo [CHECK] Review the error and, for UPLOAD_UNKNOWN, run the read-only reconciliation command.
+  echo [CHECK] Review the error and, for UPLOAD_UNKNOWN, run read-only reconciliation.
 )
 
 :finish

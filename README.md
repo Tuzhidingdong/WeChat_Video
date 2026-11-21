@@ -59,18 +59,37 @@ Run_Slice_A.bat uses --review-sample because the repository's initial Fact Card 
 
 ## Saving an approved MP4 as an unpublished Channels draft
 
-The separate development branch `feat/milestone-2-channels-draft-uploader` adds a local draft-only uploader. It uses a dedicated project Edge profile and the visible official Channels Assistant page; it does not depend on or modify `WeChat_control`.
+The independent development branch feat/milestone-2-channels-draft-uploader adds a local draft-only uploader. It uses a project-owned Edge profile and the visible official Channels Assistant website. It does not depend on or modify WeChat_control.
 
-After syncing that branch and running `Setup_Slice_A.bat`:
+### One-time topic approval
 
-1. Open the dedicated Edge profile with `Open_Channels_Session.bat` and complete the normal QR login for 「成核生长」.
-2. Use `Inspect_Channels_UI.bat` to inspect the current page controls and adjust `config/selectors.yaml` only when the live UI differs.
-3. Review the complete generated MP4, Fact Card, source record and draft copy. `Approve_Latest_Run.bat` prints the scientific claims and requires an explicit typed approval phrase.
-4. Run `Save_To_Channels_Draft.bat`. The command uploads only the newest explicitly approved run, saves an unpublished draft once and reads the new row back from the draft list.
+After syncing this branch and running Setup_Slice_A.bat once, review each scientific Fact Card and source record once:
 
-Short-title input is checked against the 6–16 character field limit. The selected short title must be explicitly present in Fact Card `channels_title`. An ordinary `--review-sample` run is still blocked from upload until the user explicitly approves that exact Fact Card and video package. A strict media QA PASS alone is not approval. On an uncertain save, use the read-only `channels-reconcile` command; never blindly upload again.
+1. Double-click Approve_Fact_Card.bat.
+2. Read the scientific question, model scope, claims, conditions, caveats and sources printed by the command.
+3. Type APPROVE FACT CARD <fact_card_id> only after deciding that the topic is scientifically approved.
 
-Implementation details and local acceptance steps: `docs/CHANNELS_DRAFT_UPLOADER.md`.
+The local approval is saved under ignored runtime/topic_approvals/ and bound to SHA-256 hashes of the exact Fact Card and source record. It does not rewrite the tracked candidate card. A later change to either file invalidates the approval.
+
+This one-time topic approval is the daily-production authorization. It is not repeated for each video.
+
+### Dedicated Edge and draft upload
+
+1. Double-click Open_Channels_Session.bat and complete the normal official QR login for 「成核生长」 in the dedicated Edge window.
+2. Run Inspect_Channels_UI.bat to inventory the visible account identity, buttons, fields and file inputs. Confirm the current live selectors before upload.
+3. Generate or select a complete output under outputs/. The uploader requires the one-time Fact Card approval, strict qa_report.json overall_status=PASS and valid channels_draft.json metadata.
+4. Double-click Save_To_Channels_Draft.bat. It chooses the newest eligible output, verifies the account, captures the pre-upload draft list, uploads one MP4, fills metadata and clicks the draft-save control once.
+5. It reads the draft list again and confirms exactly one new row matching the title and explicit draft status. Edge remains open at the draft list.
+
+The short title is the Fact Card's explicit channels_title (6–16 characters); the longer scientific title is preserved. The description is derived only from the Fact Card's scientific question and scope.
+
+A --review-sample output remains blocked while the Fact Card has not been approved. After the user approves the exact Fact Card/source pair, an existing review-sample output can be eligible only if it has strict QA PASS and its copied source hashes match the approval. Normal daily production should use the non-review path.
+
+Approve_Latest_Run.bat is an optional, stricter per-video approval route; it is not required in daily A-mode.
+
+If a save result is uncertain, use read-only channels-reconcile; never blindly upload again. The uploader never publishes, schedules, deletes or overwrites.
+
+Implementation and local acceptance details: docs/CHANNELS_DRAFT_UPLOADER.md.
 
 ## What this prototype explains
 
