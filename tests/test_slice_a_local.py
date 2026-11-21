@@ -77,6 +77,10 @@ def test_visual_stage_mapping_is_unique_and_manifest_consistent() -> None:
         stage["transition_start_frame"] <= stage["transition_end_frame"] <= stage["end_frame"]
         for stage in manifest["stages"]
     )
+    assert all(
+        450 <= stage["transition_duration_ms"] <= 800
+        for stage in manifest["stages"]
+    )
     critical_unit = next(
         u for u in script["speech_units"] if "CRITICAL_PEAK" in u["visual_trigger_ids"]
     )
