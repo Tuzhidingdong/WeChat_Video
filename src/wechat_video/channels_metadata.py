@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 
@@ -57,6 +58,24 @@ def build_channels_metadata(
     }
     validate_channels_metadata(metadata)
     return metadata
+
+
+def build_channels_metadata_for_run_dir(
+    fact_card: dict[str, Any],
+    script: dict[str, Any],
+    run_dir: str | Path,
+    *,
+    account_name: str = "成核生长",
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build draft metadata with the exact output directory name as job_id."""
+    return build_channels_metadata(
+        fact_card,
+        script,
+        Path(run_dir).name,
+        account_name=account_name,
+        tags=tags,
+    )
 
 
 def validate_channels_metadata(
