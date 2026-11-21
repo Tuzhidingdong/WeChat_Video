@@ -111,6 +111,7 @@ class _FakeFrame:
         texts=None,
         inspection=None,
         identity_matches=None,
+        locator_unsupported=False,
     ):
         self.url = url
         self.selectors = dict(selectors or {})
@@ -118,15 +119,49 @@ class _FakeFrame:
         self.texts = dict(texts or {})
         self.inspection = dict(inspection or {})
         self.identity_matches = list(identity_matches or [])
+        self.locator_unsupported = locator_unsupported
         self.last_evaluate_expression = ""
+        self.last_evaluate_args = ()
 
     def locator(self, selector):
+        if self.locator_unsupported:
+            return _FakeLocator([])
         return _FakeLocator(self.selectors.get(selector, []))
 
     def evaluate(self, expression, *args):
         self.last_evaluate_expression = expression
+        self.last_evaluate_args = args
         if "__CHANNELS_ACCOUNT_IDENTITY_SCAN__" in expression:
             return self.identity_matches
+        if "__CHANNELS_DRAFT_LIST_DOM_SCAN__" in expression:
+            config = args[0]
+
+            def items(selector):
+                return list(self.selectors.get(selector, []))
+
+            def visible(item):
+                return item.is_visible()
+
+            roots = items(config["root_selector"])
+            active_tabs = [item for item in items(config["active_tab_selector"]) if visible(item)]
+            headers = [item for item in items(config["header_selector"]) if visible(item)]
+            bodies = items(config["body_selector"])
+            body = bodies[0] if len(bodies) == 1 else None
+            row_texts = (
+                [str(value).strip() for value in body.child_texts if str(value).strip()]
+                if body is not None and visible(body)
+                else []
+            )
+            return {
+                "root_count": len(roots),
+                "root_visible_count": sum(1 for item in roots if visible(item)),
+                "active_tab_texts": [item.inner_text() for item in active_tabs],
+                "header_texts": [item.inner_text() for item in headers],
+                "body_count": len(bodies),
+                "body_visible": bool(body is not None and visible(body)),
+                "body_child_count": len(body.child_texts) if body is not None else 0,
+                "row_texts": row_texts,
+            }
         return self.inspection
 
     def get_by_role(self, role, name=None, exact=None):
@@ -337,6 +372,7 @@ def _make_draft_list_page(*, draft_count: int, entries: list[str] | None = None)
             "div.post-list-header": [header],
             "div.list-wrapper.draft-list-wrapper div.post-list-body": [body],
         },
+        locator_unsupported=True,
     )
     page = _FakePage([main, child])
     page.url = "https://channels.weixin.qq.com/platform/post/draftListManager"
@@ -352,6 +388,9 @@ def test_draft_snapshot_accepts_verified_zero_count_when_list_body_is_hidden() -
     assert snapshot["view_verified"] is True
     assert snapshot["draft_count"] == 0
     assert snapshot["entries"] == []
+    child = page.frames[1]
+    assert child.locator("div.finder-page.DraftListManager").count() == 0
+    assert "__CHANNELS_DRAFT_LIST_DOM_SCAN__" in child.last_evaluate_expression
     assert snapshot["view_evidence"]["frame_path"] == (
         "/micro/content/post/draftListManager"
     )
@@ -373,6 +412,11 @@ def test_draft_snapshot_reads_entries_from_confirmed_draft_list_body() -> None:
     assert snapshot["draft_count"] == 1
     assert len(snapshot["entries"]) == 1
     assert len(matches) == 1
+    child = page.frames[1]
+    assert child.locator(
+        "div.list-wrapper.draft-list-wrapper div.post-list-body"
+    ).count() == 0
+    assert "__CHANNELS_DRAFT_LIST_DOM_SCAN__" in child.last_evaluate_expression
 
 
 def test_draft_snapshot_rejects_video_management_route_even_if_nav_mentions_drafts() -> None:
@@ -399,6 +443,32 @@ def test_draft_snapshot_rejects_wrong_active_tab_even_on_draft_manager_route() -
 
     with pytest.raises(UploadBlockedError, match="dedicated draft manager"):
         _draft_snapshot(page, _draft_list_test_selectors())
+
+
+def test_draft_snapshot_blocks_positive_count_without_readable_rows() -> None:
+    page = _make_draft_list_page(draft_count=1, entries=[])
+
+    with pytest.raises(UploadBlockedError, match="no readable rows"):
+        _draft_snapshot(page, _draft_list_test_selectors())
+
+
+def test_matching_verified_draft_entries_counts_rows_not_repeated_title_text() -> None:
+    snapshot = {
+        "view_type": "draft_list",
+        "view_verified": True,
+        "entries": [
+            "临界半径如何决定成核 临界半径如何决定成核",
+            "另一条无关草稿",
+        ],
+    }
+
+    matches = _matching_draft_entries(
+        snapshot,
+        "临界半径如何决定成核",
+        {"draft_status_texts": ["草稿"]},
+    )
+
+    assert len(matches) == 1
 
 
 def test_pending_sample_requires_explicit_human_approval(tmp_path: Path) -> None:
