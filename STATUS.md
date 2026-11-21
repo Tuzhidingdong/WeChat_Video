@@ -69,3 +69,17 @@ The source was authored and committed through GitHub. This environment cannot ex
 ## Next step
 
 The user syncs this branch, runs Setup_Slice_A.bat once, then Run_Slice_A.bat. Use the resulting outputs/<run>/run.log, environment_report.json, qa_report.json, and REVIEW.md to fix only observed Slice A defects. Slice B remains unauthorized until Slice A has been reviewed and accepted.
+
+
+## Separate Channels draft-uploader implementation
+
+The development branch `feat/milestone-2-channels-draft-uploader` now contains a guarded local uploader path. This section records code presence only; it does not mark the V5 milestone exit condition or the live upload proof as complete.
+
+- Deterministic `channels_draft.json` metadata is generated from the Fact Card's title, scientific question and scope.
+- The dedicated Edge/Playwright uploader, local session registry, semantic selector config, draft snapshot and post-save reconciliation are implemented in source.
+- Strict QA PASS and an explicit, typed user approval record bound to the exact media/Fact Card/source/QA/metadata hashes are required.
+- Ambiguous save results become `UPLOAD_UNKNOWN`; reconciliation is read-only and never retries.
+- The save/publish boundary is draft-only. No Publish, Send, Schedule, Delete or Overwrite operation is implemented.
+- New local entry points: `Open_Channels_Session.bat`, `Inspect_Channels_UI.bat`, `Approve_Latest_Run.bat`, and `Save_To_Channels_Draft.bat`.
+
+**Not yet verified:** Windows installation, Edge/CDP persistence, QR login, live selectors, actual video upload, save-draft behavior, draft-list row reconciliation, and Edge persistence after CLI exit. Do not report a real Channels draft until those checks pass against the actual account.

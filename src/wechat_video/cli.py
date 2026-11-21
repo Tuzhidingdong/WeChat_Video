@@ -8,10 +8,12 @@ from pathlib import Path
 
 from .channels_uploader import (
     UploadBlockedError,
+    approve_latest_run,
     approve_run,
     inspect_channels_ui,
     open_channels_session,
     reconcile_upload,
+    upload_latest_approved_run,
     upload_run_to_channels,
 )
 from .model_setup import download_chinese_model, download_model
@@ -102,6 +104,19 @@ def build_parser() -> argparse.ArgumentParser:
     upload.add_argument("--project-root", type=Path, default=root)
     upload.add_argument("--run-dir", type=Path, required=True)
 
+    approve_latest = sub.add_parser(
+        "approve-latest-run",
+        help="Review the newest strict-QA-PASS output and record explicit human approval.",
+    )
+    approve_latest.add_argument("--project-root", type=Path, default=root)
+    approve_latest.add_argument("--approved-by", default=getpass.getuser())
+
+    upload_latest = sub.add_parser(
+        "channels-upload-latest",
+        help="Upload only the newest explicitly approved run; duplicate protection remains active.",
+    )
+    upload_latest.add_argument("--project-root", type=Path, default=root)
+
     reconcile = sub.add_parser(
         "channels-reconcile",
         help="Read-only reconciliation of a prior uncertain upload; never uploads or clicks Save.",
@@ -161,6 +176,14 @@ def main(argv: list[str] | None = None) -> int:
             result = inspect_channels_ui(args.project_root.resolve())
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
+        if args.command == "approve-latest-run":
+            result = approve_latest_run(
+                args.project_root.resolve(),
+                approved_by=args.approved_by,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print("Local approval recorded. This exact artifact package is now eligible for draft upload.")
+            return 0
         if args.command == "approve-run":
             result = approve_run(
                 args.project_root.resolve(),
@@ -169,6 +192,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             print("Local approval recorded. This exact artifact package is now eligible for draft upload.")
+            return 0
+        if args.command == "channels-upload-latest":
+            result = upload_latest_approved_run(args.project_root.resolve())
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print("Verified unpublished draft. No Publish/Send action was performed.")
             return 0
         if args.command == "channels-upload":
             result = upload_run_to_channels(args.project_root.resolve(), args.run_dir)

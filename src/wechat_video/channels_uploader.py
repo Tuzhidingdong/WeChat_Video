@@ -536,23 +536,30 @@ def _visible_locator(page: Any, selector_list: Any):
 
 def _video_file_input(page: Any, selectors: dict[str, Any]):
     selectors_list = selectors.get("video_file_input", ["input[type='file'][accept*='video']", "input[type='file']"])
-    candidates = []
     for selector in selectors_list:
         try:
             locator = page.locator(str(selector))
-            for index in range(min(locator.count(), 8)):
-                candidate = locator.nth(index)
-                accept = str(candidate.get_attribute("accept") or "").casefold()
-                candidates.append((candidate, accept))
+            count = locator.count()
+            if not count:
+                continue
+            candidates = [locator.nth(index) for index in range(min(count, 8))]
+            video_inputs = [
+                item for item in candidates
+                if any(token in str(item.get_attribute("accept") or "").casefold()
+                       for token in ("video", "mp4"))
+            ]
+            if len(video_inputs) == 1:
+                return video_inputs[0]
+            if len(video_inputs) > 1:
+                raise UploadBlockedError(
+                    "More than one video file input is present; refusing ambiguous selection."
+                )
+            if len(candidates) == 1:
+                return candidates[0]
+        except UploadBlockedError:
+            raise
         except Exception:
             continue
-    video_inputs = [item[0] for item in candidates if "video" in item[1] or "mp4" in item[1]]
-    if len(video_inputs) == 1:
-        return video_inputs[0]
-    if len(video_inputs) > 1:
-        raise UploadBlockedError("More than one video file input is present; refusing ambiguous selection.")
-    if len(candidates) == 1:
-        return candidates[0][0]
     raise UploadBlockedError(
         "Could not identify exactly one video upload input. Inspect the page and adjust config/selectors.yaml."
     )
@@ -726,6 +733,7 @@ def _approval_record(
         ("fact_card.json", "fact_card_sha256"),
         ("source_record.json", "source_record_sha256"),
         ("qa_report.json", "qa_report_sha256"),
+        ("channels_draft.json", "channels_metadata_sha256"),
     ):
         path = run_dir / filename
         if not path.is_file() or _sha256(path) != approval.get(key):
@@ -777,6 +785,21 @@ def approve_run(
     fact_card_id = str(card.get("fact_card_id") or "").strip()
     if not fact_card_id:
         raise UploadBlockedError("Fact Card has no fact_card_id.")
+    config, _ = _load_config(project_root)
+    script = _read_json(run_dir / "script.json")
+    metadata_path = run_dir / "channels_draft.json"
+    if metadata_path.is_file():
+        metadata = _read_json(metadata_path)
+    else:
+        metadata = build_channels_metadata(
+            card,
+            script,
+            run_dir.name,
+            account_name=str(config["account_name"]),
+            tags=list(config.get("default_tags", [])),
+        )
+        _write_json_atomic(metadata_path, metadata)
+    validate_channels_metadata(metadata)
     approval_phrase = f"APPROVE {fact_card_id}"
     print("\n即将记录本地人工审核批准：")
     print(f"Fact Card：{fact_card_id} — {card.get('title', '')}")
@@ -785,7 +808,9 @@ def approve_run(
         print(f"- {claim.get('claim_id', '')}: {claim.get('statement', '')}")
     print(f"视频：{final_mp4}")
     print(f"时长：{duration:.2f}s；QA：PASS")
-    print("请先实际观看完整视频并审阅 Fact Card 与来源记录。")
+    print(f"视频号短标题：{metadata['title']}")
+    print(f"视频号描述：{metadata['description']}")
+    print("请先实际观看完整视频并审阅 Fact Card、来源记录及待上传文案。")
     response = confirmation if confirmation is not None else input_fn(
         f"确认你已批准科学内容和成片？输入 {approval_phrase}："
     )
@@ -804,11 +829,11 @@ def approve_run(
         "fact_card_sha256": _sha256(card_path),
         "source_record_sha256": _sha256(source_path),
         "qa_report_sha256": _sha256(qa_path),
+        "channels_metadata_sha256": _sha256(metadata_path),
         "qa_status": qa["overall_status"],
         "duration_seconds": duration,
         "approval_scope": "this exact review package only",
     }
-    config, _ = _load_config(project_root)
     approval_path = _relative_config_path(
         project_root, config["approvals_dir"]
     ) / f"{run_dir.name}.json"
@@ -1120,6 +1145,74 @@ def reconcile_upload(project_root: Path, job_id: str) -> dict[str, Any]:
         )
     finally:
         playwright.stop()
+
+
+def latest_qa_pass_run(project_root: Path) -> Path:
+    """Choose the newest complete, strict-QA-PASS output for explicit review."""
+    outputs = (project_root.resolve() / "outputs")
+    candidates: list[Path] = []
+    if not outputs.is_dir():
+        raise UploadBlockedError("No outputs/ directory exists.")
+    for run_dir in outputs.iterdir():
+        if not run_dir.is_dir():
+            continue
+        try:
+            qa = _read_json(run_dir / "qa_report.json")
+            if (
+                qa.get("overall_status") == "PASS"
+                and (run_dir / "final.mp4").is_file()
+                and (run_dir / "fact_card.json").is_file()
+                and (run_dir / "source_record.json").is_file()
+                and (run_dir / "script.json").is_file()
+            ):
+                candidates.append(run_dir)
+        except UploadBlockedError:
+            continue
+    if not candidates:
+        raise UploadBlockedError("No complete output with strict QA PASS is available under outputs/.")
+    return max(candidates, key=lambda item: item.stat().st_mtime)
+
+
+def approve_latest_run(
+    project_root: Path,
+    *,
+    approved_by: str,
+    confirmation: str | None = None,
+    input_fn=input,
+) -> dict[str, Any]:
+    run_dir = latest_qa_pass_run(project_root)
+    print(f"Selected latest QA-passed run: {run_dir}")
+    return approve_run(
+        project_root,
+        run_dir,
+        approved_by=approved_by,
+        confirmation=confirmation,
+        input_fn=input_fn,
+    )
+
+
+def upload_latest_approved_run(project_root: Path) -> dict[str, Any]:
+    """Upload only the newest locally approved run; never fall back to an unapproved run."""
+    config, _ = _load_config(project_root.resolve())
+    approvals_dir = _relative_config_path(project_root.resolve(), config["approvals_dir"])
+    records = []
+    if approvals_dir.is_dir():
+        for path in approvals_dir.glob("*.json"):
+            try:
+                record = _read_json(path)
+                if record.get("fact_card_approved") is True and record.get("video_accepted") is True:
+                    records.append((str(record.get("approved_at") or ""), path.stem))
+            except UploadBlockedError:
+                continue
+    if not records:
+        raise UploadBlockedError(
+            "No locally approved video exists. Review the Fact Card and MP4, then run approve-latest-run first."
+        )
+    _, job_id = max(records, key=lambda item: item[0])
+    run_dir = (project_root.resolve() / "outputs" / job_id)
+    if not run_dir.is_dir():
+        raise UploadBlockedError(f"Approved run directory is missing: {job_id}.")
+    return upload_run_to_channels(project_root, run_dir)
 
 
 def inspect_channels_ui(project_root: Path) -> dict[str, Any]:

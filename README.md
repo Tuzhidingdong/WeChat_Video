@@ -21,7 +21,7 @@ The current default production script is `content/sample_script.en.json`; narrat
 
 Local-only audio diagnostics (five gain-matched stems, aggressive-denoise A/B, the no-afftdn vs afftdn same-text A/B, and post-AAC noise inspection) live in `wechat_video.audio_diagnostics`; all outputs stay under ignored `outputs/` or `private/` paths. The noise floor was proven to come from the disabled synthetic ambient stem, not the personal voice. A controlled A/B showed afftdn removed ~93% of 4–10 kHz consonant/air detail, so it was disabled in the default profile. No gate, expander, AGC, cloud TTS, source-separation model, or continuous bed is used. The final video applies one single-pass full-programme loudnorm during mux; two-pass linear loudnorm could deadlock this FFmpeg build with a denoise-free voice stem.
 
-This is deliberately not the full daily production product. No topic-pool manager, OpenCode authoring, Google Flow, Edge session, WeChat uploader, upload state machine, or publishing action is included in Slice A.
+The local video renderer remains a one-template Slice A implementation; the full Verified Topic Pool, OpenCode authoring, five-template library and daily scheduler are not yet integrated. A separate development branch adds a guarded, local-only Channels draft uploader. It does not make a pending Fact Card or review-only sample eligible for upload.
 
 ## First-time setup (one time)
 
@@ -56,6 +56,21 @@ The output is written to a new timestamped folder under outputs/, containing:
 - qa_report.json, review_status.json, REVIEW.md, and run.log
 
 Run_Slice_A.bat uses --review-sample because the repository's initial Fact Card is a candidate pending your review. The resulting package is explicitly marked NOT_FOR_PUBLICATION_PENDING_USER_FACT_CARD_REVIEW. It is not a Verified Topic Pool entry and must not be uploaded or published. The normal CLI path rejects an unapproved card unless the review-sample flag is explicitly supplied.
+
+## Saving an approved MP4 as an unpublished Channels draft
+
+The separate development branch `feat/milestone-2-channels-draft-uploader` adds a local draft-only uploader. It uses a dedicated project Edge profile and the visible official Channels Assistant page; it does not depend on or modify `WeChat_control`.
+
+After syncing that branch and running `Setup_Slice_A.bat`:
+
+1. Open the dedicated Edge profile with `Open_Channels_Session.bat` and complete the normal QR login for 「成核生长」.
+2. Use `Inspect_Channels_UI.bat` to inspect the current page controls and adjust `config/selectors.yaml` only when the live UI differs.
+3. Review the complete generated MP4, Fact Card, source record and draft copy. `Approve_Latest_Run.bat` prints the scientific claims and requires an explicit typed approval phrase.
+4. Run `Save_To_Channels_Draft.bat`. The command uploads only the newest explicitly approved run, saves an unpublished draft once and reads the new row back from the draft list.
+
+An ordinary `--review-sample` run is still blocked from upload until the user explicitly approves that exact Fact Card and video package. A strict media QA PASS alone is not approval. On an uncertain save, use the read-only `channels-reconcile` command; never blindly upload again.
+
+Implementation details and local acceptance steps: `docs/CHANNELS_DRAFT_UPLOADER.md`.
 
 ## What this prototype explains
 
@@ -95,6 +110,8 @@ These are diagnostic commands only; normal sample production uses the BAT launch
 ## Safety boundary
 
 - No paid APIs, paid model fallback, online TTS, paid Flow credits, or new hardware.
-- No browser automation, cookies, user credentials, or Edge profile.
-- No upload, scheduling, final-send click, or automatic publication.
+- No access to the user's ordinary Edge profile or to any WeChat_Control browser/session data.
+- The separate draft uploader uses only its own ignored Edge profile and the visible Channels Assistant website.
+- No cookies, passwords or authentication tokens are exported or written to tracked files.
+- Draft upload is allowed only for an explicitly approved, strict-QA-PASS package; publication and scheduling remain prohibited.
 - TASK_PLAN.md remains the frozen V5 authority. Implementation progress is recorded in STATUS.md.

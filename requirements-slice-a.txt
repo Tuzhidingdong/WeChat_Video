@@ -4,3 +4,8 @@ manim==0.22.1
 sherpa-onnx>=1.12,<2
 soundfile>=0.12,<1
 fonttools>=4.40,<5
+
+# Visible Channels Assistant automation only; uses installed Microsoft Edge (no browser download).
+playwright>=1.50,<2
+psutil>=5.9,<8
+PyYAML>=6,<7

@@ -1,0 +1,22 @@
+name: Channels uploader unit tests
+
+on:
+  push:
+    branches:
+      - feat/milestone-2-channels-draft-uploader
+  pull_request:
+    branches:
+      - feat/slice-a-english-visual-refinement
+
+jobs:
+  channels-uploader-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check pytest PyYAML
+      - name: Run repository tests
+        run: python -m pytest -q
