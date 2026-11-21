@@ -431,23 +431,33 @@ def open_channels_session(project_root: Path, *, wait_login_seconds: int = 5) ->
     try:
         page = context.new_page()
         page.goto(str(config["create_url"]), wait_until="domcontentloaded", timeout=60_000)
+        expected_name = str(config["account_name"])
         verified = _wait_for_account_identity(
             page,
-            str(config["account_name"]),
+            expected_name,
             selectors,
             wait_seconds=max(0, int(wait_login_seconds)),
         )
+        login_required = not verified and _login_required_hint(page)
         return {
             "session_pid": session["edge_pid"],
             "session_profile": session["user_data_dir"],
             "edge_version": session["edge_version"],
             "page_url": page.url,
             "account_verified": verified,
-            "manual_login_required": not verified,
+            "manual_login_required": login_required,
             "message": (
                 "Account identity verified."
                 if verified
-                else "Edge is open. Scan the QR code/login manually, then rerun channels-inspect."
+                else (
+                    "A login prompt is visible. Complete manual login in the dedicated Edge window, "
+                    "then rerun channels-inspect."
+                    if login_required
+                    else (
+                        f"The page is open, but account identity {expected_name!r} is not yet verified. "
+                        "No upload action is allowed."
+                    )
+                )
             ),
         }
     finally:
@@ -468,6 +478,128 @@ def _body_text(page: Any) -> str:
     return "\n".join(chunks)
 
 
+def _login_required_hint(page: Any) -> bool:
+    """Return true only for an explicit, high-confidence login prompt."""
+    body = _body_text(page)
+    explicit_prompts = (
+        "扫码登录",
+        "微信登录",
+        "请登录",
+        "立即登录",
+        "登录后继续",
+        "登录以继续",
+    )
+    return any(token in body for token in explicit_prompts)
+
+
+def _account_identity_evidence(frame: Any, expected_name: str) -> list[dict[str, Any]]:
+    """Find only visible DOM evidence for the configured account identity.
+
+    The scan is restricted to the configured account name in visible text,
+    accessible attributes, image alt text, or CSS pseudo-element content. It
+    accepts a match only in the lower-left account area or on a semantically
+    account-related element. No form values, cookies, storage, or page-wide
+    text dumps are collected.
+    """
+    expression = r"""(expectedName) => {
+        const marker = "__CHANNELS_ACCOUNT_IDENTITY_SCAN__";
+        const expected = String(expectedName || "").replace(/\s+/g, " ").trim();
+        if (!expected) return [];
+        const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+        const visible = (element) => {
+            if (!element || element.hidden) return false;
+            const rect = element.getBoundingClientRect();
+            if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+            for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+                const style = window.getComputedStyle(node);
+                if (style.display === "none" || style.visibility === "hidden" ||
+                    style.visibility === "collapse" || Number.parseFloat(style.opacity || "1") === 0) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const matches = [];
+        const elements = Array.from(document.querySelectorAll("body *"));
+        for (const element of elements) {
+            if (!visible(element)) continue;
+            const rect = element.getBoundingClientRect();
+            const directText = Array.from(element.childNodes)
+                .filter(node => node.nodeType === Node.TEXT_NODE)
+                .map(node => normalize(node.nodeValue))
+                .filter(Boolean);
+            const candidates = directText.map(value => ["visible_text", value]);
+            for (const attr of ["aria-label", "title", "alt"]) {
+                const value = normalize(element.getAttribute(attr));
+                if (value) candidates.push([attr, value]);
+            }
+            for (const pseudo of ["::before", "::after"]) {
+                const value = normalize(window.getComputedStyle(element, pseudo).content)
+                    .replace(/^["']|["']$/g, "");
+                if (value && value !== "none" && value !== "normal") {
+                    candidates.push(["pseudo_text", value]);
+                }
+            }
+            const matched = candidates.find(([, value]) => value.includes(expected));
+            if (!matched) continue;
+
+            const semanticHint = [
+                element.getAttribute("role"),
+                element.getAttribute("aria-label"),
+                element.getAttribute("title"),
+                element.getAttribute("id"),
+                typeof element.className === "string" ? element.className : ""
+            ].join(" ");
+            const semanticAccountSurface =
+                /(account|profile|avatar|user|账号|用户|个人中心)/i.test(semanticHint);
+            const lowerLeft =
+                rect.left <= window.innerWidth * 0.45 &&
+                rect.top >= window.innerHeight * 0.50;
+            if (!lowerLeft && !semanticAccountSurface) continue;
+
+            matches.push({
+                tag: element.tagName.toLowerCase(),
+                evidence_type: matched[0],
+                matched_value: matched[1].slice(0, 80),
+                region: lowerLeft ? "lower_left" : "semantic_account_surface",
+                semantic_account_surface: semanticAccountSurface,
+                role: element.getAttribute("role") || "",
+                left: Math.round(rect.left),
+                top: Math.round(rect.top),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height)
+            });
+            if (matches.length >= 8) break;
+        }
+        return matches;
+    }"""
+    try:
+        raw = frame.evaluate(expression, expected_name)
+    except Exception:
+        return []
+    if not isinstance(raw, list):
+        return []
+    evidence: list[dict[str, Any]] = []
+    for item in raw[:8]:
+        if not isinstance(item, dict):
+            continue
+        region = str(item.get("region") or "")
+        if region != "lower_left" and item.get("semantic_account_surface") is not True:
+            continue
+        evidence.append({
+            "tag": str(item.get("tag") or "")[:24],
+            "evidence_type": str(item.get("evidence_type") or "")[:24],
+            "matched_value": str(item.get("matched_value") or "")[:80],
+            "region": region,
+            "role": str(item.get("role") or "")[:40],
+            "left": int(item.get("left") or 0),
+            "top": int(item.get("top") or 0),
+            "width": int(item.get("width") or 0),
+            "height": int(item.get("height") or 0),
+        })
+    return evidence
+
+
 def _wait_for_account_identity(
     page: Any,
     expected_name: str,
@@ -485,6 +617,8 @@ def _wait_for_account_identity(
     while True:
         for frame in _frame_contexts(page):
             try:
+                if _account_identity_evidence(frame, expected_name):
+                    return True
                 if selector:
                     loc = frame.locator(str(selector))
                     for index in range(min(loc.count(), 8)):
@@ -515,8 +649,7 @@ def _ensure_account_identity(
         page, expected_name, selectors, wait_seconds=wait_seconds
     ):
         return
-    body = _body_text(page)
-    if any(token in body for token in ("扫码登录", "微信登录", "请登录", "登录后")):
+    if _login_required_hint(page):
         raise UploadBlockedError(
             "The dedicated Channels session is not logged in. Scan the QR code in the open Edge window, "
             "confirm the intended account, then rerun this command."
@@ -1592,12 +1725,19 @@ def inspect_channels_ui(project_root: Path) -> dict[str, Any]:
             page.wait_for_timeout(settle_ms)
 
         ready_timeout = max(0, int(config.get("ui_ready_timeout_seconds", 15)))
+        expected_name = str(config["account_name"])
         account_verified = _wait_for_account_identity(
             page,
-            str(config["account_name"]),
+            expected_name,
             selectors,
             wait_seconds=ready_timeout,
         )
+        account_identity_evidence: list[dict[str, Any]] = []
+        for frame in _frame_contexts(page):
+            for item in _account_identity_evidence(frame, expected_name):
+                details = dict(item)
+                details["frame_url"] = str(getattr(frame, "url", ""))
+                account_identity_evidence.append(details)
         (
             frame_inventory,
             buttons,
@@ -1606,13 +1746,11 @@ def inspect_channels_ui(project_root: Path) -> dict[str, Any]:
             controls_ready,
         ) = _collect_ui_inventory(page, timeout_seconds=ready_timeout)
 
-        body = _body_text(page)
-        login_hint = any(
-            token in body for token in ("扫码登录", "微信登录", "请登录", "登录后")
-        )
+        login_required = not account_verified and _login_required_hint(page)
         return {
             "account_verified": account_verified,
-            "manual_login_required": not account_verified and login_hint,
+            "manual_login_required": login_required,
+            "account_identity_evidence": account_identity_evidence,
             "page_url": page.url,
             "page_title": page.title(),
             "frame_count": len(frame_inventory),
