@@ -66,6 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=root / "content" / "sample_script.en.json",
     )
     run.add_argument("--output-root", type=Path, default=Path("outputs"))
+    run.add_argument(
+        "--review-sample",
+        action="store_true",
+        help="Allow a pending Fact Card for a local review sample; output remains not-for-publication.",
+    )
 
     run_and_upload = sub.add_parser(
         "run-slice-a-and-upload-draft",
@@ -83,11 +88,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=root / "content" / "sample_script.en.json",
     )
     run_and_upload.add_argument("--output-root", type=Path, default=Path("outputs"))
-    run.add_argument(
-        "--review-sample",
-        action="store_true",
-        help="Allow a pending Fact Card for a local review sample; output remains not-for-publication.",
-    )
 
     session = sub.add_parser(
         "channels-session",
