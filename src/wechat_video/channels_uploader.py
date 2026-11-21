@@ -1077,6 +1077,117 @@ def _wait_for_draft_list_view(
     )
 
 
+def _click_draft_list_nav_entry(
+    page: Any,
+    selectors: dict[str, Any],
+) -> None:
+    """Open DraftListManager through the platform's own SPA navigation.
+
+    Directly loading /platform/post/draftListManager can update the iframe URL
+    without mounting the list application. The official platform exposes this
+    view under the left-side Content Management menu, so navigate through that
+    visible entry and still require the dedicated frame/DOM proof afterwards.
+    """
+    entry_selectors = [
+        str(item)
+        for item in selectors.get("draft_list_nav_entry_selectors", [])
+        if str(item).strip()
+    ]
+    parent_selectors = [
+        str(item)
+        for item in selectors.get("draft_list_nav_parent_selectors", [])
+        if str(item).strip()
+    ]
+    if not entry_selectors or not parent_selectors:
+        raise UploadBlockedError(
+            "Draft-list navigation selectors are missing from config/selectors.yaml."
+        )
+
+    def visible_entry():
+        for selector in entry_selectors:
+            matches = _visible_locators(page, selector, limit=12)
+            if len(matches) > 1:
+                raise UploadBlockedError(
+                    "More than one visible DraftListManager navigation entry exists; "
+                    "refusing an ambiguous click."
+                )
+            if len(matches) == 1:
+                return matches[0]
+        return None
+
+    def click_entry(entry: Any) -> None:
+        try:
+            entry.click(timeout=10_000)
+        except Exception as exc:
+            raise UploadBlockedError(
+                "The visible DraftListManager navigation entry could not be clicked."
+            ) from exc
+
+    # The submenu may already be expanded (for example after a prior read).
+    entry = visible_entry()
+    if entry is not None:
+        click_entry(entry)
+        return
+
+    timeout_seconds = max(
+        0, int(selectors.get("draft_list_nav_timeout_seconds", 20))
+    )
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        found_parent = False
+        for selector in parent_selectors:
+            for parent in _visible_locators(page, selector, limit=12):
+                found_parent = True
+                try:
+                    parent.hover(timeout=2_000)
+                except Exception:
+                    continue
+                # The platform submenu is animated after its parent is hovered.
+                page.wait_for_timeout(400)
+                entry = visible_entry()
+                if entry is not None:
+                    click_entry(entry)
+                    return
+
+        if time.monotonic() >= deadline:
+            break
+        page.wait_for_timeout(400 if not found_parent else 250)
+
+    raise UploadBlockedError(
+        "Could not open the DraftListManager from the visible Content Management "
+        "navigation. No upload or save action was attempted."
+    )
+
+
+def _open_draft_list_view(
+    page: Any,
+    config: dict[str, Any],
+    selectors: dict[str, Any],
+) -> None:
+    """Navigate from the authenticated platform shell into DraftListManager."""
+    platform_url = str(
+        config.get("platform_url") or "https://channels.weixin.qq.com/platform"
+    )
+    parsed = urlparse(platform_url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "channels.weixin.qq.com"
+        or parsed.path.rstrip("/") != "/platform"
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise UploadBlockedError(
+            "platform_url must be the exact official Channels /platform shell URL."
+        )
+
+    page.goto(platform_url, wait_until="domcontentloaded", timeout=60_000)
+    _ensure_draft_list_account_identity(page, config, selectors)
+    _click_draft_list_nav_entry(page, selectors)
+    # URL changes alone are not accepted: the existing strict frame and DOM
+    # evidence remains the only proof that the dedicated draft view is active.
+    _wait_for_draft_list_view(page, selectors)
+
+
 def _draft_snapshot(page: Any, selectors: dict[str, Any]) -> dict[str, Any]:
     """Read the actual draft list only after its dedicated view is positively identified."""
     evidence = _wait_for_draft_list_view(page, selectors)
@@ -1468,12 +1579,7 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
         )
 
         draft_page = context.new_page()
-        draft_page.goto(
-            str(config["draft_list_url"]),
-            wait_until="domcontentloaded",
-            timeout=60_000,
-        )
-        _ensure_draft_list_account_identity(draft_page, config, selectors)
+        _open_draft_list_view(draft_page, config, selectors)
         before = _draft_snapshot(draft_page, selectors)
         if _matching_draft_entries(before, str(metadata["title"]), selectors):
             job["state"] = "BLOCKED_DUPLICATE_TITLE"
@@ -1527,7 +1633,7 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
         verified: list[str] = []
         after: dict[str, Any] | None = None
         for attempt in range(attempts):
-            draft_page.reload(wait_until="domcontentloaded", timeout=60_000)
+            _open_draft_list_view(draft_page, config, selectors)
             after = _draft_snapshot(draft_page, selectors)
             verified = _matching_draft_entries(after, str(metadata["title"]), selectors)
             if verified:
@@ -1623,8 +1729,7 @@ def reconcile_upload(project_root: Path, job_id: str) -> dict[str, Any]:
     playwright, browser, context = _connect_playwright(websocket_url)
     try:
         page = context.new_page()
-        page.goto(str(config["draft_list_url"]), wait_until="domcontentloaded", timeout=60_000)
-        _ensure_draft_list_account_identity(page, config, selectors)
+        _open_draft_list_view(page, config, selectors)
         after = _draft_snapshot(page, selectors)
         matches = _matching_draft_entries(after, str(job.get("title") or ""), selectors)
         prior = _matching_draft_entries(before, str(job.get("title") or ""), selectors)
