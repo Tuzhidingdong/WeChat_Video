@@ -11,6 +11,11 @@ from wechat_video.channels_uploader import (
     _approval_record,
     _matching_draft_entries,
     _validate_run_for_upload,
+    _visible_locator,
+    _fill_field,
+    _draft_save_button,
+    _video_file_input,
+    _wait_for_account_identity,
     approve_run,
 )
 from wechat_video.topic_approval import (
@@ -18,6 +23,94 @@ from wechat_video.topic_approval import (
     approve_fact_card,
     verify_fact_card_approval,
 )
+
+
+
+
+class _FakeElement:
+    def __init__(self, *, text="", attrs=None, tag="div", visible=True, enabled=True):
+        self.text = text
+        self.attrs = dict(attrs or {})
+        self.tag = tag
+        self.visible = visible
+        self.enabled = enabled
+        self.clicked = False
+
+    def is_visible(self):
+        return self.visible
+
+    def is_enabled(self):
+        return self.enabled
+
+    def get_attribute(self, name):
+        return self.attrs.get(name)
+
+    def inner_text(self, timeout=None):
+        return self.text
+
+    def input_value(self, timeout=None):
+        if self.tag in {"input", "textarea"}:
+            return self.text
+        raise ValueError("not an input element")
+
+    def fill(self, value, timeout=None):
+        self.text = value
+
+    def click(self, timeout=None):
+        self.clicked = True
+
+    def evaluate(self, expression):
+        if "tagName.toLowerCase()" in expression:
+            return self.tag
+        if "matches('a,button,[role=button]')" in expression:
+            return False
+        raise NotImplementedError(expression)
+
+
+class _FakeLocator:
+    def __init__(self, items=None):
+        self.items = list(items or [])
+
+    @property
+    def first(self):
+        return self.nth(0)
+
+    def count(self):
+        return len(self.items)
+
+    def nth(self, index):
+        return self.items[index]
+
+    def wait_for(self, state=None, timeout=None):
+        if not self.items:
+            raise TimeoutError("not found")
+
+
+class _FakeFrame:
+    def __init__(self, url, *, selectors=None, roles=None, texts=None):
+        self.url = url
+        self.selectors = dict(selectors or {})
+        self.roles = dict(roles or {})
+        self.texts = dict(texts or {})
+
+    def locator(self, selector):
+        return _FakeLocator(self.selectors.get(selector, []))
+
+    def get_by_role(self, role, name=None, exact=None):
+        return _FakeLocator(self.roles.get((role, name, exact), []))
+
+    def get_by_text(self, text, exact=None):
+        return _FakeLocator(self.texts.get((text, exact), []))
+
+
+class _FakePage:
+    def __init__(self, frames):
+        self.frames = list(frames)
+        self.main_frame = self.frames[0]
+        self.url = "https://channels.weixin.qq.com/platform/post/create"
+
+    def wait_for_timeout(self, milliseconds):
+        return None
 
 
 def _write(path: Path, value: dict) -> None:
@@ -319,3 +412,110 @@ def test_preexisting_output_without_new_short_title_uses_approved_card_title(
     assert qa["overall_status"] == "PASS"
     assert approval["approval_type"] == "local_hash_bound"
     assert approval["channels_title"] == "临界半径如何决定成核"
+
+
+def test_description_locator_matches_empty_contenteditable_in_child_iframe() -> None:
+    editor = _FakeElement(
+        text="",
+        attrs={"contenteditable": "", "data-placeholder": "添加描述"},
+        tag="div",
+    )
+    main = _FakeFrame("https://channels.weixin.qq.com/platform/post/create")
+    child = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create",
+        selectors={"[contenteditable][data-placeholder='添加描述']": [editor]},
+    )
+    page = _FakePage([main, child])
+
+    locator = _visible_locator(
+        page,
+        [
+            "[contenteditable][data-placeholder='添加描述']",
+            "[contenteditable][data-placeholder*='描述']",
+        ],
+    )
+    assert locator is editor
+
+
+def test_fill_description_in_child_iframe_contenteditable() -> None:
+    editor = _FakeElement(
+        attrs={"contenteditable": "", "data-placeholder": "添加描述"},
+        tag="div",
+    )
+    main = _FakeFrame("https://channels.weixin.qq.com/platform/post/create")
+    child = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create",
+        selectors={"[contenteditable][data-placeholder*='描述']": [editor]},
+    )
+    page = _FakePage([main, child])
+
+    _fill_field(
+        page,
+        {"description_input": ["[contenteditable][data-placeholder*='描述']"]},
+        "description_input",
+        "测试描述内容",
+    )
+    assert editor.text == "测试描述内容"
+
+
+def test_draft_save_button_is_found_inside_child_iframe() -> None:
+    save = _FakeElement(text="保存草稿", tag="button")
+    main = _FakeFrame("https://channels.weixin.qq.com/platform/post/create")
+    child = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create",
+        roles={("button", "保存草稿", True): [save]},
+    )
+    page = _FakePage([main, child])
+
+    assert _draft_save_button(
+        page, {"draft_save_button_text": ["保存草稿"]}
+    ) is save
+
+
+def test_video_file_input_is_found_in_main_frame_when_form_fields_are_in_iframe() -> None:
+    upload = _FakeElement(
+        attrs={"accept": "video/mp4,video/x-m4v,video/*", "multiple": "multiple"},
+        tag="input",
+    )
+    main = _FakeFrame(
+        "https://channels.weixin.qq.com/platform/post/create",
+        selectors={"input[type='file'][accept*='video']": [upload]},
+    )
+    child = _FakeFrame("https://channels.weixin.qq.com/micro/content/post/create")
+    page = _FakePage([main, child])
+
+    assert _video_file_input(
+        page,
+        {"video_file_input": ["input[type='file'][accept*='video']"]},
+    ) is upload
+
+
+def test_account_identity_waits_and_checks_child_frames() -> None:
+    identity = _FakeElement(text="成核生长")
+    main = _FakeFrame("https://channels.weixin.qq.com/platform/post/create")
+    child = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create",
+        texts={("成核生长", True): [identity]},
+    )
+    page = _FakePage([main, child])
+
+    assert _wait_for_account_identity(
+        page,
+        "成核生长",
+        {"account_identity": {"exact_text": "成核生长"}},
+        wait_seconds=0,
+    ) is True
+
+
+def test_live_description_selector_matches_empty_contenteditable_and_spa_wait_is_15_seconds() -> None:
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    selectors = yaml.safe_load((root / "config" / "selectors.yaml").read_text(encoding="utf-8"))
+    config = json.loads(
+        (root / "config" / "channels_upload.json").read_text(encoding="utf-8")
+    )
+    description_selectors = selectors["description_input"]
+    assert any("[contenteditable]" in item for item in description_selectors)
+    assert not any("[contenteditable='true']" in item for item in description_selectors)
+    assert config["ui_ready_timeout_seconds"] == 15

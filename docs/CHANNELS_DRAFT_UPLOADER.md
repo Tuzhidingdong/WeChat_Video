@@ -36,7 +36,7 @@ This is a one-time topic approval, not a per-video approval. Thereafter, each ge
 
 1. Double-click Open_Channels_Session.bat. It creates or reuses the dedicated Edge profile at runtime/edge-profile, with CDP bound only to 127.0.0.1.
 2. Complete the official QR login manually for the intended 「成核生长」 account.
-3. Run Inspect_Channels_UI.bat. This inventories visible controls without uploading or saving. Verify the account identity and current page controls; report selector mismatches before any upload.
+3. Run Inspect_Channels_UI.bat. The inspector waits up to 15 seconds for the signed-in account node and inventories controls separately for the top page and embedded frames without uploading, filling or saving. Verify account identity and live controls; report selector mismatches before any upload. The description editor selector matches an empty-valued contenteditable attribute, as used by the live editor.
 4. Generate/select a complete output under outputs/. The uploader requires a valid one-time Fact Card approval, strict qa_report.json overall_status=PASS, valid channels_draft.json metadata and a complete final.mp4.
 5. Double-click Save_To_Channels_Draft.bat. It selects the newest eligible output, verifies the account, snapshots the draft list, uploads one MP4, fills metadata and clicks the draft-save control exactly once.
 6. The uploader re-reads the draft list and verifies exactly one new row matching the short title and an explicit draft status. It leaves Edge open at the draft list.
@@ -65,6 +65,6 @@ Reconciliation never uploads, never clicks save and never retries. The same job 
 
 ## 7. Verification boundary
 
-GitHub Actions runs portable unit tests. The following require local Windows verification: dependency setup, Edge/CDP persistence, manual login/account identity, current live UI selectors, upload completion, preview readiness, the single save click and draft-list readback.
+GitHub Actions runs portable unit tests, including a frame-split creator-page fixture. Local Windows verification has confirmed the dedicated Edge/CDP lifecycle, the 「成核生长」 account identity, the short-title and file inputs, and the draft-save control. The remaining local Windows checks are to sync this frame-aware fix, rerun the full test suite, and then verify the live description editor and save/preview/list selectors before the first upload.
 
 A passing unit test, UI inventory or toast message is not proof of a real draft. Success means the newly-created unpublished draft has been read back from the actual account's draft list and matched to the job.

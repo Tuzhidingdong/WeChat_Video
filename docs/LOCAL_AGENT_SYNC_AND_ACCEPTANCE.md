@@ -19,7 +19,7 @@ The user has assigned all GitHub code development to the ChatGPT developer. The 
 4. Run `.venv\Scripts\python.exe -X utf8 -m pytest -q` once. Report the complete pass/fail summary. The GitHub CI workflow intentionally runs only portable tests; the local full suite also checks Windows fonts, local TTS models and the user's private voice-profile artifacts.
 5. Run the existing project preflight once only if the local runtime is already set up. Do not render another video as part of uploader acceptance.
 6. Double-click or invoke `Open_Channels_Session.bat` only to confirm that the dedicated Edge profile launches/reuses safely. If QR login is needed, let the user perform the normal login.
-7. Run `Inspect_Channels_UI.bat` after login. Report the visible button names, text-box placeholders and file-input accept types, and whether the exact account name 「成核生长」 was detected. If actual controls differ from `config/selectors.yaml`, report observed differences; do not edit the selector/code yourself.
+7. Run `Inspect_Channels_UI.bat` after login. The updated inspector waits up to 15 seconds for the SPA account node and inventories buttons, textboxes, file inputs and frame URLs across the top document and embedded frames. Report visible buttons, placeholders/data-placeholders, contenteditable attribute values, file-input accept types, and whether the exact account name 「成核生长」 was detected. Do not edit selectors or code.
 8. Verify the local profile/session/job/approval paths are ignored by Git and no credentials or browser cookies are present in tracked files.
 
 ## Do not perform these actions

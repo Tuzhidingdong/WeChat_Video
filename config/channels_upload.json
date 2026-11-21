@@ -19,12 +19,18 @@
   "title_min_chars": 6,
   "title_max_chars": 16,
   "description_max_chars": 1000,
-  "default_tags": ["#成核生长", "#科学动画", "#材料科学"],
+  "default_tags": [
+    "#成核生长",
+    "#科学动画",
+    "#材料科学"
+  ],
   "safety": {
     "allow_publish": false,
     "allow_schedule": false,
     "allow_delete": false,
     "allow_overwrite": false,
     "cdp_host": "127.0.0.1"
-  }
+  },
+  "ui_ready_timeout_seconds": 15,
+  "ui_settle_ms": 750
 }

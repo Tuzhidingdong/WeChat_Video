@@ -76,7 +76,7 @@ This one-time topic approval is the daily-production authorization. It is not re
 ### Dedicated Edge and draft upload
 
 1. Double-click Open_Channels_Session.bat and complete the normal official QR login for 「成核生长」 in the dedicated Edge window.
-2. Run Inspect_Channels_UI.bat to inventory the visible account identity, buttons, fields and file inputs. Confirm the current live selectors before upload.
+2. Run Inspect_Channels_UI.bat to inventory visible account identity, buttons, fields and file inputs across the top document and embedded form iframe. It waits up to 15 seconds for the SPA account node. Confirm the current live selectors before upload.
 3. Generate or select a complete output under outputs/. The uploader requires the one-time Fact Card approval, strict qa_report.json overall_status=PASS and valid channels_draft.json metadata.
 4. Double-click Save_To_Channels_Draft.bat. It chooses the newest eligible output, verifies the account, captures the pre-upload draft list, uploads one MP4, fills metadata and clicks the draft-save control once.
 5. It reads the draft list again and confirms exactly one new row matching the title and explicit draft status. Edge remains open at the draft list.

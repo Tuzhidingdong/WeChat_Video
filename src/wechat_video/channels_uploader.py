@@ -456,10 +456,16 @@ def open_channels_session(project_root: Path, *, wait_login_seconds: int = 5) ->
 
 
 def _body_text(page: Any) -> str:
-    try:
-        return str(page.locator("body").inner_text(timeout=5_000))
-    except Exception:
-        return ""
+    """Read visible text across the top document and all embedded frames."""
+    chunks: list[str] = []
+    for frame in _frame_contexts(page):
+        try:
+            value = str(frame.locator("body").inner_text(timeout=3_000)).strip()
+        except Exception:
+            continue
+        if value and value not in chunks:
+            chunks.append(value)
+    return "\n".join(chunks)
 
 
 def _wait_for_account_identity(
@@ -475,25 +481,27 @@ def _wait_for_account_identity(
     account_cfg = selectors.get("account_identity", {}) or {}
     selector = account_cfg.get("selector")
     exact_text = str(account_cfg.get("exact_text") or expected_name)
-    deadline = time.monotonic() + wait_seconds
+    deadline = time.monotonic() + max(0, wait_seconds)
     while True:
-        try:
-            if selector:
-                loc = page.locator(str(selector))
-                if loc.count() and loc.first.is_visible():
-                    actual = loc.first.inner_text().strip()
-                    if actual == expected_name or expected_name in actual:
-                        return True
-            loc = page.get_by_text(exact_text, exact=True)
-            if loc.count():
+        for frame in _frame_contexts(page):
+            try:
+                if selector:
+                    loc = frame.locator(str(selector))
+                    for index in range(min(loc.count(), 8)):
+                        candidate = loc.nth(index)
+                        if candidate.is_visible():
+                            actual = candidate.inner_text().strip()
+                            if actual == expected_name or expected_name in actual:
+                                return True
+                loc = frame.get_by_text(exact_text, exact=True)
                 for index in range(min(loc.count(), 8)):
                     if loc.nth(index).is_visible():
                         return True
-        except Exception:
-            pass
+            except Exception:
+                continue
         if time.monotonic() >= deadline:
             return False
-        page.wait_for_timeout(1_000)
+        page.wait_for_timeout(500)
 
 
 def _ensure_account_identity(
@@ -519,50 +527,79 @@ def _ensure_account_identity(
     )
 
 
+def _frame_contexts(page: Any) -> list[Any]:
+    """Return the top frame followed by child frames, without duplicates."""
+    try:
+        frames = list(page.frames)
+    except Exception:
+        return [page]
+    main_frame = getattr(page, "main_frame", None)
+    ordered: list[Any] = []
+    if main_frame is not None:
+        ordered.append(main_frame)
+    ordered.extend(frame for frame in frames if frame is not main_frame)
+    return ordered or [page]
+
+
+def _visible_locators(page: Any, selector: str, *, limit: int = 8) -> list[Any]:
+    visible: list[Any] = []
+    for frame in _frame_contexts(page):
+        try:
+            locator = frame.locator(str(selector))
+            for index in range(min(locator.count(), limit)):
+                candidate = locator.nth(index)
+                if candidate.is_visible():
+                    visible.append(candidate)
+        except Exception:
+            continue
+    return visible
+
+
 def _visible_locator(page: Any, selector_list: Any):
     if not isinstance(selector_list, list):
         selector_list = [selector_list] if selector_list else []
     for selector in selector_list:
-        try:
-            locator = page.locator(str(selector))
-            count = locator.count()
-            for index in range(min(count, 8)):
-                candidate = locator.nth(index)
-                if candidate.is_visible():
-                    return candidate
-        except Exception:
-            continue
+        candidates = _visible_locators(page, str(selector))
+        if candidates:
+            return candidates[0]
     return None
 
 
 def _video_file_input(page: Any, selectors: dict[str, Any]):
-    selectors_list = selectors.get("video_file_input", ["input[type='file'][accept*='video']", "input[type='file']"])
+    selectors_list = selectors.get(
+        "video_file_input",
+        ["input[type='file'][accept*='video']", "input[type='file']"],
+    )
     for selector in selectors_list:
-        try:
-            locator = page.locator(str(selector))
-            count = locator.count()
-            if not count:
-                continue
-            candidates = [locator.nth(index) for index in range(min(count, 8))]
-            video_inputs = [
-                item for item in candidates
-                if any(token in str(item.get_attribute("accept") or "").casefold()
-                       for token in ("video", "mp4"))
-            ]
-            if len(video_inputs) == 1:
-                return video_inputs[0]
-            if len(video_inputs) > 1:
-                raise UploadBlockedError(
-                    "More than one video file input is present; refusing ambiguous selection."
+        candidates = []
+        for frame in _frame_contexts(page):
+            try:
+                locator = frame.locator(str(selector))
+                candidates.extend(
+                    locator.nth(index)
+                    for index in range(min(locator.count(), 8))
                 )
-            if len(candidates) == 1:
-                return candidates[0]
-        except UploadBlockedError:
-            raise
-        except Exception:
-            continue
+            except Exception:
+                continue
+        video_inputs = [
+            item
+            for item in candidates
+            if any(
+                token in str(item.get_attribute("accept") or "").casefold()
+                for token in ("video", "mp4")
+            )
+        ]
+        if len(video_inputs) == 1:
+            return video_inputs[0]
+        if len(video_inputs) > 1:
+            raise UploadBlockedError(
+                "More than one video file input is present across the page frames; refusing ambiguous selection."
+            )
+        if len(candidates) == 1:
+            return candidates[0]
     raise UploadBlockedError(
-        "Could not identify exactly one video upload input. Inspect the page and adjust config/selectors.yaml."
+        "Could not identify exactly one video upload input across the page frames. "
+        "Inspect the page and adjust config/selectors.yaml."
     )
 
 
@@ -570,7 +607,8 @@ def _fill_field(page: Any, selectors: dict[str, Any], key: str, value: str) -> N
     locator = _visible_locator(page, selectors.get(key, []))
     if locator is None:
         raise UploadBlockedError(
-            f"Could not locate the {key} field using config/selectors.yaml; no save action was taken."
+            f"Could not locate the {key} field in any page frame using config/selectors.yaml; "
+            "no save action was taken."
         )
     locator.fill(value, timeout=10_000)
     try:
@@ -583,18 +621,39 @@ def _fill_field(page: Any, selectors: dict[str, Any], key: str, value: str) -> N
 
 def _draft_save_button(page: Any, selectors: dict[str, Any]):
     for name in selectors.get("draft_save_button_text", ["存草稿", "保存草稿"]):
-        try:
-            locator = page.get_by_role("button", name=str(name), exact=True)
-            if locator.count() == 1 and locator.first.is_visible():
-                return locator.first
-        except Exception:
-            continue
-        try:
-            locator = page.get_by_text(str(name), exact=True)
-            if locator.count() == 1 and locator.first.is_visible():
-                return locator.first
-        except Exception:
-            continue
+        matches = []
+        for frame in _frame_contexts(page):
+            try:
+                locator = frame.get_by_role("button", name=str(name), exact=True)
+                for index in range(min(locator.count(), 8)):
+                    candidate = locator.nth(index)
+                    if candidate.is_visible():
+                        matches.append(candidate)
+            except Exception:
+                continue
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise UploadBlockedError(
+                f"More than one visible '{name}' button exists across the page frames."
+            )
+
+        text_matches = []
+        for frame in _frame_contexts(page):
+            try:
+                locator = frame.get_by_text(str(name), exact=True)
+                for index in range(min(locator.count(), 8)):
+                    candidate = locator.nth(index)
+                    if candidate.is_visible():
+                        text_matches.append(candidate)
+            except Exception:
+                continue
+        if len(text_matches) == 1:
+            return text_matches[0]
+        if len(text_matches) > 1:
+            raise UploadBlockedError(
+                f"More than one visible exact '{name}' text control exists across the page frames."
+            )
     return None
 
 
@@ -642,53 +701,93 @@ def _wait_upload_ready(
 
 def _select_draft_tab(page: Any, selectors: dict[str, Any]) -> None:
     for name in selectors.get("draft_tab_text", ["草稿箱", "草稿"]):
-        try:
-            locator = page.get_by_text(str(name), exact=True)
-            if locator.count() == 1 and locator.first.is_visible():
-                locator.first.click(timeout=5_000)
+        matches = []
+        for frame in _frame_contexts(page):
+            try:
+                locator = frame.get_by_text(str(name), exact=True)
+                for index in range(min(locator.count(), 8)):
+                    candidate = locator.nth(index)
+                    if candidate.is_visible():
+                        matches.append(candidate)
+            except Exception:
+                continue
+        if len(matches) == 1:
+            matches[0].click(timeout=5_000)
+            page.wait_for_timeout(500)
+            return
+        if len(matches) > 1:
+            clickable = []
+            for candidate in matches:
+                try:
+                    if candidate.evaluate(
+                        "(el) => el.matches('a,button,[role=button]') || Boolean(el.closest('a,button,[role=button]'))"
+                    ):
+                        clickable.append(candidate)
+                except Exception:
+                    continue
+            if len(clickable) == 1:
+                clickable[0].click(timeout=5_000)
                 page.wait_for_timeout(500)
                 return
-        except Exception:
-            continue
     body = _body_text(page)
     if not any(token in body for token in ("草稿箱", "草稿")):
         raise UploadBlockedError(
-            "Could not verify the draft-list view. Inspect the account UI and adjust config/selectors.yaml."
+            "Could not verify the draft-list view across page frames. Inspect the account UI and adjust config/selectors.yaml."
         )
 
 
 def _draft_snapshot(page: Any, selectors: dict[str, Any]) -> dict[str, Any]:
     ready_selector = selectors.get("draft_list_ready_selector")
     if ready_selector:
-        page.locator(str(ready_selector)).wait_for(state="visible", timeout=15_000)
+        found = False
+        for frame in _frame_contexts(page):
+            try:
+                frame.locator(str(ready_selector)).wait_for(state="visible", timeout=2_000)
+                found = True
+                break
+            except Exception:
+                continue
+        if not found:
+            raise UploadBlockedError("The configured draft-list ready selector did not appear in any page frame.")
+
     _select_draft_tab(page, selectors)
     body = _body_text(page)
     if not any(token in body for token in ("草稿箱", "草稿")):
-        raise UploadBlockedError("The page does not identify itself as the draft list.")
+        raise UploadBlockedError("The page frames do not identify the current view as the draft list.")
+
     entries: list[str] = []
     for selector in selectors.get("draft_row_selectors", []):
-        try:
-            rows = page.locator(str(selector))
-            count = rows.count()
-            if count:
-                entries = [
-                    re.sub(r"\s+", " ", rows.nth(index).inner_text(timeout=2_000)).strip()
-                    for index in range(min(count, 500))
-                ]
-                entries = [item for item in entries if item]
-                if entries:
-                    break
-        except Exception:
-            continue
+        frame_entries: list[str] = []
+        for frame in _frame_contexts(page):
+            try:
+                rows = frame.locator(str(selector))
+                count = rows.count()
+                if count:
+                    frame_entries = [
+                        re.sub(r"\s+", " ", rows.nth(index).inner_text(timeout=2_000)).strip()
+                        for index in range(min(count, 500))
+                    ]
+                    frame_entries = [item for item in frame_entries if item]
+                    if frame_entries:
+                        break
+            except Exception:
+                continue
+        if frame_entries:
+            entries = frame_entries
+            break
+
     if not entries:
-        # A compact line snapshot is a fallback, not evidence of an individual
-        # new draft. Verification below still requires an identifiable row.
         entries = [
             re.sub(r"\s+", " ", line).strip()
             for line in body.splitlines()
             if line.strip()
         ][:500]
-    return {"captured_at": _now(), "url": page.url, "entries": entries}
+    return {
+        "captured_at": _now(),
+        "url": page.url,
+        "frame_urls": [str(getattr(frame, "url", "")) for frame in _frame_contexts(page)],
+        "entries": entries,
+    }
 
 
 def _matching_draft_entries(
@@ -1264,63 +1363,141 @@ def upload_latest_approved_run(project_root: Path) -> dict[str, Any]:
 
 
 def inspect_channels_ui(project_root: Path) -> dict[str, Any]:
-    """Return a sanitized inventory of visible controls to tune selectors locally."""
+    """Return a sanitized inventory of visible controls across all page frames."""
     project_root = project_root.resolve()
     config, selectors = _load_config(project_root)
-    session, websocket_url = ensure_edge_session(project_root, open_url=str(config["create_url"]))
+    session, websocket_url = ensure_edge_session(
+        project_root, open_url=str(config["create_url"])
+    )
     playwright, browser, context = _connect_playwright(websocket_url)
     try:
         page = context.new_page()
-        page.goto(str(config["create_url"]), wait_until="domcontentloaded", timeout=60_000)
-        page.wait_for_timeout(1_000)
-        body = _body_text(page)
-        account_verified = _wait_for_account_identity(
-            page, str(config["account_name"]), selectors, wait_seconds=0
+        page.goto(
+            str(config["create_url"]),
+            wait_until="domcontentloaded",
+            timeout=60_000,
         )
-        buttons = []
-        try:
-            loc = page.get_by_role("button")
-            for index in range(min(loc.count(), 100)):
-                item = loc.nth(index)
-                if item.is_visible():
-                    text = re.sub(r"\s+", " ", item.inner_text()).strip()
-                    if text:
-                        buttons.append(text[:100])
-        except Exception:
-            pass
-        textboxes = []
-        try:
-            loc = page.get_by_role("textbox")
-            for index in range(min(loc.count(), 100)):
-                item = loc.nth(index)
-                if item.is_visible():
-                    textboxes.append({
+        settle_ms = max(0, int(config.get("ui_settle_ms", 750)))
+        if settle_ms:
+            page.wait_for_timeout(settle_ms)
+
+        account_verified = _wait_for_account_identity(
+            page,
+            str(config["account_name"]),
+            selectors,
+            wait_seconds=max(0, int(config.get("ui_ready_timeout_seconds", 15))),
+        )
+        frames = _frame_contexts(page)
+        buttons: list[dict[str, Any]] = []
+        textboxes: list[dict[str, Any]] = []
+        files: list[dict[str, Any]] = []
+        frame_inventory: list[dict[str, Any]] = []
+        seen_buttons: set[tuple[str, str]] = set()
+        seen_textboxes: set[tuple[str, str, str]] = set()
+        for frame in frames:
+            frame_url = str(getattr(frame, "url", ""))
+            frame_buttons: list[str] = []
+            try:
+                locator = frame.locator("button, [role='button']")
+                for index in range(min(locator.count(), 150)):
+                    item = locator.nth(index)
+                    if not item.is_visible():
+                        continue
+                    label = re.sub(r"\s+", " ", item.inner_text(timeout=1_000)).strip()
+                    if not label:
+                        label = str(item.get_attribute("aria-label") or "").strip()
+                    if label:
+                        key = (frame_url, label)
+                        if key not in seen_buttons:
+                            seen_buttons.add(key)
+                            buttons.append({"text": label[:120], "frame_url": frame_url})
+                            frame_buttons.append(label[:120])
+            except Exception:
+                try:
+                    locator = frame.get_by_role("button")
+                    for index in range(min(locator.count(), 100)):
+                        item = locator.nth(index)
+                        if item.is_visible():
+                            label = re.sub(r"\s+", " ", item.inner_text(timeout=1_000)).strip()
+                            if label and (frame_url, label) not in seen_buttons:
+                                seen_buttons.add((frame_url, label))
+                                buttons.append({"text": label[:120], "frame_url": frame_url})
+                                frame_buttons.append(label[:120])
+                except Exception:
+                    pass
+
+            frame_textboxes: list[dict[str, Any]] = []
+            try:
+                locator = frame.locator(
+                    "input[type='text'], input:not([type]), textarea, [contenteditable]"
+                )
+                for index in range(min(locator.count(), 150)):
+                    item = locator.nth(index)
+                    if not item.is_visible():
+                        continue
+                    details = {
+                        "tag": str(item.evaluate("(el) => el.tagName.toLowerCase()")),
                         "placeholder": item.get_attribute("placeholder"),
+                        "data_placeholder": item.get_attribute("data-placeholder"),
                         "aria_label": item.get_attribute("aria-label"),
+                        "contenteditable": item.get_attribute("contenteditable"),
                         "role": item.get_attribute("role"),
-                    })
-        except Exception:
-            pass
-        files = []
-        try:
-            loc = page.locator("input[type='file']")
-            for index in range(min(loc.count(), 20)):
-                item = loc.nth(index)
-                files.append({"accept": item.get_attribute("accept"), "multiple": item.get_attribute("multiple")})
-        except Exception:
-            pass
-        login_hint = any(token in body for token in ("扫码登录", "微信登录", "请登录", "登录后"))
+                        "frame_url": frame_url,
+                    }
+                    identity = (
+                        frame_url,
+                        str(details.get("tag")),
+                        str(details.get("placeholder") or details.get("data_placeholder") or details.get("aria_label") or ""),
+                    )
+                    if identity not in seen_textboxes:
+                        seen_textboxes.add(identity)
+                        textboxes.append(details)
+                        frame_textboxes.append(details)
+            except Exception:
+                pass
+
+            frame_files: list[dict[str, Any]] = []
+            try:
+                locator = frame.locator("input[type='file']")
+                for index in range(min(locator.count(), 30)):
+                    item = locator.nth(index)
+                    details = {
+                        "accept": item.get_attribute("accept"),
+                        "multiple": item.get_attribute("multiple"),
+                        "frame_url": frame_url,
+                    }
+                    files.append(details)
+                    frame_files.append(details)
+            except Exception:
+                pass
+            frame_inventory.append({
+                "url": frame_url,
+                "visible_buttons": frame_buttons,
+                "visible_textboxes": frame_textboxes,
+                "file_inputs": frame_files,
+            })
+
+        body = _body_text(page)
+        login_hint = any(
+            token in body for token in ("扫码登录", "微信登录", "请登录", "登录后")
+        )
         return {
             "account_verified": account_verified,
             "manual_login_required": not account_verified and login_hint,
             "page_url": page.url,
             "page_title": page.title(),
+            "frame_count": len(frames),
+            "frames": frame_inventory,
             "visible_buttons": buttons,
             "visible_textboxes": textboxes,
             "file_inputs": files,
+            "ui_ready_timeout_seconds": int(config.get("ui_ready_timeout_seconds", 15)),
             "session_pid": session["edge_pid"],
             "session_profile": session["user_data_dir"],
-            "note": "No upload, save, publish or delete action was performed.",
+            "note": "Read-only inspection across all frames. No upload, fill, save, publish or delete action was performed.",
         }
     finally:
+        # The persistent Edge process/context is intentionally left alive.
         playwright.stop()
+
+

@@ -18,10 +18,11 @@ title_input:
   - "textarea[placeholder*='标题']"
 
 description_input:
+  - "[contenteditable][data-placeholder='添加描述']"
+  - "[contenteditable][data-placeholder*='描述']"
+  - "[contenteditable][data-placeholder*='内容']"
   - "textarea[placeholder*='描述']"
   - "textarea[placeholder*='内容']"
-  - "[contenteditable='true'][data-placeholder*='描述']"
-  - "[contenteditable='true'][data-placeholder*='内容']"
 
 draft_save_button_text:
   - "存草稿"

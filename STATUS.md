@@ -84,3 +84,9 @@ The independent branch feat/milestone-2-channels-draft-uploader contains a guard
 - Local entry points: Open_Channels_Session.bat, Inspect_Channels_UI.bat, Approve_Fact_Card.bat, Save_To_Channels_Draft.bat. Approve_Latest_Run.bat is optional per-video approval, not part of normal daily A-mode.
 
 **Not yet verified:** Windows installation, Edge/CDP persistence, QR login, live selectors, actual video upload, save-draft behavior, draft-list row reconciliation and Edge persistence after CLI exit. Do not report a real Channels draft until the new entry has been read back from the real account.
+
+## Live Edge findings and frame-aware correction
+
+Local acceptance confirmed account 「成核生长」, the 6–16 character short-title input, the MP4 file input and the 「保存草稿」 control. It also found that the description editor is inside the content iframe and has an empty-valued contenteditable attribute. The uploader has now been updated to search every frame for title/description fields, save button, preview, account identity and draft-list controls. The description selector uses attribute presence rather than requiring contenteditable="true"; UI inspection waits up to 15 seconds for the SPA account node and reports controls by frame.
+
+The first Windows report predates this correction. The latest frame-aware revision still requires one local full pytest run and a read-only UI inspection. No approval or upload has occurred.
