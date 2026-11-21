@@ -85,3 +85,15 @@ DraftListManager page. This desktop readback confirms that the web draft record
 exists; it does not independently prove that the WeChat mobile client displays
 it. Check the target phone after the run rather than treating desktop readback
 as proof of mobile visibility.
+
+
+### SPA parent-shell route compatibility
+
+Some headless Channels sessions may keep the top-level page at the exact
+`/platform` shell while the dedicated
+`/micro/content/post/draftListManager` child frame hosts the actual draft
+manager. The verifier accepts that shell route only when the child-frame path
+matches exactly and the unique visible `DraftListManager` root, active
+`草稿箱 (n)` tab, matching header count, and draft-list body container all
+pass the same DOM checks as the direct route. The ordinary video-management
+route and any other parent/child route combination remain rejected.
