@@ -1352,6 +1352,7 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
             "account_name": config["account_name"],
             "verified_draft": job["verified_draft"],
             "edge_pid": session["edge_pid"],
+            "authorization_basis": "standing_user_instruction_draft_only",
             "automatic_publication": False,
         }
     except UploadUnknownError:
