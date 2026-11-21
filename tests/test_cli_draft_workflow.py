@@ -16,7 +16,7 @@ def test_one_click_slice_a_command_uploads_the_exact_run_and_records_draft(
         json.dumps({"automatic_upload": False, "automatic_publication": False}),
         encoding="utf-8",
     )
-    (run_dir / "REVIEW.md").write_text("# Review\\n", encoding="utf-8")
+    (run_dir / "REVIEW.md").write_text("# Review\n", encoding="utf-8")
 
     calls: dict[str, object] = {}
 
