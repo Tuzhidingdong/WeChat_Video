@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import threading
 import wave
 from pathlib import Path
 
 import pytest
 
+from wechat_video import media as media_module
 from wechat_video.fact_card import FactCardError, load_fact_card
 from wechat_video.timeline import build_audio_timeline
 
@@ -108,3 +111,163 @@ def test_timeline_rejects_mixed_sample_rates(tmp_path: Path) -> None:
             output_wav=tmp_path / "narration.wav",
             ffprobe_records={"U01": {}, "U02": {}},
         )
+
+
+def test_final_video_assembly_runs_video_audio_and_mux_as_separate_stages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    scene = run_dir / "scene.mp4"
+    audio = run_dir / "final_mix.wav"
+    captions = run_dir / "captions.ass"
+    final = run_dir / "final.mp4"
+    for path in (scene, audio, captions):
+        path.write_bytes(b"input")
+
+    calls: list[tuple[str, list[str]]] = []
+
+    def fake_stage(args, *, cwd, stage_name, progress_path, **kwargs):
+        command = [str(item) for item in args]
+        calls.append((stage_name, command))
+        output = Path(command[-1])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"x" * 2048)
+        progress_path.parent.mkdir(parents=True, exist_ok=True)
+        progress_path.write_text("frame=10\nout_time_us=1000000\nprogress=end\n", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "progress=end\n", "")
+
+    monkeypatch.setattr(media_module, "_run_ffmpeg_stage", fake_stage)
+    monkeypatch.setattr(
+        media_module,
+        "_loudnorm_measurement",
+        lambda *_args: {
+            "measured_I": "-20.0",
+            "measured_TP": "-3.0",
+            "measured_LRA": "4.0",
+            "measured_thresh": "-30.0",
+            "offset": "0.0",
+        },
+    )
+    monkeypatch.setattr(media_module, "resolve_command", lambda name: f"fake-{name}")
+    monkeypatch.setattr(media_module, "_cfr_flag", lambda _exe: ["-fps_mode", "cfr"])
+
+    config = {
+        "preset_id": "test-preset",
+        "final_programme": {
+            "integrated_lufs": -16.0,
+            "true_peak_dbtp": -1.5,
+            "codec": "aac",
+            "bitrate_kbps": 192,
+            "sample_rate": 44100,
+            "channels": 1,
+        },
+    }
+    report = media_module.assemble_final_video(
+        scene,
+        audio,
+        captions,
+        final,
+        run_dir,
+        expected_frames=1800,
+        config=config,
+    )
+
+    assert [name for name, _ in calls] == [
+        "video_encode",
+        "audio_normalize",
+        "final_mux",
+    ]
+    video_command = calls[0][1]
+    audio_command = calls[1][1]
+    mux_command = calls[2][1]
+
+    assert "-vf" in video_command and "-af" not in video_command
+    assert "libx264" in video_command
+    assert video_command[video_command.index("-preset") + 1] == "medium"
+    assert video_command[video_command.index("-crf") + 1] == "19"
+    assert video_command[video_command.index("-frames:v") + 1] == "1800"
+
+    assert "-af" in audio_command and "loudnorm=I=-16.0:TP=-1.5:LRA=11:print_format=summary" in audio_command
+    assert "-vf" not in audio_command and "-vn" in audio_command
+    assert audio_command[audio_command.index("-c:a") + 1] == "aac"
+
+    assert "-c" in mux_command and mux_command[mux_command.index("-c") + 1] == "copy"
+    assert "-shortest" in mux_command
+    assert "-vf" not in mux_command and "-af" not in mux_command
+    assert final.is_file() and final.stat().st_size == 2048
+    assert report["assembly_mode"] == (
+        "separate_video_encode_audio_normalize_then_stream_copy_mux"
+    )
+    assert report["loudnorm_pass"] == "single_pass_full_programme_audio_only_stage"
+    assert [stage["stage"] for stage in report["stages"]] == [
+        "video_encode",
+        "audio_normalize",
+        "final_mux",
+    ]
+
+
+def test_ffmpeg_stage_watchdog_terminates_process_without_progress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BlockingStdout:
+        def __init__(self):
+            self.closed = threading.Event()
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            self.closed.wait()
+            raise StopIteration
+
+        def close(self):
+            self.closed.set()
+
+    class StalledProcess:
+        def __init__(self):
+            self.stdout = BlockingStdout()
+            self.returncode = None
+            self.terminated = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = -15
+            self.stdout.close()
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+            self.stdout.close()
+
+    fake_process = StalledProcess()
+    monkeypatch.setattr(
+        media_module.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: fake_process,
+    )
+    progress = tmp_path / "video.progress.txt"
+
+    with pytest.raises(
+        media_module.ExternalProcessError,
+        match="no FFmpeg progress",
+    ):
+        media_module._run_ffmpeg_stage(
+            ["fake-ffmpeg", "-y", str(tmp_path / "video.mp4")],
+            cwd=tmp_path,
+            stage_name="video_encode",
+            progress_path=progress,
+            timeout_seconds=1,
+            stall_timeout_seconds=0.01,
+        )
+
+    assert fake_process.terminated is True
+    assert progress.is_file()
+    assert progress.read_text(encoding="utf-8") == ""
