@@ -5,9 +5,12 @@ import wave
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 
 COVER_DURATION_MS = 1000
-DEFAULT_INTER_UNIT_PAUSE_MS = 280
+DEFAULT_INTER_UNIT_PAUSE_MS = 220
+UNIT_EDGE_FADE_MS = 12
 COMPREHENSION_PAUSE_MIN_MS = 500
 COMPREHENSION_PAUSE_MAX_MS = 800
 
@@ -25,6 +28,20 @@ def _round_samples_to_ms(samples: int, sample_rate: int) -> int:
 
 def _silence_bytes(frames: int, channels: int, sample_width: int) -> bytes:
     return b"\x00" * (frames * channels * sample_width)
+
+
+def _fade_pcm_edges(pcm: bytes, sample_rate: int, fade_ms: int) -> bytes:
+    """Apply short equal-power edge fades to prevent clicks at phrase boundaries."""
+    samples = np.frombuffer(pcm, dtype="<i2")
+    fade_frames = min(samples.size // 2, max(0, sample_rate * fade_ms // 1000))
+    if fade_frames <= 0:
+        return pcm
+    values = samples.astype(np.float64)
+    phase = np.linspace(0.0, np.pi / 2.0, fade_frames, endpoint=True)
+    ramp = np.sin(phase) ** 2
+    values[:fade_frames] *= ramp
+    values[-fade_frames:] *= ramp[::-1]
+    return np.clip(np.rint(values), -32768, 32767).astype("<i2").tobytes()
 
 
 def build_audio_timeline(
@@ -96,6 +113,7 @@ def build_audio_timeline(
             expected_bytes = meta["frames"] * 2
             if len(pcm) != expected_bytes:
                 raise ValueError(f"{unit['unit_id']} WAV 数据长度与帧数不一致。")
+            pcm = _fade_pcm_edges(pcm, sample_rate, UNIT_EDGE_FADE_MS)
 
             start_sample = cursor
             end_sample = start_sample + meta["frames"]
@@ -193,6 +211,11 @@ def build_audio_timeline(
         "total_duration_ms": _round_samples_to_ms(total_frames, sample_rate),
         "total_duration_seconds": total_frames / sample_rate,
         "cover_to_first_speech_gap_ms": 0,
+        "audio_boundary_transition": {
+            "inter_unit_pause_ms": DEFAULT_INTER_UNIT_PAUSE_MS,
+            "speech_edge_fade_ms": UNIT_EDGE_FADE_MS,
+            "fade_curve": "equal_power_sine_squared",
+        },
         "timing_authority": "measured WAV sample counts; ffprobe metadata retained per speech unit",
     }
 
