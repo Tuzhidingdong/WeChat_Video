@@ -25,6 +25,7 @@ from wechat_video.channels_uploader import (
     _account_identity_evidence,
     _login_required_hint,
     _collect_ui_inventory,
+    _is_headless_command,
     approve_run,
 )
 from wechat_video.topic_approval import (
@@ -34,6 +35,13 @@ from wechat_video.topic_approval import (
 )
 
 
+
+
+def test_edge_headless_mode_is_detected_without_accepting_unrelated_flags() -> None:
+    assert _is_headless_command(["msedge.exe", "--user-data-dir=C:/profile", "--headless=new"])
+    assert _is_headless_command(["msedge.exe", "--headless"])
+    assert not _is_headless_command(["msedge.exe", "--new-window", "--disable-gpu"])
+    assert not _is_headless_command(["msedge.exe", "--disable-headless-mode"])
 
 
 class _FakeElement:
