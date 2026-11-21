@@ -20,7 +20,7 @@ from typing import Any
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
-from .channels_metadata import build_channels_metadata, validate_channels_metadata
+from .channels_metadata import build_channels_metadata_for_run_dir, validate_channels_metadata
 from .topic_approval import TopicApprovalError, verify_fact_card_approval
 
 
@@ -1022,10 +1022,10 @@ def approve_run(
     script = _read_json(run_dir / "script.json")
     metadata_path = run_dir / "channels_draft.json"
     try:
-        expected_metadata = build_channels_metadata(
+        expected_metadata = build_channels_metadata_for_run_dir(
             card,
             script,
-            run_dir.name,
+            run_dir,
             account_name=str(config["account_name"]),
             tags=list(config.get("default_tags", [])),
         )
@@ -1138,10 +1138,10 @@ def _validate_run_for_upload(
     if approval.get("channels_title") and not metadata_card.get("channels_title"):
         metadata_card["channels_title"] = approval["channels_title"]
     try:
-        expected_metadata = build_channels_metadata(
+        expected_metadata = build_channels_metadata_for_run_dir(
             metadata_card,
             script,
-            run_dir.name,
+            run_dir,
             account_name=str(config["account_name"]),
             tags=list(config.get("default_tags", [])),
         )
