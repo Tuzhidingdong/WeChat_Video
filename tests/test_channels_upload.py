@@ -387,6 +387,20 @@ def test_draft_snapshot_rejects_video_management_route_even_if_nav_mentions_draf
         _draft_snapshot(page, _draft_list_test_selectors())
 
 
+def test_draft_snapshot_rejects_wrong_active_tab_even_on_draft_manager_route() -> None:
+    page = _make_draft_list_page(draft_count=0)
+    child = page.frames[1]
+    child.selectors["li.weui-desktop-tab__nav_current"] = [
+        _FakeElement(text="视频 (0)", visible=True)
+    ]
+    child.selectors["div.post-list-header"] = [
+        _FakeElement(text="视频 (0)", visible=True)
+    ]
+
+    with pytest.raises(UploadBlockedError, match="dedicated draft manager"):
+        _draft_snapshot(page, _draft_list_test_selectors())
+
+
 def test_pending_sample_requires_explicit_human_approval(tmp_path: Path) -> None:
     run_dir = _make_run(tmp_path)
     with pytest.raises(UploadBlockedError, match="Approval phrase did not match"):
