@@ -32,6 +32,9 @@ draft_save_button_text:
 # The left-nav text "草稿箱" is not used as view evidence: it is present on
 # the ordinary video-management page too.
 draft_list_path: "/platform/post/draftListManager"
+# Observed SPA shell fallback: allowed only when the child frame and all
+# DraftListManager-specific DOM evidence independently match.
+draft_list_parent_shell_path: "/platform"
 draft_list_frame_path: "/micro/content/post/draftListManager"
 draft_list_root_selector: "div.finder-page.DraftListManager"
 draft_list_active_tab_selector: "li.weui-desktop-tab__nav_current"
