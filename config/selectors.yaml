@@ -36,6 +36,13 @@ draft_list_path: "/platform/post/draftListManager"
 # DraftListManager-specific DOM evidence independently match.
 draft_list_parent_shell_path: "/platform"
 draft_list_frame_path: "/micro/content/post/draftListManager"
+# The list is mounted by the platform SPA when opened from its left navigation.
+# The parent group expands on hover; the entry click is navigation, not proof.
+draft_list_nav_parent_selectors:
+  - ".finder-ui-desktop-menu__sub__wrp"
+draft_list_nav_entry_selectors:
+  - ".finder-ui-desktop-sub-menu__item:has-text('草稿箱')"
+draft_list_nav_timeout_seconds: 20
 draft_list_root_selector: "div.finder-page.DraftListManager"
 draft_list_active_tab_selector: "li.weui-desktop-tab__nav_current"
 draft_list_header_selector: "div.post-list-header"
