@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import sys
 from pathlib import Path
 
+from .channels_uploader import (
+    UploadBlockedError,
+    approve_run,
+    inspect_channels_ui,
+    open_channels_session,
+    reconcile_upload,
+    upload_run_to_channels,
+)
 from .model_setup import download_chinese_model, download_model
 from .pipeline import run_slice_a
 from .preflight import run_preflight
@@ -19,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     root = _project_root()
     parser = argparse.ArgumentParser(
         prog="wechat-video",
-        description="WeChat science animation — Milestone 1 Slice A local proof",
+        description="WeChat science animation — local production and unpublished Channels drafts",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -59,6 +68,47 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow a pending Fact Card for a local review sample; output remains not-for-publication.",
     )
+
+    session = sub.add_parser(
+        "channels-session",
+        help="Open/reuse the dedicated Edge profile at the official Channels Assistant page.",
+    )
+    session.add_argument("--project-root", type=Path, default=root)
+    session.add_argument(
+        "--wait-login-seconds",
+        type=int,
+        default=0,
+        help="Optional bounded wait for the expected account name after manual QR login.",
+    )
+
+    inspect = sub.add_parser(
+        "channels-inspect",
+        help="Inspect visible Channels UI controls without uploading or saving anything.",
+    )
+    inspect.add_argument("--project-root", type=Path, default=root)
+
+    approve = sub.add_parser(
+        "approve-run",
+        help="Record explicit human approval of one QA-passed video and its Fact Card.",
+    )
+    approve.add_argument("--project-root", type=Path, default=root)
+    approve.add_argument("--run-dir", type=Path, required=True)
+    approve.add_argument("--approved-by", default=getpass.getuser())
+
+    upload = sub.add_parser(
+        "channels-upload",
+        help="Upload one explicitly approved, QA-passed run and save it as an unpublished draft.",
+    )
+    upload.add_argument("--project-root", type=Path, default=root)
+    upload.add_argument("--run-dir", type=Path, required=True)
+
+    reconcile = sub.add_parser(
+        "channels-reconcile",
+        help="Read-only reconciliation of a prior uncertain upload; never uploads or clicks Save.",
+    )
+    reconcile.add_argument("--project-root", type=Path, default=root)
+    reconcile.add_argument("--job-id", required=True)
+
     return parser
 
 
@@ -98,10 +148,43 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\nSlice A review package: {run_dir}")
             print(f"Video: {run_dir / 'final.mp4'}")
             print(f"Report: {run_dir / 'qa_report.json'}")
+            print(f"Channels metadata: {run_dir / 'channels_draft.json'}")
+            return 0
+        if args.command == "channels-session":
+            result = open_channels_session(
+                args.project_root.resolve(),
+                wait_login_seconds=args.wait_login_seconds,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "channels-inspect":
+            result = inspect_channels_ui(args.project_root.resolve())
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "approve-run":
+            result = approve_run(
+                args.project_root.resolve(),
+                args.run_dir,
+                approved_by=args.approved_by,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print("Local approval recorded. This exact artifact package is now eligible for draft upload.")
+            return 0
+        if args.command == "channels-upload":
+            result = upload_run_to_channels(args.project_root.resolve(), args.run_dir)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print("Verified unpublished draft. No Publish/Send action was performed.")
+            return 0
+        if args.command == "channels-reconcile":
+            result = reconcile_upload(args.project_root.resolve(), args.job_id)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         return 2
+    except UploadBlockedError as exc:
+        print(f"\nCHANNELS WORKFLOW BLOCKED: {exc}", file=sys.stderr)
+        return 2
     except Exception as exc:
-        print(f"\nSLICE A FAILED: {exc}", file=sys.stderr)
+        print(f"\nWECHAT VIDEO FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
 

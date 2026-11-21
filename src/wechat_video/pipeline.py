@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .audio_diagnostics import encoded_aac_noise_report
+from .channels_metadata import build_channels_metadata
 from .fact_card import load_fact_card, read_json, validate_script_claim_links
 from .master_config import audio_config, theme_config
 from .media import assemble_final_video, mix_final_audio, probe_media
@@ -152,6 +153,10 @@ def run_slice_a(
     shutil.copy2(source_path, run_dir / "source_record.json")
     shutil.copy2(script_path, run_dir / "script.json")
     _write_script_markdown(run_dir / "script_en.md", script)
+    _write_json(
+        run_dir / "channels_draft.json",
+        build_channels_metadata(card, script, run_id, account_name="成核生长"),
+    )
     layout = read_json(project_root / "configs" / "layout.json")
     _write_json(run_dir / "layout_profile.json", layout)
 
