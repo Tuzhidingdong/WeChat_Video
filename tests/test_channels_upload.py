@@ -216,7 +216,7 @@ def test_fact_card_approval_is_one_time_and_hash_bound_to_sources(tmp_path: Path
         source_path.read_text(encoding="utf-8") + "\n",
         encoding="utf-8",
     )
-    with pytest.raises(TopicApprovalError, match="Source record changed"):
+    with pytest.raises(TopicApprovalError, match="approved source record changed"):
         verify_fact_card_approval(tmp_path, card_path, source_path)
 
 

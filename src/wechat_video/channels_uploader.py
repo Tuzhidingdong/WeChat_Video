@@ -789,12 +789,9 @@ def approve_run(
     config, _ = _load_config(project_root)
     script = _read_json(run_dir / "script.json")
     metadata_path = run_dir / "channels_draft.json"
-    metadata_card = dict(card)
-    if approval.get("channels_title") and not metadata_card.get("channels_title"):
-        metadata_card["channels_title"] = approval["channels_title"]
     try:
         expected_metadata = build_channels_metadata(
-            metadata_card,
+            card,
             script,
             run_dir.name,
             account_name=str(config["account_name"]),
@@ -806,8 +803,7 @@ def approve_run(
         metadata = _read_json(metadata_path)
         if metadata != expected_metadata:
             raise UploadBlockedError(
-                "channels_draft.json differs from the exact approved Fact Card-derived metadata. "
-                "Do not upload edited copy; update channels_title/Fact Card and explicitly re-approve the card."
+                "channels_draft.json differs from the Fact Card-derived metadata for this run."
             )
     else:
         metadata = expected_metadata
@@ -902,13 +898,19 @@ def _validate_run_for_upload(
                 "This Fact Card has not been approved. Run approve-fact-card once before daily draft production."
             ) from exc
     metadata_path = run_dir / "channels_draft.json"
-    expected_metadata = build_channels_metadata(
-        card,
-        script,
-        run_dir.name,
-        account_name=str(config["account_name"]),
-        tags=list(config.get("default_tags", [])),
-    )
+    metadata_card = dict(card)
+    if approval.get("channels_title") and not metadata_card.get("channels_title"):
+        metadata_card["channels_title"] = approval["channels_title"]
+    try:
+        expected_metadata = build_channels_metadata(
+            metadata_card,
+            script,
+            run_dir.name,
+            account_name=str(config["account_name"]),
+            tags=list(config.get("default_tags", [])),
+        )
+    except ValueError as exc:
+        raise UploadBlockedError(f"Fact Card-derived Channels metadata is invalid: {exc}") from exc
     if metadata_path.is_file():
         metadata = _read_json(metadata_path)
         if metadata != expected_metadata:
