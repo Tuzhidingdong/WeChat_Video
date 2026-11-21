@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .audio_diagnostics import encoded_aac_noise_report
-from .channels_metadata import build_channels_metadata
+from .channels_metadata import build_channels_metadata_for_run_dir
 from .fact_card import FactCardError, load_fact_card, read_json, validate_script_claim_links
 from .master_config import audio_config, theme_config
 from .media import assemble_final_video, mix_final_audio, probe_media
@@ -36,10 +36,10 @@ def _write_channels_metadata(
     """Write deterministic draft metadata keyed to the complete output directory name."""
     _write_json(
         run_dir / "channels_draft.json",
-        build_channels_metadata(
+        build_channels_metadata_for_run_dir(
             card,
             script,
-            run_dir.name,
+            run_dir,
             account_name="成核生长",
         ),
     )
