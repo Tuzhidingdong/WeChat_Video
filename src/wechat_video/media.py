@@ -79,6 +79,21 @@ def _dbfs(value: float) -> float:
     return 20 * math.log10(value) if value > 0 else -120.0
 
 
+def _fade_audio_edges(samples: np.ndarray, sample_rate: int, fade_ms: int) -> np.ndarray:
+    """Apply a short equal-power fade to an SFX clip without changing its duration."""
+    if fade_ms <= 0 or samples.size < 2:
+        return samples
+    fade_frames = min(samples.size // 2, sample_rate * fade_ms // 1000)
+    if fade_frames <= 0:
+        return samples
+    result = samples.copy()
+    phase = np.linspace(0.0, np.pi / 2.0, fade_frames, endpoint=True)
+    ramp = np.sin(phase) ** 2
+    result[:fade_frames] *= ramp
+    result[-fade_frames:] *= ramp[::-1]
+    return result
+
+
 def _ducking_envelope(voice: np.ndarray, sample_rate: int, duck_db: float) -> np.ndarray:
     """Smooth gain envelope: full bed in gaps, reduced under active narration."""
     frame = 1024
@@ -160,6 +175,9 @@ def mix_final_audio(
     relative_db = float(sfx_cfg["relative_level_db"])
     min_db = float(sfx_cfg["min_relative_db"])
     max_db = float(sfx_cfg["max_relative_db"])
+    sfx_edge_fade_ms = int(sfx_cfg.get("edge_fade_ms", 15))
+    if sfx_edge_fade_ms < 0 or sfx_edge_fade_ms > 100:
+        raise RuntimeError("Configured SFX edge fade must be between 0 and 100 ms.")
     if not min_db <= relative_db <= max_db:
         raise RuntimeError("Configured SFX relative level is outside the allowed range.")
     window = int(rate * float(sfx_cfg["measurement_window_ms"]) / 1000)
@@ -180,6 +198,7 @@ def mix_final_audio(
                 np.frombuffer(reader.readframes(reader.getnframes()), dtype="<i2").astype(np.float64)
                 / 32768.0
             )
+        clip = _fade_audio_edges(clip, rate, sfx_edge_fade_ms)
         start = int(event["start_sample"])
         end = min(len(voice), start + len(clip))
         if end <= start:
@@ -215,6 +234,7 @@ def mix_final_audio(
                 "target_sfx_rms_dbfs": round(target_rms_db, 2),
                 "measured_sfx_rms_dbfs": round(_dbfs(float(np.sqrt(np.mean(scaled**2)))), 2),
                 "gain": round(gain, 4),
+                "edge_fade_ms": sfx_edge_fade_ms,
                 "peak_dbfs": round(_dbfs(float(np.max(np.abs(scaled)))), 2),
             }
         )
@@ -271,6 +291,7 @@ def mix_final_audio(
         "silence_diagnostics": silence_diagnostics,
         "sfx_events": sfx_reports,
         "sfx_relative_db": relative_db,
+        "sfx_edge_fade_ms": sfx_edge_fade_ms,
         "peak_dbfs": round(_dbfs(peak), 2),
         "clipped_samples": 0,
     }
