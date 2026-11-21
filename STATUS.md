@@ -76,12 +76,13 @@ The user syncs this branch, runs Setup_Slice_A.bat once, then Run_Slice_A.bat. U
 The independent branch feat/milestone-2-channels-draft-uploader contains a guarded local draft uploader. This records code presence only; it does not mark V5 milestone exit conditions or the live upload proof complete.
 
 - Deterministic channels_draft.json metadata uses the Fact Card's explicit channels_title (6–16 characters), scientific question and scope.
-- approve-fact-card provides one-time local approval of a Fact Card/source pair, bound by SHA-256 and stored under ignored runtime/topic_approvals/. The tracked Fact Card status is not rewritten.
-- Every video must separately pass strict QA PASS. Daily videos do not require an additional per-video approval after the Fact Card is approved once.
+- The user has granted standing authorization for strict-QA-PASS outputs to be saved as unpublished drafts without per-video or Fact Card approval prompts. This does not authorize publication.
+- approve-fact-card remains available for the separate topic-governance decision to admit a Fact Card into the human-approved Verified Topic Pool; it is not required for draft creation.
+- Every uploaded video must still pass strict QA PASS, metadata validation, account identity verification and duplicate checks.
 - The dedicated Edge/Playwright uploader uses a local session record, semantic selector config, pre-upload draft snapshot, single save click and post-save draft-list reconciliation.
 - Ambiguous save results become UPLOAD_UNKNOWN; reconciliation is read-only and never retries.
 - The save/publish boundary is draft-only. No Publish, Send, Schedule, Delete or Overwrite operation is implemented.
-- Local entry points: Open_Channels_Session.bat, Inspect_Channels_UI.bat, Approve_Fact_Card.bat, Save_To_Channels_Draft.bat. Approve_Latest_Run.bat is optional per-video approval, not part of normal daily A-mode.
+- Local entry points: Open_Channels_Session.bat, Inspect_Channels_UI.bat, Save_To_Channels_Draft.bat and Run_And_Save_Slice_A_Draft.bat. The latter generates one Slice A review sample and uploads that exact run after strict QA PASS. Approve_Fact_Card.bat and Approve_Latest_Run.bat remain optional governance/audit routes.
 
 **Not yet verified:** Windows installation, Edge/CDP persistence, QR login, live selectors, actual video upload, save-draft behavior, draft-list row reconciliation and Edge persistence after CLI exit. Do not report a real Channels draft until the new entry has been read back from the real account.
 
