@@ -971,6 +971,7 @@ def _draft_list_view_evidence(
     video-management page. It is therefore not evidence of the current view.
     """
     page_path = str(selectors.get("draft_list_path") or "/platform/post/draftListManager")
+    shell_path = str(selectors.get("draft_list_parent_shell_path") or "/platform")
     frame_path = str(
         selectors.get("draft_list_frame_path")
         or "/micro/content/post/draftListManager"
@@ -978,7 +979,16 @@ def _draft_list_view_evidence(
     parsed_page = urlparse(str(getattr(page, "url", "")))
     if parsed_page.hostname != "channels.weixin.qq.com":
         return None
-    if parsed_page.path.rstrip("/") != page_path.rstrip("/"):
+    normalized_page_path = parsed_page.path.rstrip("/") or "/"
+    if normalized_page_path == page_path.rstrip("/"):
+        page_route_mode = "direct_draft_route"
+    elif normalized_page_path == shell_path.rstrip("/"):
+        # Some Channels SPA/headless sessions retain the platform shell URL
+        # while the dedicated draft manager is loaded in its own child frame.
+        # This is only a route-shell allowance: all frame and DraftListManager
+        # DOM checks below remain mandatory.
+        page_route_mode = "platform_shell_with_verified_draft_frame"
+    else:
         return None
 
     for frame in _frame_contexts(page):
@@ -1022,6 +1032,7 @@ def _draft_list_view_evidence(
         return {
             "frame": frame,
             "page_path": parsed_page.path,
+            "page_route_mode": page_route_mode,
             "frame_path": parsed_frame.path,
             "active_tab_text": active_texts[0],
             "header_text": header_texts[0],
@@ -1058,7 +1069,8 @@ def _wait_for_draft_list_view(
     ]
     raise UploadBlockedError(
         "The page could not be verified as the dedicated draft manager. "
-        "Expected page path '/platform/post/draftListManager', child frame path "
+        "Expected page path '/platform/post/draftListManager' or the exact "
+        "platform shell '/platform' with child frame path "
         "'/micro/content/post/draftListManager', DraftListManager root, selected "
         "'草稿箱 (n)' tab/header, and the draft-list body container. "
         f"Current page URL: {getattr(page, 'url', '')}; frame URLs: {frame_urls}"
@@ -1109,6 +1121,7 @@ def _draft_snapshot(page: Any, selectors: dict[str, Any]) -> dict[str, Any]:
         "view_verified": True,
         "view_evidence": {
             "page_path": evidence["page_path"],
+            "page_route_mode": evidence["page_route_mode"],
             "frame_path": evidence["frame_path"],
             "active_tab_text": evidence["active_tab_text"],
             "header_text": evidence["header_text"],
