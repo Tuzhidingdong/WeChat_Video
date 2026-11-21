@@ -1,5 +1,5 @@
 {
-  "profile_id": "wechat_channels_portrait_slice_a_v1",
+  "profile_id": "wechat_channels_portrait_slice_a_bilingual_v2",
   "canvas": {
     "width": 1080,
     "height": 1920,
@@ -8,28 +8,37 @@
   },
   "safe_zones": {
     "top_reserved_percent": 10,
-    "science_content_top_percent": 10,
-    "science_content_bottom_percent": 68,
+    "science_content_top_percent": 20,
+    "science_content_bottom_percent": 66,
     "subtitle_top_percent": 68,
     "subtitle_bottom_percent": 78,
     "bottom_ui_reserved_percent": 22,
-    "left_margin_percent": 5,
+    "left_margin_percent": 15,
     "right_reserved_percent": 15
   },
   "subtitle": {
-    "font_size": 46,
-    "outline": 3,
+    "latin_fonts": ["Arial", "Segoe UI", "Aptos"],
+    "cjk_fonts": ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC"],
+    "preferred_fonts": ["Arial", "Segoe UI", "Aptos"],
+    "latin_font_size": 40,
+    "cjk_font_size": 46,
+    "font_size": 40,
+    "outline": 2,
     "shadow": 1,
-    "margin_left": 72,
+    "margin_left": 162,
     "margin_right": 162,
-    "margin_vertical": 500,
-    "max_line_chars": 18,
-    "preferred_fonts": [
-      "Microsoft YaHei",
-      "SimHei",
-      "Noto Sans CJK SC",
-      "Source Han Sans SC"
-    ]
+    "margin_vertical": 0,
+    "max_line_chars": 36,
+    "max_line_chars_en": 36,
+    "max_line_chars_zh": 12,
+    "en_y_percent": 70.5,
+    "zh_y_percent": 75.5,
+    "safe_rect": {
+      "left_percent": 15,
+      "right_percent": 15,
+      "top_percent": 68,
+      "bottom_percent": 78
+    }
   },
   "manim": {
     "renderer": "cairo",
@@ -37,6 +46,13 @@
     "foreground_color": "#F4F7FB",
     "accent_color": "#61D6C8",
     "secondary_color": "#F3B85B",
-    "danger_color": "#E77A74"
+    "danger_color": "#E77A74",
+    "semantic": {
+      "favorable_color": "#61D6C8",
+      "resistance_color": "#F08A5D",
+      "critical_color": "#FFD166",
+      "neutral_color": "#F4F7FB",
+      "dim_opacity": 0.25
+    }
   }
 }

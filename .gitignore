@@ -13,6 +13,23 @@ runtime/
 media/
 *.log
 
+# Project-local tools, caches and machine-specific config
+.cache/
+tools/
+.venv-voice/
+config/tools.local.json
+
+# Private user voice data — never commit
+my_voice/
+private/
+*.pth
+*.m4a
+*.wav
+voice-runtime-requirements.txt.local
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+
 # Editor / OS
 .vscode/
 .idea/

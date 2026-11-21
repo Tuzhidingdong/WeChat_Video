@@ -1,0 +1,48 @@
+{
+  "schema_version": 2,
+  "miktex": {
+    "root": "tools/miktex-portable",
+    "bin_dir": "tools/miktex-portable/texmfs/install/miktex/bin/x64",
+    "latex": "tools/miktex-portable/texmfs/install/miktex/bin/x64/latex.exe",
+    "dvisvgm": "tools/miktex-portable/texmfs/install/miktex/bin/x64/dvisvgm.exe",
+    "kpsewhich": "tools/miktex-portable/texmfs/install/miktex/bin/x64/kpsewhich.exe",
+    "version": "25.12",
+    "installed": true,
+    "automatic_package_install": "never"
+  },
+  "ffmpeg": {
+    "root": "tools/ffmpeg",
+    "bin_dir": "tools/ffmpeg/bin",
+    "ffmpeg": "tools/ffmpeg/bin/ffmpeg.exe",
+    "ffprobe": "tools/ffmpeg/bin/ffprobe.exe",
+    "version": "9.1-essentials_build-www.gyan.dev",
+    "installed": true
+  },
+  "tts_model": {
+    "root": "assets/models/vits-piper-en_US-lessac-medium",
+    "engine": "sherpa-onnx Piper VITS",
+    "language": "en-US",
+    "voice": "en_US-lessac-medium",
+    "sample_rate": 22050,
+    "installed": true,
+    "source": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium.tar.bz2",
+    "archive_size_bytes": 67230653,
+    "archive_sha256": "9e3febfacf0abf4270172d2958bcec246032b7e88efc2720840cc80c93de334e"
+  },
+  "tts_model_zh": {
+    "root": "assets/models/vits-melo-tts-zh_en",
+    "engine": "sherpa-onnx MeloTTS",
+    "language": "zh-CN",
+    "installed": true,
+    "note": "Retained for rollback only; not the default Slice A voice."
+  },
+  "voice": {
+    "runtime": ".venv-voice",
+    "engine": "MeloTTS EN-US -> OpenVoice V2 ToneColorConverter",
+    "base_model": "assets/models/melo-en-us",
+    "converter": "tools/openvoice/checkpoints_v2",
+    "profile": "private/voice_profile",
+    "installed": false,
+    "note": "Personal voice profile is private and never committed."
+  }
+}

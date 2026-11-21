@@ -6,22 +6,22 @@
 
 - **Milestone:** 1 — Local video-production proof
 - **Slice:** A — One critical-nucleus / free-energy-barrier sample
-- **Implementation state:** Code path committed for local Windows integration testing
-- **Slice A exit condition:** NOT MET — the local MP4 has not yet been rendered and manually accepted by the user
-- **Next authorized work:** fix Slice A issues exposed by the user's local run; do not begin Slice B.
+- **Implementation state:** Final refinement v3 implemented: r³ volume caption locked by regression test, free-energy marker rises to r* then holds, Direction/Speed affirmed-vs-excluded hierarchy with visible clock strike-through, first-frame left hook particles with verified inward/outward trajectories, and a controlled no-afftdn A/B that led to disabling afftdn in the default profile. Single-pass loudnorm avoids an FFmpeg mux deadlock. A new real bilingual MP4 was rendered and passes full QA.
+- **Slice A exit condition:** NOT MET — the user must listen to the A/B voice samples and play the bilingual MP4 before accepting it.
+- **Next authorized work:** user review of voice identity/cleanliness, US-English pronunciation, bilingual subtitle legibility, motion timing, and scientific claims; do not begin Slice B.
 
 ## Implemented in this branch
 
 - Project-local Python environment bootstrap (Setup_Slice_A.bat).
 - Local-only runtime entry (Run_Slice_A.bat); no runtime package installation or network fallback.
-- Windows preflight for Python venv, Manim, FFmpeg/ffprobe, libass/loudnorm, LaTeX/dvisvgm, Chinese font, and offline TTS model files.
-- Official sherpa-onnx VITS MeloTTS zh/en model bootstrap and CPU-only offline inference.
-- Speech-unit script schema with separate raw/display/spoken forms and claim/visual-trigger links.
-- Per-unit WAV output and independent pronunciation-review WAV.
-- Measured sample counts, per-unit ffprobe metadata, explicit cover, pauses, and global audio timeline.
-- One registered Manim critical-nucleus template with cue checkpoints.
-- Static-camera portrait safe-zone profile for the first proof.
-- SRT/ASS subtitle generation and relative-path FFmpeg burn-in.
+- Windows preflight for Python venv, Manim, project-local FFmpeg/ffprobe, libass/loudnorm plus local denoise filters, portable MiKTeX LaTeX/dvisvgm, independently validated Latin and CJK fonts, and the personal OpenVoice runtime/profile.
+- Default personal English narration: one-time OpenVoice V2 target embedding from `my_voice/voice.m4a`, reused for all speech units; isolated `.venv-voice` (Python 3.9, CPU PyTorch), MeloTTS EN-US base voice; legacy Chinese and Piper voices retained for rollback only.
+- Phrase-level bilingual script schema with raw/display/spoken/zh forms, claim links, rhythm blocks, configurable pauses, and SFX triggers.
+- Per-unit converted WAV output, independent pronunciation-review WAV, and separate private A/B cleanup candidates without overwriting the active embedding.
+- Measured sample counts, per-unit ffprobe metadata, explicit cover, configurable silence, sparse SFX events, and one global audio timeline.
+- One registered Manim critical-nucleus template with continuous value-driven motion, mutually exclusive visual stages, focus dimming, and `visual_stage_manifest.json` / `motion_event_manifest.json`.
+- Static-camera portrait safe-zone profile with symmetric 15% side margins and x=0 centered content.
+- Bilingual SRT/ASS subtitles with separate Latin/CJK styles, explicit safe-zone placement, and relative-path FFmpeg burn-in.
 - Video/audio assembly and mandatory media QA.
 - Candidate Fact Card plus source records and a clear not-for-publication review status.
 - Core unit tests and GitHub Actions test workflow.

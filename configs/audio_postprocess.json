@@ -1,0 +1,96 @@
+{
+  "schema_version": 2,
+  "preset_id": "clean_voice_no_denoise_no_bed",
+  "default_profile": "clean_voice_no_denoise_no_bed",
+  "legacy_eq_preset_id": "voice_clarity_v1",
+  "required_ffmpeg_filters": ["highpass", "equalizer", "highshelf"],
+  "denoise_decision": {
+    "same_text_ab_report": "outputs/audio_ab_v3/afftdn_ab_report.json (local, ignored)",
+    "A_detail_energy_4k_to_10k": 0.000059,
+    "B_detail_energy_4k_to_10k": 0.000004,
+    "detail_retention_with_afftdn": 0.0678,
+    "noise_floor_ratio_with_afftdn": 0.2947,
+    "selected": "A_no_afftdn_eq",
+    "reason": "afftdn removes most consonant/air detail and sounds watery; the personal-voice stem has no continuous contaminant"
+  },
+  "noise_policy": {
+    "default_no_continuous_noise": true,
+    "random_noise_bed_allowed_in_default": false,
+    "preserve_true_silence_in_voice_track": true,
+    "no_gate_expander_or_agc": true,
+    "final_loudnorm_must_not_fill_gaps": true,
+    "gap_noise_ceiling_dbfs": -45.0,
+    "gap_to_speech_separation_db": 25.0
+  },
+  "denoise": {
+    "enabled": false,
+    "filter": "afftdn",
+    "nf_db": -25,
+    "reference_highpass_hz": 80,
+    "reference_nf_db": -28,
+    "opt_in_only": true,
+    "note": "disabled by default; available only as an explicit diagnostic candidate"
+  },
+  "voice_eq": {
+    "highpass_hz": 85,
+    "low_mid_hz": 300,
+    "low_mid_q": 1.5,
+    "low_mid_gain_db": -2.5,
+    "presence_hz": 4000,
+    "presence_q": 1.2,
+    "presence_gain_db": 3.0,
+    "air_hz": 9500,
+    "air_gain_db": 2.0
+  },
+  "voice_headroom": {
+    "premix_peak_ceiling_dbfs": -3.0,
+    "transparent_static_gain_only": true,
+    "compression_enabled": false
+  },
+  "sfx": {
+    "enabled": true,
+    "relative_level_db": -13.5,
+    "min_relative_db": -15.0,
+    "max_relative_db": -12.0,
+    "measurement_window_ms": 250,
+    "soft_low_frequency_only": true
+  },
+  "ambient_bed": {
+    "enabled": false,
+    "opt_in_required": true,
+    "random_noise_voice_disabled": true,
+    "diagnostic_only": true,
+    "rms_target_dbfs": -30.0,
+    "rms_min_dbfs": -33.0,
+    "rms_max_dbfs": -30.0,
+    "duck_db": 3.5,
+    "fade_ms": 800,
+    "texture": "soft_low_hiss_diagnostic_only",
+    "continuous_through_gaps": false
+  },
+  "final_programme": {
+    "integrated_lufs": -16.0,
+    "true_peak_dbtp": -1.5,
+    "sample_rate": 44100,
+    "channels": 1,
+    "codec": "aac",
+    "bitrate_kbps": 192,
+    "single_loudnorm_pass": true
+  },
+  "processing_order": [
+    "melotts_en_us_synthesis",
+    "openvoice_v2_timbre_conversion",
+    "no_post_conversion_denoise_by_default",
+    "configured_clarity_eq",
+    "voice_peak_ceiling_and_sample_measurement",
+    "global_timeline_from_processed_wavs",
+    "relative_level_sfx_mix",
+    "single_full_programme_loudnorm_and_aac_encode"
+  ],
+  "excluded_from_default_profile": [
+    "continuous_random_noise_bed",
+    "dynamic_gate",
+    "expander",
+    "automatic_gain_control"
+  ]
+}

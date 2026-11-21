@@ -12,9 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from .process import ExternalProcessError, run_checked
+from .tooling import resolve_command, tool_env
 
 
 FONT_FILE_HINTS = {
+    "Arial": ("arial.ttf", "arialbd.ttf"),
+    "Segoe UI": ("segoeui.ttf", "seguisb.ttf"),
+    "Aptos": ("aptos.ttf", "aptosb.ttf"),
     "Microsoft YaHei": ("msyh.ttc", "msyh.ttf", "msyhbd.ttc"),
     "SimHei": ("simhei.ttf",),
     "Noto Sans CJK SC": ("NotoSansCJK", "NotoSansSC"),
@@ -42,7 +46,35 @@ def _font_dirs() -> list[Path]:
     return [p for p in dirs if p.exists()]
 
 
-def find_chinese_font(preferred: list[str]) -> tuple[str, str]:
+def font_supports_chars(path: str, text: str) -> bool:
+    """Return True only when the font's cmap contains every non-space codepoint."""
+    try:
+        from fontTools.ttLib import TTCollection, TTFont
+    except ImportError as exc:  # pragma: no cover - fontTools is a declared dependency
+        raise RuntimeError("fontTools is required for glyph coverage checks.") from exc
+
+    font_path = Path(path)
+    try:
+        if font_path.suffix.lower() == ".ttc":
+            fonts = TTCollection(str(font_path)).fonts
+        else:
+            fonts = [TTFont(str(font_path))]
+        codepoints = {ord(char) for char in text if not char.isspace()}
+        for font in fonts:
+            cmap = set()
+            for table in font["cmap"].tables:
+                if table.isUnicode():
+                    cmap.update(table.cmap.keys())
+            if codepoints.issubset(cmap):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def find_font(
+    preferred: list[str], *, required_chars: str | None = None
+) -> tuple[str, str]:
     directories = _font_dirs()
     font_files = [
         path
@@ -58,6 +90,8 @@ def find_chinese_font(preferred: list[str]) -> tuple[str, str]:
             hint = hint.lower()
             for name, full_path in lowered:
                 if hint in name:
+                    if required_chars and not font_supports_chars(full_path, required_chars):
+                        continue
                     return family, full_path
 
     if platform.system() != "Windows" and shutil.which("fc-match"):
@@ -76,12 +110,14 @@ def find_chinese_font(preferred: list[str]) -> tuple[str, str]:
             if probe.returncode == 0 and probe.stdout.strip():
                 return family, probe.stdout.strip()
     raise RuntimeError(
-        "未找到可用的中文字体。请安装 Microsoft YaHei、SimHei、Noto Sans CJK SC "
-        "或 Source Han Sans SC，然后重新运行。"
+        "No preferred font was found. Check the layout profile's preferred_fonts list."
     )
 
 
-def _latex_smoke_test(latex: str, dvisvgm: str) -> dict[str, Any]:
+find_chinese_font = find_font  # backwards-compatible alias for legacy callers
+
+
+def _latex_smoke_test(latex: str, dvisvgm: str, root: Path) -> dict[str, Any]:
     tex_source = (
         r"\documentclass[preview]{standalone}" "\n"
         r"\usepackage{amsmath}" "\n"
@@ -96,6 +132,7 @@ def _latex_smoke_test(latex: str, dvisvgm: str) -> dict[str, Any]:
             [latex, "-interaction=nonstopmode", "-halt-on-error", "-no-shell-escape", "smoke.tex"],
             cwd=work,
             timeout_seconds=90,
+            env=tool_env(root),
         )
         dvi = work / "smoke.dvi"
         if not dvi.exists():
@@ -104,6 +141,7 @@ def _latex_smoke_test(latex: str, dvisvgm: str) -> dict[str, Any]:
             [dvisvgm, "--no-fonts", "--output=smoke.svg", "smoke.dvi"],
             cwd=work,
             timeout_seconds=90,
+            env=tool_env(root),
         )
         if not (work / "smoke.svg").exists():
             raise RuntimeError("dvisvgm 命令退出成功，但没有生成 smoke.svg。")
@@ -152,61 +190,119 @@ def run_preflight(
 
     required_tools = {}
     for command in ("ffmpeg", "ffprobe", "latex", "dvisvgm"):
-        path = shutil.which(command)
-        required_tools[command] = path
-        if not path:
+        try:
+            required_tools[command] = resolve_command(command, project_root)
+        except RuntimeError as exc:
             raise RuntimeError(
-                f"未找到 {command}。请按 README 的 Windows 前置条件安装并加入 PATH。"
-            )
+                f"未找到 {command}。请检查项目内工具与 config/tools.local.json。"
+            ) from exc
     report["tools"] = required_tools
 
+    ffmpeg_environment = tool_env(project_root)
     ffmpeg_version = run_checked(
-        ["ffmpeg", "-version"], timeout_seconds=20
+        [required_tools["ffmpeg"], "-version"],
+        timeout_seconds=20,
+        env=ffmpeg_environment,
     ).stdout.splitlines()[0]
     ffprobe_version = run_checked(
-        ["ffprobe", "-version"], timeout_seconds=20
+        [required_tools["ffprobe"], "-version"],
+        timeout_seconds=20,
+        env=ffmpeg_environment,
     ).stdout.splitlines()[0]
     filter_result = run_checked(
-        ["ffmpeg", "-hide_banner", "-filters"], timeout_seconds=30
+        [required_tools["ffmpeg"], "-hide_banner", "-filters"],
+        timeout_seconds=30,
+        env=ffmpeg_environment,
     )
     filter_text = filter_result.stdout + "\n" + filter_result.stderr
     if "subtitles" not in filter_text or "loudnorm" not in filter_text:
         raise RuntimeError(
             "当前 FFmpeg 缺少 subtitles/libass 或 loudnorm filter；请更换包含 libass 的构建。"
         )
+    for optional_filter in ("subtitles", "loudnorm"):
+        if optional_filter not in filter_text:
+            raise RuntimeError(f"FFmpeg is missing required filter: {optional_filter}")
+    cleanup_filters = [name for name in ("afftdn", "anlmdn") if name in filter_text]
+    if not cleanup_filters:
+        report["warnings"].append("No local audio denoise filter was detected.")
+    report["available_cleanup_filters"] = cleanup_filters
+
+    from .master_config import audio_config, theme_config
+
+    theme = theme_config(str(project_root))
+    audio_master = audio_config(str(project_root))
+    missing_filters = [
+        name for name in audio_master["required_ffmpeg_filters"] if name not in filter_text
+    ]
+    if missing_filters:
+        raise RuntimeError(f"FFmpeg is missing configured audio filters: {missing_filters}")
+    report["series_master"] = {
+        "theme_id": theme["theme_id"],
+        "audio_preset": audio_master["preset_id"],
+        "verified_ffmpeg_filters": audio_master["required_ffmpeg_filters"],
+        "default_denoise_enabled": bool(audio_master["denoise"].get("enabled", False)),
+        "default_ambient_bed_enabled": bool(audio_master["ambient_bed"].get("enabled", False)),
+    }
+    report["checks"]["series_master_config_valid"] = "PASS"
     report["ffmpeg_version"] = ffmpeg_version
     report["ffprobe_version"] = ffprobe_version
     report["checks"]["ffmpeg_ffprobe_libass_loudnorm"] = "PASS"
 
-    latex_report = _latex_smoke_test(required_tools["latex"], required_tools["dvisvgm"])
+    latex_report = _latex_smoke_test(
+        required_tools["latex"], required_tools["dvisvgm"], project_root
+    )
     report.update(latex_report)
     report["checks"]["latex_noninteractive_smoke"] = "PASS"
 
     layout = json.loads(
         (project_root / "configs" / "layout.json").read_text(encoding="utf-8")
     )
-    preferred = layout["subtitle"]["preferred_fonts"]
-    family, font_path = find_chinese_font(preferred)
-    report["chinese_font"] = {"family": family, "file": font_path}
-    report["checks"]["chinese_font_file_present"] = "PASS"
-
-    model_root = project_root / "assets" / "models" / "vits-melo-tts-zh_en"
-    model_files = {
-        "model": model_root / "model.onnx",
-        "lexicon": model_root / "lexicon.txt",
-        "tokens": model_root / "tokens.txt",
+    subtitle_config = layout["subtitle"]
+    latin_family, latin_path = find_font(subtitle_config["latin_fonts"])
+    cjk_chars = "成核临界半径自由能垒"
+    cjk_family, cjk_path = find_font(
+        subtitle_config["cjk_fonts"], required_chars=cjk_chars
+    )
+    report["font"] = {"family": latin_family, "file": latin_path}
+    report["font_family"] = latin_family
+    report["font_file"] = latin_path
+    report["latin_font"] = {"family": latin_family, "file": latin_path}
+    report["cjk_font"] = {
+        "family": cjk_family,
+        "file": cjk_path,
+        "verified_codepoints": cjk_chars,
     }
-    missing = [name for name, path in model_files.items() if not path.is_file()]
-    if require_tts_model and missing:
+    report["chinese_font"] = report["cjk_font"]
+    report["checks"]["latin_font_file_present"] = "PASS"
+    report["checks"]["cjk_font_glyphs_present"] = "PASS"
+
+    voice_python = project_root / ".venv-voice" / "python.exe"
+    profile_dir = project_root / "private" / "voice_profile"
+    profile_json = profile_dir / "voice_profile.json"
+    target_se = profile_dir / "target_se.pth"
+    melo_dir = project_root / "assets" / "models" / "melo-en-us"
+    converter = project_root / "tools" / "openvoice" / "checkpoints_v2" / "converter"
+    personal_paths = {
+        "voice_runtime": voice_python,
+        "voice_profile": profile_json,
+        "target_embedding": target_se,
+        "melo_en_checkpoint": melo_dir / "checkpoint.pth",
+        "openvoice_converter": converter / "checkpoint.pth",
+    }
+    missing_personal = [str(key) for key, path in personal_paths.items() if not path.is_file()]
+    if missing_personal:
         raise RuntimeError(
-            "本地离线 TTS 模型不完整，缺少："
-            + ", ".join(missing)
-            + "。首次运行请执行 Setup_Slice_A.bat 完成一次性模型下载。"
+            "Personal OpenVoice path is incomplete; missing: " + ", ".join(missing_personal)
         )
-    report["tts_model_root"] = str(model_root)
-    report["checks"]["offline_tts_model"] = "PASS" if not missing else "NOT_READY"
-    if missing:
-        report["warnings"].append("尚未下载 sherpa-onnx MeloTTS 中文/英文模型。")
+    report["personal_voice"] = {
+        "engine": "MeloTTS EN-US -> OpenVoice V2 ToneColorConverter",
+        "provider": "cpu",
+        "runtime": str(voice_python.relative_to(project_root)),
+        "profile": str(profile_json.relative_to(project_root)),
+    }
+    report["checks"]["personal_voice_runtime_and_profile"] = "PASS"
+    report["tts_model_engine"] = "MeloTTS EN-US -> OpenVoice V2 (personal profile)"
+    report["checks"]["offline_tts_model"] = "PASS"
 
     report["checks"]["all_preflight"] = "PASS"
     return report
