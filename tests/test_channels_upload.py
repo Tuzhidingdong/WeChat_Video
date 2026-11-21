@@ -994,10 +994,17 @@ def test_live_description_selector_matches_empty_contenteditable_and_spa_wait_is
     assert config["draft_list_url"] == (
         "https://channels.weixin.qq.com/platform/post/draftListManager"
     )
+    assert config["platform_url"] == "https://channels.weixin.qq.com/platform"
     assert selectors["draft_list_path"] == "/platform/post/draftListManager"
     assert selectors["draft_list_frame_path"] == (
         "/micro/content/post/draftListManager"
     )
+    assert selectors["draft_list_nav_parent_selectors"] == [
+        ".finder-ui-desktop-menu__sub__wrp"
+    ]
+    assert selectors["draft_list_nav_entry_selectors"] == [
+        ".finder-ui-desktop-sub-menu__item:has-text('草稿箱')"
+    ]
     assert selectors["draft_list_root_selector"] == (
         "div.finder-page.DraftListManager"
     )
