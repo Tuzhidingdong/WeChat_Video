@@ -6,7 +6,7 @@
 
 - **Milestone:** 1 — Local video-production proof
 - **Slice:** A — One critical-nucleus / free-energy-barrier sample
-- **Implementation state:** Bilingual short-form upgrade implemented: cleaned personal OpenVoice voice candidate, English narration with Simplified Chinese subtitles, five rhythm blocks, continuous dynamic Manim motion, sparse local SFX, and a new real MP4 rendered on this branch.
+- **Implementation state:** Series master v1 implemented: reusable theme/audio JSON configs, configured voice clarity EQ with A/B, continuous ambient bed with ducking, relative-level SFX, dimension-correct geometry, distinct subcritical/supercritical paths, binary hook, and a new real bilingual MP4 rendered on this branch.
 - **Slice A exit condition:** NOT MET — the user must listen to the A/B voice samples and play the bilingual MP4 before accepting it.
 - **Next authorized work:** user review of voice identity/cleanliness, US-English pronunciation, bilingual subtitle legibility, motion timing, and scientific claims; do not begin Slice B.
 

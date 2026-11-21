@@ -35,6 +35,12 @@ for _key, _value in (
 for _dir in (CACHE / "temp", CACHE / "hf" / "hub", CACHE / "nltk_data"):
     _dir.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(ROOT / "tools" / "voice_shims"))
+sys.path.insert(0, str(ROOT / "src"))
+from wechat_video.master_config import (  # noqa: E402
+    audio_config,
+    denoise_filter_chain,
+    voice_eq_filter_chain,
+)
 
 OV_ROOT = ROOT / "tools" / "openvoice" / "checkpoints_v2"
 CONVERTER_DIR = OV_ROOT / "converter"
@@ -109,6 +115,62 @@ def acoustic_metrics(path: Path) -> dict[str, Any]:
         else -120.0,
         "noise_floor": round(noise_floor, 6),
         "clipping_ratio": round(float(np.mean(np.abs(values) >= 0.999)), 6),
+    }
+
+
+def spectral_bands(path: Path) -> dict[str, float]:
+    """Band-energy ratios for objective EQ diagnosis (no transcript/path data)."""
+    import numpy as np
+    import soundfile as sf
+
+    samples, rate = sf.read(str(path), dtype="float32")
+    values = np.asarray(samples, dtype=np.float32).reshape(-1)
+    if values.size == 0:
+        return {}
+    spectrum = np.abs(np.fft.rfft(values * np.hanning(values.size)))
+    freqs = np.fft.rfftfreq(values.size, 1.0 / rate)
+    total = float(np.sum(spectrum**2)) or 1.0
+    bands = {
+        "low_mid_250_350": (250, 350),
+        "presence_3500_5000": (3500, 5000),
+        "air_9000_10000": (9000, 10000),
+    }
+    return {
+        name: round(float(np.sum(spectrum[(freqs >= lo) & (freqs <= hi)] ** 2) / total), 6)
+        for name, (lo, hi) in bands.items()
+    }
+
+
+def apply_configured_eq(source: Path, target: Path) -> dict[str, Any]:
+    """Apply configured clarity EQ, verify samples, and enforce voice peak ceiling."""
+    config = audio_config()
+    chain = voice_eq_filter_chain(config)
+    _ffmpeg_filter_copy(source, target, chain)
+    before = acoustic_metrics(source)
+    after = acoustic_metrics(target)
+    if after["frames"] != before["frames"] or after["sample_rate"] != before["sample_rate"]:
+        raise RuntimeError("Configured EQ changed sample count or sample rate.")
+    ceiling = float(config["voice_headroom"]["premix_peak_ceiling_dbfs"])
+    gain_db = 0.0
+    if after["peak_dbfs"] > ceiling:
+        gain_db = round(ceiling - after["peak_dbfs"], 3)
+        limited = target.with_name(target.stem + "_limited.wav")
+        _ffmpeg_filter_copy(target, limited, f"volume={gain_db}dB")
+        limited_info = acoustic_metrics(limited)
+        if limited_info["frames"] != before["frames"]:
+            raise RuntimeError("Voice ceiling gain changed sample count.")
+        shutil.move(str(limited), str(target))
+        after = limited_info
+    return {
+        "filter_chain": chain,
+        "preset_id": config["preset_id"],
+        "frames_preserved": True,
+        "peak_dbfs_before": before["peak_dbfs"],
+        "peak_dbfs_after": after["peak_dbfs"],
+        "gain_db": gain_db,
+        "ceiling_dbfs": ceiling,
+        "bands_before": spectral_bands(source),
+        "bands_after": spectral_bands(target),
     }
 
 
@@ -367,6 +429,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
         text = unit["spoken_text"]
         base_path = base_dir / f"{unit_id}.wav"
         raw_path = raw_dir / f"{unit_id}.wav"
+        cleaned_path = raw_dir / f"{unit_id}_cleaned.wav"
         final_path = converted_dir / f"{unit_id}.wav"
         t0 = time.time()
         model.tts_to_file(text, speaker_id, str(base_path), speed=1.0)
@@ -379,11 +442,12 @@ def cmd_generate(args: argparse.Namespace) -> int:
             message="@MyShell",
         )
         if clean_converted:
-            _ffmpeg_filter_copy(raw_path, final_path, "afftdn=nf=-25")
-            if _wav_info(final_path)["frames"] != _wav_info(raw_path)["frames"]:
+            _ffmpeg_filter_copy(raw_path, cleaned_path, denoise_filter_chain())
+            if _wav_info(cleaned_path)["frames"] != _wav_info(raw_path)["frames"]:
                 raise RuntimeError(f"Post-conversion cleanup changed sample count for {unit_id}")
         else:
-            shutil.copy2(raw_path, final_path)
+            shutil.copy2(raw_path, cleaned_path)
+        eq_report = apply_configured_eq(cleaned_path, final_path)
         t2 = time.time()
         info = _wav_info(final_path)
         results.append(
@@ -393,7 +457,8 @@ def cmd_generate(args: argparse.Namespace) -> int:
                 "base_wav": str(base_path.relative_to(ROOT)),
                 "raw_converted_wav": str(raw_path.relative_to(ROOT)),
                 "final_wav": str(final_path.relative_to(ROOT)),
-                "post_conversion_cleanup": "afftdn=nf=-25" if clean_converted else "none",
+                "post_conversion_cleanup": denoise_filter_chain() if clean_converted else "none",
+                "voice_eq": eq_report,
                 **info,
                 "base_generation_seconds": round(t1 - t0, 3),
                 "conversion_seconds": round(t2 - t1, 3),
@@ -416,10 +481,12 @@ def cmd_generate(args: argparse.Namespace) -> int:
         output_path=str(raw_review),
         message="@MyShell",
     )
+    cleaned_review = raw_dir / "pronunciation_review_cleaned.wav"
     if clean_converted:
-        _ffmpeg_filter_copy(raw_review, final_review, "afftdn=nf=-25")
+        _ffmpeg_filter_copy(raw_review, cleaned_review, denoise_filter_chain())
     else:
-        shutil.copy2(raw_review, final_review)
+        shutil.copy2(raw_review, cleaned_review)
+    apply_configured_eq(cleaned_review, final_review)
 
     manifest = {
         "schema_version": 1,
@@ -431,7 +498,9 @@ def cmd_generate(args: argparse.Namespace) -> int:
         "watermark_preserved": True,
         "cleanup_steps": {
             "reference": "filtered candidate" if profile_choice == "candidate" else "original 16k mono",
-            "post_conversion": "afftdn=nf=-25" if clean_converted else "none",
+            "post_conversion": denoise_filter_chain() if clean_converted else "none",
+            "clarity_eq": voice_eq_filter_chain(),
+            "preset_id": audio_config()["preset_id"],
         },
         "units": results,
         "pronunciation_review": _wav_info(final_review),
@@ -581,6 +650,32 @@ def cmd_clean_candidate(args: argparse.Namespace) -> int:
     return 0
 
 
+AB_EQ = CANDIDATE_DIR / "ab_voice_clarity_eq.wav"
+
+
+def cmd_eq_ab(args: argparse.Namespace) -> int:
+    flat = Path(args.flat) if args.flat else AB_CLEANED
+    if not flat.is_file():
+        raise RuntimeError(f"Flat A/B source missing: {flat}")
+    eq_report = apply_configured_eq(flat, AB_EQ)
+    report = {
+        "schema_version": 1,
+        "flat_path": str(flat.relative_to(ROOT)),
+        "eq_path": str(AB_EQ.relative_to(ROOT)),
+        "flat_metrics": acoustic_metrics(flat),
+        "eq_metrics": acoustic_metrics(AB_EQ),
+        "eq_report": eq_report,
+        "flat_spectrum": spectral_bands(flat),
+        "eq_spectrum": spectral_bands(AB_EQ),
+        "human_listening_required": True,
+    }
+    (CANDIDATE_DIR / "voice_eq_ab_report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    print("EQ_AB_OK", json.dumps(report, ensure_ascii=False))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="wechat-video-voice-worker")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -590,6 +685,8 @@ def build_parser() -> argparse.ArgumentParser:
     enroll.add_argument("--force", action="store_true")
     sub.add_parser("diagnose")
     sub.add_parser("clean-candidate")
+    eq_ab = sub.add_parser("eq-ab")
+    eq_ab.add_argument("--flat", default=None)
     generate = sub.add_parser("generate")
     generate.add_argument("--script", default=str(ROOT / "content" / "sample_script.en.json"))
     generate.add_argument("--out", required=True)
@@ -608,6 +705,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_diagnose(args)
     if args.command == "clean-candidate":
         return cmd_clean_candidate(args)
+    if args.command == "eq-ab":
+        return cmd_eq_ab(args)
     if args.command == "generate":
         return cmd_generate(args)
     return 2

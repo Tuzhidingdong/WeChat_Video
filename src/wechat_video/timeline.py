@@ -179,6 +179,15 @@ def build_audio_timeline(
         "segments": segments,
         "speech_units": cue_records,
         "sfx_events": [],
+        "ambient_regions": [
+            {
+                "start_sample": segment["start_sample"],
+                "end_sample": segment["end_sample"],
+                "kind": segment["kind"],
+            }
+            for segment in segments
+            if segment["kind"] in {"cover", "silence"}
+        ],
         "rhythm_blocks": [],
         "total_sample_count": total_frames,
         "total_duration_ms": _round_samples_to_ms(total_frames, sample_rate),

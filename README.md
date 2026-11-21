@@ -17,7 +17,7 @@ One local, Windows-first golden path for a critical-nucleus / free-energy-barrie
 9. Symmetric portrait safe-zone profile (15% margins each side) and bilingual hard subtitles (ASS/SRT) with separately validated Latin and CJK fonts.
 10. FFmpeg normalization, two-pass loudness measurement/application, exact global frame trim, and final MP4 QA.
 
-The current default production script is `content/sample_script.en.json`; narration is standard US English and every cue carries a Simplified Chinese subtitle line. The original Chinese Fact Card is retained as the scientific authority and remains pending user review.
+The current default production script is `content/sample_script.en.json`; narration is standard US English and every cue carries a Simplified Chinese subtitle line. Reusable series rules live in `configs/theme_config.json` (palette, portrait grid, dimensional geometry, hook and state-curve motion) and `configs/audio_postprocess.json` (voice clarity EQ, headroom, relative SFX, ambient bed, final loudness). Both are validated by preflight and read by the production code. The original Chinese Fact Card is retained as the scientific authority and remains pending user review.
 
 This is deliberately not the full daily production product. No topic-pool manager, OpenCode authoring, Google Flow, Edge session, WeChat uploader, upload state machine, or publishing action is included in Slice A.
 

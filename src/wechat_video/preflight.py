@@ -226,6 +226,22 @@ def run_preflight(
     if not cleanup_filters:
         report["warnings"].append("No local audio denoise filter was detected.")
     report["available_cleanup_filters"] = cleanup_filters
+
+    from .master_config import audio_config, theme_config
+
+    theme = theme_config(str(project_root))
+    audio_master = audio_config(str(project_root))
+    missing_filters = [
+        name for name in audio_master["required_ffmpeg_filters"] if name not in filter_text
+    ]
+    if missing_filters:
+        raise RuntimeError(f"FFmpeg is missing configured audio filters: {missing_filters}")
+    report["series_master"] = {
+        "theme_id": theme["theme_id"],
+        "audio_preset": audio_master["preset_id"],
+        "verified_ffmpeg_filters": audio_master["required_ffmpeg_filters"],
+    }
+    report["checks"]["series_master_config_valid"] = "PASS"
     report["ffmpeg_version"] = ffmpeg_version
     report["ffprobe_version"] = ffprobe_version
     report["checks"]["ffmpeg_ffprobe_libass_loudnorm"] = "PASS"

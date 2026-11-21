@@ -76,7 +76,10 @@ def test_visual_stage_mapping_is_unique_and_manifest_consistent() -> None:
         stage["transition_start_frame"] <= stage["transition_end_frame"] <= stage["end_frame"]
         for stage in manifest["stages"]
     )
-    assert stage_for_unit(script["speech_units"][8])[0] == "critical_threshold"
+    critical_unit = next(
+        u for u in script["speech_units"] if "CRITICAL_PEAK" in u["visual_trigger_ids"]
+    )
+    assert stage_for_unit(critical_unit)[0] == "critical_threshold"
 
 
 def test_layout_uses_symmetric_portrait_content_band() -> None:
@@ -85,7 +88,7 @@ def test_layout_uses_symmetric_portrait_content_band() -> None:
     assert (canvas["width"], canvas["height"], canvas["fps"]) == (1080, 1920, 30)
     zones = layout["safe_zones"]
     assert zones["left_margin_percent"] == zones["right_reserved_percent"] == 15
-    assert (zones["science_content_top_percent"], zones["science_content_bottom_percent"]) == (10, 68)
+    assert (zones["science_content_top_percent"], zones["science_content_bottom_percent"]) == (20, 66)
     assert (zones["subtitle_top_percent"], zones["subtitle_bottom_percent"]) == (68, 78)
     family, font_path = find_font(layout["subtitle"]["preferred_fonts"])
     assert family in layout["subtitle"]["preferred_fonts"]

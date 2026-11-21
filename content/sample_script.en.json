@@ -25,16 +25,28 @@
   "speech_units": [
     {
       "unit_id": "U01",
-      "raw_text": "Tiny seeds die; larger ones grow.",
-      "display_text": "Tiny seeds die; larger ones grow.",
-      "spoken_text": "Tiny seeds die; larger ones grow.",
-      "display_text_zh": "小晶核消失，大晶核长大。",
+      "raw_text": "Tiny seeds fade—",
+      "display_text": "Tiny seeds fade—",
+      "spoken_text": "Tiny seeds fade",
+      "display_text_zh": "微小晶核消逝。",
       "claim_ids": ["CNT-04"],
       "visual_trigger_ids": ["SEED_FORM_DISSOLVE"],
       "rhythm_block_id": "HOOK",
-      "visual_keyword": "tiny vs stable",
-      "pause_after_ms": 280,
+      "visual_keyword": "failure path",
+      "pause_after_ms": 300,
       "sfx_trigger_id": "seed_flip"
+    },
+    {
+      "unit_id": "U02",
+      "raw_text": "larger crystals grow.",
+      "display_text": "larger crystals grow.",
+      "spoken_text": "larger crystals grow",
+      "display_text_zh": "较大晶体生长。",
+      "claim_ids": ["CNT-04"],
+      "visual_trigger_ids": ["SEED_GROW"],
+      "rhythm_block_id": "HOOK",
+      "visual_keyword": "success path",
+      "pause_after_ms": 280
     },
     {
       "unit_id": "U03",

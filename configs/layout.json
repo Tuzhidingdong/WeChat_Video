@@ -8,8 +8,8 @@
   },
   "safe_zones": {
     "top_reserved_percent": 10,
-    "science_content_top_percent": 10,
-    "science_content_bottom_percent": 68,
+    "science_content_top_percent": 20,
+    "science_content_bottom_percent": 66,
     "subtitle_top_percent": 68,
     "subtitle_bottom_percent": 78,
     "bottom_ui_reserved_percent": 22,

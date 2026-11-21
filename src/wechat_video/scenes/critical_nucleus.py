@@ -15,6 +15,7 @@ from manim import (
     FadeIn,
     FadeOut,
     MathTex,
+    Polygon,
     Rectangle,
     Scene,
     Text,
@@ -26,12 +27,18 @@ from manim import (
     linear,
 )
 
-from ..visual_stages import DIM_OPACITY, stage_for_unit, transition_ms
+from ..master_config import theme_color, theme_config
+from ..visual_stages import stage_for_unit, transition_ms
 
 
 FRAME_WIDTH = 9.0
 FRAME_HEIGHT = 16.0
-GRAPH_STAGES = {"free_energy_landscape", "critical_threshold", "threshold_dynamics"}
+GRAPH_STAGES = {
+    "free_energy_landscape",
+    "critical_threshold",
+    "subcritical_return",
+    "supercritical_descent",
+}
 
 
 def _bounds(profile: dict[str, Any]) -> dict[str, float]:
@@ -89,11 +96,14 @@ class CriticalNucleusScene(Scene):
         spec = json.loads(Path(spec_path).read_text(encoding="utf-8"))
         profile = spec["layout"]
         font = spec["font_family"]
-        semantics = profile["manim"]["semantic"]
-        favorable = semantics["favorable_color"]
-        resistance = semantics["resistance_color"]
-        critical = semantics["critical_color"]
-        neutral = semantics["neutral_color"]
+        theme = theme_config()
+        palette = theme["palette"]
+        favorable = palette["driving_force"]
+        resistance = palette["resistance"]
+        critical = palette["critical"]
+        neutral = palette["neutral"]
+        grid = theme["portrait_grid"]
+        focus = theme["focus_rules"]
         box = _bounds(profile)
         cx, cy = box["center_x"], box["center_y"]
         max_w = box["content_width"] - 0.3
@@ -101,41 +111,72 @@ class CriticalNucleusScene(Scene):
         assert abs(float(self.camera.frame_width) - FRAME_WIDTH) < 0.01
         assert abs(float(self.camera.frame_height) - FRAME_HEIGHT) < 0.01
 
-        # Active 0–1000 ms hook: particles assemble, the tiny embryo dissolves.
-        hook_tracker = ValueTracker(0.0)
+        badge_y = (
+            FRAME_HEIGHT / 2
+            - FRAME_HEIGHT
+            * (grid["badge_top_percent"] + grid["badge_bottom_percent"])
+            / 200
+        )
+        badge_font = spec.get("cjk_font_family", font)
+        badge = (
+            Text(theme["series_identity"]["badge_text"], font=badge_font, font_size=18,
+                 color=neutral)
+            .move_to([cx, badge_y, 0])
+            .set_opacity(0.75)
+        )
+        self.add(badge)
 
-        def seed_points() -> VGroup:
-            progress = hook_tracker.get_value()
+        # Active 0–1000 ms binary contrast: a small seed fails, a larger one grows.
+        hook_tracker = ValueTracker(0.0)
+        left_x, right_x = cx - 1.45, cx + 1.45
+
+        def side_particles(center_x: float, succeeds: bool) -> VGroup:
+            p = hook_tracker.get_value()
             dots: list[Dot] = []
             for index, (dx, dy) in enumerate(
-                [(-0.5, 0.25), (0.0, 0.45), (0.45, 0.2), (-0.35, -0.3),
-                 (0.25, -0.25), (0.6, -0.5), (-0.1, -0.55)]
+                [(-0.35, 0.25), (0.0, 0.4), (0.32, 0.2), (-0.25, -0.2),
+                 (0.2, -0.15), (0.35, -0.4), (-0.05, -0.42)]
             ):
-                appear = min(1.0, max(0.0, progress * 1.6 - index * 0.08))
-                tiny_shrink = 1.0 if progress < 0.65 else max(0.25, 1 - (progress - 0.65) * 2.0)
-                radius = 0.075 * appear * tiny_shrink
+                appear = min(1.0, max(0.0, p * 2.0 - index * 0.06))
+                if succeeds:
+                    scale = 0.7 + 0.7 * p
+                    radius = 0.07 * appear
+                    color = favorable
+                else:
+                    scale = 0.7
+                    shrink = 1.0 if p < 0.55 else max(0.0, 1 - (p - 0.55) / 0.45)
+                    radius = 0.07 * appear * shrink
+                    color = resistance
                 if radius <= 0.001:
                     continue
                 dots.append(
-                    Dot([cx + dx * (0.6 + 0.4 * progress), cy + dy, 0], radius=radius, color=neutral)
+                    Dot([center_x + dx * scale, cy + dy * scale, 0], radius=radius, color=color)
                 )
             return VGroup(*dots)
 
-        seed = always_redraw(seed_points)
-        hook_ring = always_redraw(
-            lambda: Circle(
-                radius=max(0.05, 0.95 * (0.35 + 0.65 * hook_tracker.get_value())),
-                color=critical, stroke_width=2,
-            ).move_to([cx, cy, 0])
+        left = always_redraw(lambda: side_particles(left_x, False))
+        right = always_redraw(lambda: side_particles(right_x, True))
+        reference = VGroup(
+            Circle(radius=0.72, color=neutral, stroke_width=1, stroke_opacity=0.35).move_to(
+                [left_x, cy, 0]
+            ),
+            Circle(radius=0.72, color=neutral, stroke_width=1, stroke_opacity=0.35).move_to(
+                [right_x, cy, 0]
+            ),
         )
-        hook_hint = _fit(
-            Text("Stability depends on size", font=font, font_size=24, color=neutral), max_w
-        ).move_to([cx, cy - 1.45, 0])
-        hook_group = VGroup(seed, hook_ring, hook_hint)
-        _assert_safe_zone(hook_group, "hook", box)
-        self.play(FadeIn(hook_group), run_time=0.35)
+        hook_hint = VGroup(
+            Text("fades", font=font, font_size=22, color=resistance).move_to(
+                [left_x, cy - 1.15, 0]
+            ),
+            Text("grows", font=font, font_size=22, color=favorable).move_to(
+                [right_x, cy - 1.15, 0]
+            ),
+        )
+        hook_group = VGroup(left, right, reference, hook_hint)
+        _assert_safe_zone(hook_group, "binary_hook", box)
+        self.play(FadeIn(hook_group), run_time=0.25)
         self.play(hook_tracker.animate.set_value(1.0), run_time=0.65, rate_func=linear)
-        self.play(FadeOut(hook_group), run_time=0.15)
+        self.play(FadeOut(hook_group), run_time=0.10)
 
         graph: VGroup | None = None
         current: list[Any] = []
@@ -179,7 +220,15 @@ class CriticalNucleusScene(Scene):
             for item in overlay.submobjects:
                 _assert_safe_zone(item, f"{stage_key}:{id(item) % 100}", box)
             if graph is not None:
-                graph.set_opacity(1.0 if stage_key == "free_energy_landscape" else DIM_OPACITY)
+                # Only helper context may dim; the primary curve stays fully opaque.
+                context_opacity = (
+                    focus["active_opacity"]
+                    if stage_key == "free_energy_landscape"
+                    else focus["inactive_opacity"]
+                )
+                for index in (0, 2, 3):  # axes, title, x-label
+                    graph.submobjects[index].set_opacity(context_opacity)
+                graph.submobjects[1].set_opacity(focus["primary_curve_opacity_during_motion"])
 
             transition_animations = [FadeOut(item) for item in outgoing]
             if create_graph and graph is not None:
@@ -241,6 +290,8 @@ class CriticalNucleusScene(Scene):
     ) -> tuple[VGroup, bool]:
         cx, cy = box["center_x"], box["center_y"]
         max_w = box["content_width"] - 0.3
+        theme = theme_config()
+        state_motion = theme["state_curve_motion"]
         children: list[Any] = []
         animated = False
 
@@ -249,7 +300,39 @@ class CriticalNucleusScene(Scene):
                 [cx, y, 0]
             )
 
-        if stage_key in {"particle_embryo", "crystal_growth", "takeaway"}:
+        if stage_key in {"seed_failure", "seed_success"}:
+            succeeds = stage_key == "seed_success"
+            side_x = cx + 1.45 if succeeds else cx - 1.45
+            color = favorable if succeeds else resistance
+
+            def hook_seed() -> VGroup:
+                p = tracker.get_value()
+                dots: list[Dot] = []
+                for index, (dx, dy) in enumerate(
+                    [(-0.32, 0.22), (0.0, 0.38), (0.3, 0.18), (-0.22, -0.18),
+                     (0.18, -0.12), (0.3, -0.38), (-0.04, -0.4)]
+                ):
+                    appear = min(1.0, max(0.0, p * 2.2 - index * 0.05))
+                    scale = 0.7 + 0.7 * p if succeeds else 0.7
+                    fade = max(0.0, 1 - max(0.0, p - 0.55) / 0.45) if not succeeds else 1.0
+                    radius = 0.07 * appear * fade
+                    if radius <= 0.001:
+                        continue
+                    dots.append(
+                        Dot([side_x + dx * scale, cy + dy * scale, 0], radius=radius, color=color)
+                    )
+                return VGroup(*dots)
+
+            children = [
+                always_redraw(hook_seed),
+                Circle(radius=0.72, color=neutral, stroke_width=1, stroke_opacity=0.35).move_to(
+                    [side_x, cy, 0]
+                ),
+                short_line("grows" if succeeds else "fades", color, 22, cy - 1.15),
+            ]
+            animated = True
+
+        elif stage_key in {"particle_embryo", "crystal_growth", "takeaway"}:
             def particles() -> VGroup:
                 p = tracker.get_value()
                 scale = 0.6 + 0.7 * p if stage_key != "particle_embryo" else 0.5 + 0.5 * p
@@ -294,24 +377,62 @@ class CriticalNucleusScene(Scene):
             animated = True
 
         elif stage_key in {"area_scaling", "volume_scaling"}:
-            def growth_shape() -> VGroup:
+            is_volume = stage_key == "volume_scaling"
+            dimension_key = "3D" if is_volume else "2D"
+            geometry = theme["dimension_visual_mapping"][dimension_key]["geometry"]
+
+            def iso_cube(size: float, center_x: float, center_y: float) -> VGroup:
+                s = size
+                depth = 0.35 * s
+                front = Polygon(
+                    [center_x, center_y - s / 2, 0],
+                    [center_x + s / 2, center_y, 0],
+                    [center_x, center_y + s / 2, 0],
+                    [center_x - s / 2, center_y, 0],
+                    color=favorable, stroke_width=2, fill_opacity=0.25,
+                )
+                top = Polygon(
+                    [center_x - s / 2, center_y, 0],
+                    [center_x, center_y + s / 2, 0],
+                    [center_x, center_y + s / 2 + depth, 0],
+                    [center_x - s / 2, center_y + depth, 0],
+                    color=favorable, stroke_width=2, fill_opacity=0.12,
+                )
+                side = Polygon(
+                    [center_x + s / 2, center_y, 0],
+                    [center_x + s / 2, center_y + depth, 0],
+                    [center_x, center_y + s / 2 + depth, 0],
+                    [center_x, center_y + s / 2, 0],
+                    color=favorable, stroke_width=2, fill_opacity=0.18,
+                )
+                return VGroup(front, top, side)
+
+            def dim_shape() -> VGroup:
                 p = tracker.get_value()
-                side = 0.6 + 1.6 * p if stage_key == "volume_scaling" else 0.6 + 1.3 * p
+                if is_volume:
+                    return iso_cube(0.7 + 1.3 * p, cx + 1.0, cy + 0.1)
                 return VGroup(
-                    Rectangle(width=side, height=side,
-                              color=favorable if stage_key == "volume_scaling" else resistance,
-                              stroke_width=3)
-                    .move_to([cx + (0.9 if stage_key == "volume_scaling" else -0.9), cy + 0.3, 0])
+                    Circle(
+                        radius=0.45 + 1.0 * p, color=resistance,
+                        stroke_width=4, stroke_opacity=1.0,
+                    ).move_to([cx - 1.0, cy + 0.1, 0])
                 )
 
             children = [
-                always_redraw(growth_shape),
-                short_line("r² area" if stage_key == "area_scaling" else "r³ volume",
-                           resistance if stage_key == "area_scaling" else favorable),
+                always_redraw(dim_shape),
+                short_line(
+                    "r² area" if not is_volume else "r³ volume",
+                    resistance if not is_volume else favorable,
+                ),
             ]
             animated = True
 
-        elif stage_key in {"free_energy_landscape", "critical_threshold", "threshold_dynamics"}:
+        elif stage_key in {
+            "free_energy_landscape",
+            "critical_threshold",
+            "subcritical_return",
+            "supercritical_descent",
+        }:
             if graph is None:
                 raise RuntimeError("Graph stage reached without a shared graph.")
             axes = graph[0]
@@ -323,24 +444,55 @@ class CriticalNucleusScene(Scene):
                 )
                 children = [line, marker, short_line("r*", critical, 28, cy - 1.6)]
             else:
-                def moving_marker() -> Dot:
+                subcritical = stage_key == "subcritical_return"
+                path = state_motion["subcritical" if subcritical else "supercritical"]
+
+                def moving_marker() -> VGroup:
                     p = tracker.get_value()
-                    if stage_key == "threshold_dynamics":
-                        x = 0.7 + 0.8 * p
+                    if subcritical:
+                        approach_end = 0.5
+                        if p <= approach_end:
+                            q = p / approach_end
+                            x = path["start_x"] + (path["approach_x"] - path["start_x"]) * q
+                            scale = 1.0
+                            opacity = 1.0
+                        else:
+                            q = (p - approach_end) / (1 - approach_end)
+                            x = path["approach_x"] + (path["return_x"] - path["approach_x"]) * q
+                            scale = 1.0 + (path["marker_scale_end"] - 1.0) * q
+                            opacity = 1.0 + (path["marker_fade_end"] - 1.0) * q
                     else:
-                        x = 0.2 + 1.3 * p
+                        q = p**2
+                        x = path["start_x"] + (path["end_x"] - path["start_x"]) * q
+                        scale = path["marker_scale_end"]
+                        opacity = path["marker_fade_end"]
                     y = 3 * x**2 - 2 * x**3
-                    return Dot(axes.c2p(x, y), color=critical, radius=0.09)
+                    return VGroup(
+                        Dot(axes.c2p(x, y), color=critical, radius=0.09)
+                        .scale(scale)
+                        .set_opacity(opacity)
+                    )
 
                 children = [always_redraw(moving_marker)]
             animated = True
 
         elif stage_key == "barrier_relation":
-            equation = _fit(
-                MathTex(r"\Delta G^* = \frac{16\pi\gamma^3}{3\Delta g_v^2}",
-                        font_size=40, color=critical),
-                max_w,
-            ).move_to([cx, cy + 0.2, 0])
+            roles = theme["formula_symbol_roles"]
+            equation = MathTex(
+                r"\Delta G^* = \frac{16\pi\gamma^3}{3\Delta g_v^2}",
+                font_size=40,
+                substrings_to_isolate=[r"\Delta G^*", r"\gamma^3", r"\Delta g_v^2"],
+            )
+            for token, role_key in (
+                (r"\gamma^3", "gamma"),
+                (r"\Delta g_v^2", "delta_g_v"),
+                (r"\Delta G^*", "barrier"),
+            ):
+                try:
+                    equation.get_part_by_tex(token).set_color(theme_color(roles[role_key]))
+                except (ValueError, KeyError):
+                    pass
+            equation = _fit(equation, max_w).move_to([cx, cy + 0.2, 0])
 
             def pulsing_equation() -> Any:
                 p = tracker.get_value()

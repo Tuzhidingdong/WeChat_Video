@@ -225,19 +225,56 @@ def test_qa_accepts_context_only_with_true_personal_voice(tmp_path: Path, monkey
             stderr=json.dumps({"input_i": "-16.2", "input_tp": "-1.6"}), stdout=""
         ),
     )
+    from wechat_video.master_config import audio_config, theme_config, voice_eq_filter_chain
+
+    audio_master = audio_config(str(ROOT))
+    theme_master = theme_config(str(ROOT))
     context = {
         "audio_manifest": {
             "engine": "MeloTTS EN-US -> OpenVoice V2 ToneColorConverter (CPU)",
             "voice_profile_fingerprint": "abc",
+            "cleanup_steps": {"clarity_eq": voice_eq_filter_chain(audio_master)},
         },
         "environment": {"cjk_font": {"verified_codepoints": "成核"}},
         "motion_manifest": {
             "events": [
-                {"rhythm_block_id": block} for block in
+                {"rhythm_block_id": block, "motion_type": f"motion_{block}"} for block in
                 ("HOOK", "CONFLICT", "MECHANISM", "APPLICATION", "TAKEAWAY")
             ]
+            + [
+                {
+                    "motion_type": "subcritical_return",
+                    "crosses_threshold": False,
+                    "path_end_x": 0.12,
+                    "graph_opacity_during_motion": 1.0,
+                },
+                {
+                    "motion_type": "supercritical_descent",
+                    "path_start_x": 1.08,
+                    "monotonic": True,
+                    "marker_opacity_during_motion": 1.0,
+                },
+            ]
+        },
+        "audio_master": audio_master,
+        "theme_master": theme_master,
+        "mix_report": {
+            "voice_peak_dbfs": -6.0,
+            "clipped_samples": 0,
+            "ambient_bed": {
+                "enabled": True,
+                "measured_rms_dbfs": -30.0,
+                "continuous_through_gaps": True,
+            },
+            "sfx_events": [
+                {
+                    "measured_sfx_rms_dbfs": -28.0,
+                    "local_voice_rms_dbfs": -14.5,
+                }
+            ],
         },
     }
+    timeline["speech_units"][0]["sample_count"] = 44100
     report = qa.run_qa(Path("final.mp4"), narration, timeline, 1,
                        tmp_path / "qa.json", context=context)
     statuses = {c["check"]: c["status"] for c in report["checks"]}

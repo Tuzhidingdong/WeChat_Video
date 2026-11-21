@@ -9,6 +9,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
+from .master_config import voice_eq_filter_chain
 from .media import probe_media
 from .process import run_checked
 from .tooling import resolve_command, tool_env
@@ -121,6 +122,10 @@ def _measure_final_audio_loudness(final_mp4: Path) -> dict[str, float]:
     if math.isfinite(lra):
         values["loudness_range_lu"] = lra
     return values
+
+
+def state_threshold(theme_master: dict[str, Any]) -> float:
+    return float(theme_master.get("state_curve_motion", {}).get("threshold_x", 1.0))
 
 
 def run_qa(
@@ -326,7 +331,89 @@ def run_qa(
         check(
             "motion_event_in_every_rhythm_block",
             expected_blocks.issubset(event_blocks),
-            f"blocks={sorted(event_blocks)}",
+            f"blocks={sorted(str(b) for b in event_blocks if b)}",
+        )
+
+        audio_master = context.get("audio_master", {})
+        theme_master = context.get("theme_master", {})
+        mix_report = context.get("mix_report", {})
+        check(
+            "series_master_configs_loaded",
+            bool(audio_master.get("preset_id")) and bool(theme_master.get("theme_id")),
+            f"theme={theme_master.get('theme_id')}; preset={audio_master.get('preset_id')}",
+        )
+        expected_eq = voice_eq_filter_chain(audio_master) if audio_master else ""
+        recorded_eq = str(audio_manifest.get("cleanup_steps", {}).get("clarity_eq", ""))
+        check(
+            "effective_voice_eq_matches_config",
+            bool(expected_eq) and recorded_eq == expected_eq,
+            f"recorded={recorded_eq}",
+        )
+        units = timeline["speech_units"]
+        check(
+            "processed_voice_samples_valid",
+            all(int(u.get("sample_count", 0)) > 0 for u in units),
+            f"{len(units)} units",
+        )
+        ceiling = float(
+            audio_master.get("voice_headroom", {}).get("premix_peak_ceiling_dbfs", -3.0)
+        )
+        voice_peak_dbfs = float(mix_report.get("voice_peak_dbfs", -120.0))
+        check(
+            "voice_peak_within_premix_ceiling",
+            voice_peak_dbfs <= ceiling + 0.2,
+            f"peak={voice_peak_dbfs} dBFS; ceiling={ceiling} dBFS",
+        )
+        ambient = mix_report.get("ambient_bed", {})
+        amb_cfg = audio_master.get("ambient_bed", {})
+        amb_ok = (
+            ambient.get("enabled") is True
+            and amb_cfg.get("rms_min_dbfs", -33)
+            <= float(ambient.get("measured_rms_dbfs", -120))
+            <= amb_cfg.get("rms_max_dbfs", -30)
+            and ambient.get("continuous_through_gaps") is True
+        )
+        check("ambient_bed_continuous_and_on_target", amb_ok, f"rms={ambient.get('measured_rms_dbfs')}")
+        sfx_reports = mix_report.get("sfx_events", [])
+        relative_values = [
+            float(e["measured_sfx_rms_dbfs"]) - float(e["local_voice_rms_dbfs"])
+            for e in sfx_reports
+            if "measured_sfx_rms_dbfs" in e and "local_voice_rms_dbfs" in e
+        ]
+        sfx_cfg = audio_master.get("sfx", {})
+        sfx_ok = bool(relative_values) and all(
+            float(sfx_cfg.get("min_relative_db", -15)) <= value <= float(
+                sfx_cfg.get("max_relative_db", -12)
+            )
+            for value in relative_values
+        )
+        check("sfx_relative_level_in_range", sfx_ok, f"levels={[round(v, 2) for v in relative_values]}")
+        check(
+            "final_mix_has_no_clipped_samples",
+            int(mix_report.get("clipped_samples", -1)) == 0,
+            f"clipped={mix_report.get('clipped_samples')}",
+        )
+        by_type = {e.get("motion_type"): e for e in motion.get("events", [])}
+        sub = by_type.get("subcritical_return", {})
+        sup = by_type.get("supercritical_descent", {})
+        threshold = float(state_threshold(theme_master))
+        path_ok = (
+            bool(sub)
+            and bool(sup)
+            and sub.get("crosses_threshold") is False
+            and float(sub.get("path_end_x", 1)) < threshold
+            and float(sup.get("path_start_x", 0)) > threshold
+            and sup.get("monotonic") is True
+            and float(sub.get("graph_opacity_during_motion", 0)) == 1.0
+            and float(sup.get("marker_opacity_during_motion", 0)) == 1.0
+        )
+        check(
+            "state_curve_paths_and_focus_valid",
+            path_ok,
+            f"sub_end={sub.get('path_end_x')}; sub_crosses={sub.get('crosses_threshold')}; "
+            f"sup_start={sup.get('path_start_x')}; sup_monotonic={sup.get('monotonic')}; "
+            f"graph_opacity={sub.get('graph_opacity_during_motion')}; "
+            f"marker_opacity={sup.get('marker_opacity_during_motion')}; threshold={threshold}",
         )
 
     failures = [item for item in checks if item["status"] == "FAIL"]

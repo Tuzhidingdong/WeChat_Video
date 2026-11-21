@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "theme_id": "chenghe-growth-shortform-v1",
+  "series_identity": {
+    "series_name_zh": "成核生长",
+    "badge_text": "CLASSICAL NUCLEATION · 经典成核"
+  },
+  "palette": {
+    "resistance": "#F08A5D",
+    "driving_force": "#61D6C8",
+    "critical": "#FFD166",
+    "neutral": "#F4F7FB"
+  },
+  "semantic_roles": {
+    "resistance": ["surface energy cost", "interface", "activation barrier", "loss", "positive cost"],
+    "driving_force": ["bulk free-energy gain", "favorable contribution", "thermodynamic driving force", "negative contribution"],
+    "critical": ["critical radius", "critical point", "threshold marker", "decisive result", "barrier quantity"],
+    "neutral": ["axes", "context", "secondary annotation", "grid"]
+  },
+  "portrait_grid": {
+    "badge_top_percent": 10,
+    "badge_bottom_percent": 16,
+    "science_top_percent": 20,
+    "science_bottom_percent": 66,
+    "subtitle_top_percent": 68,
+    "subtitle_bottom_percent": 78,
+    "bottom_ui_reserve_percent": 20,
+    "right_ui_reserve_percent": 15,
+    "left_science_margin_percent": 15,
+    "right_science_margin_percent": 15
+  },
+  "subtitle_rules": {
+    "languages": ["en", "zh-Hans"],
+    "lines_per_cue": 2,
+    "en_max_words_per_line": 6,
+    "zh_max_chars_per_line": 12,
+    "en_font_role": "latin",
+    "zh_font_role": "cjk",
+    "phrase_level_timing": true,
+    "word_level_karaoke": false
+  },
+  "dimension_visual_mapping": {
+    "1D": {
+      "scaling_exponent": 1,
+      "geometry": "line_segment_or_vector_arrow",
+      "description": "linear length or time; use a one-dimensional ruler or arrow"
+    },
+    "2D": {
+      "scaling_exponent": 2,
+      "geometry": "annulus_or_surface_membrane",
+      "description": "area or interface; use a ring, plane, polygon or highlighted surface layer"
+    },
+    "3D": {
+      "scaling_exponent": 3,
+      "geometry": "isometric_cube_with_depth",
+      "description": "volume or bulk; use a depth-shaded isometric solid, sphere or voxel with visible depth cues"
+    }
+  },
+  "hook_pattern": {
+    "id": "dynamic_binary_contrast",
+    "failure_side": "left",
+    "success_side": "right",
+    "failure_action": "assemble_then_contract_and_extinguish",
+    "success_action": "assemble_then_continue_growing",
+    "shared_scale_reference": true,
+    "first_frame_motion": true,
+    "static_title_card_allowed": false,
+    "badge_visible": true
+  },
+  "state_curve_motion": {
+    "curve_expression": "3*x**2 - 2*x**3",
+    "dimensionless_x": "r/r*",
+    "threshold_x": 1.0,
+    "subcritical": {
+      "start_x": 0.35,
+      "approach_x": 0.92,
+      "return_x": 0.12,
+      "crosses_threshold": false,
+      "marker_scale_end": 0.15,
+      "marker_fade_end": 0.0,
+      "easing": "reverse_after_approach"
+    },
+    "supercritical": {
+      "start_x": 1.08,
+      "end_x": 2.0,
+      "monotonic": true,
+      "easing": "p_squared",
+      "marker_scale_end": 1.0,
+      "marker_fade_end": 1.0
+    },
+    "schematic_marker": true
+  },
+  "focus_rules": {
+    "active_opacity": 1.0,
+    "inactive_opacity": 0.25,
+    "primary_curve_opacity_during_motion": 1.0,
+    "marker_opacity_during_motion": 1.0,
+    "dim_only_inactive_helpers": true
+  },
+  "motion_accent_rules": {
+    "pulse_scale": 0.06,
+    "pulse_duration_ms": 300,
+    "max_pulses_per_block": 2,
+    "static_hold_limit_ms": 2000
+  },
+  "formula_symbol_roles": {
+    "surface_term": "resistance",
+    "bulk_term": "driving_force",
+    "critical_radius": "critical",
+    "barrier": "critical",
+    "gamma": "resistance",
+    "delta_g_v": "driving_force"
+  }
+}

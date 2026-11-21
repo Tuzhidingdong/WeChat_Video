@@ -3,9 +3,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from .master_config import theme_config
+
 
 TRIGGER_TO_STAGE: dict[str, tuple[str, str]] = {
-    "SEED_FORM_DISSOLVE": ("particle_embryo", "Tiny seed forms and dissolves"),
+    "SEED_FORM_DISSOLVE": ("seed_failure", "Subcritical seed fades"),
+    "SEED_GROW": ("seed_success", "Supercritical seed grows"),
     "SEED_QUESTION": ("particle_embryo", "Critical-size question"),
     "TWO_TERMS": ("energy_competition", "Two opposing terms"),
     "SURFACE_COST": ("surface_cost", "Surface-energy cost"),
@@ -18,8 +21,8 @@ TRIGGER_TO_STAGE: dict[str, tuple[str, str]] = {
     "CRITICAL_PEAK": ("critical_threshold", "Critical-radius peak"),
     "BARRIER_EQ": ("barrier_relation", "Barrier relation"),
     "MODEL_ASSUMPTION": ("model_scope", "Model assumptions"),
-    "SUBCRITICAL_RETURN": ("threshold_dynamics", "Subcritical return"),
-    "SUPERCRITICAL_DESCENT": ("threshold_dynamics", "Supercritical descent"),
+    "SUBCRITICAL_RETURN": ("subcritical_return", "Subcritical return"),
+    "SUPERCRITICAL_DESCENT": ("supercritical_descent", "Supercritical descent"),
     "THERMO_CAVEAT": ("thermo_caveat", "Thermodynamic tendency"),
     "REAL_SYSTEMS": ("real_systems", "Real-system factors"),
     "CRYSTAL_GROW": ("crystal_growth", "Crystal growth beyond threshold"),
@@ -28,6 +31,7 @@ TRIGGER_TO_STAGE: dict[str, tuple[str, str]] = {
 
 TRIGGER_TO_MOTION: dict[str, str] = {
     "SEED_FORM_DISSOLVE": "seed_assemble_and_dissolve",
+    "SEED_GROW": "seed_assemble_and_grow",
     "SEED_QUESTION": "marker_pulse",
     "TWO_TERMS": "term_split",
     "SURFACE_COST": "surface_growth",
@@ -131,6 +135,13 @@ def build_stage_manifest(
 def build_motion_manifest(
     cues: list[dict[str, Any]], units: list[dict[str, Any]], fps: int = 30
 ) -> dict[str, Any]:
+    theme = theme_config()
+    state = theme["state_curve_motion"]
+    focus = theme["focus_rules"]
+
+    def curve_y(x: float) -> float:
+        return 3.0 * x**2 - 2.0 * x**3
+
     events: list[dict[str, Any]] = []
     for cue, unit in zip(cues, units):
         trigger = unit["visual_trigger_ids"][0]
@@ -139,21 +150,57 @@ def build_motion_manifest(
             raise ValueError(f"No motion event registered for trigger {trigger}")
         start_ms = int(cue["start_ms"])
         trans_ms = transition_ms(int(cue["end_ms"]) - start_ms)
-        events.append(
-            {
-                "event_id": f"{motion}_{unit['unit_id']}",
-                "motion_type": motion,
-                "unit_id": unit["unit_id"],
-                "rhythm_block_id": unit.get("rhythm_block_id"),
-                "trigger_id": trigger,
-                "start_ms": start_ms + trans_ms,
-                "end_ms": int(cue["end_ms"]),
-                "start_frame": round((start_ms + trans_ms) * fps / 1000),
-                "end_frame": round(int(cue["end_ms"]) * fps / 1000),
-                "dim_opacity": DIM_OPACITY,
-                "schematic_marker": motion in {"subcritical_return", "supercritical_descent"},
-            }
-        )
+        event: dict[str, Any] = {
+            "event_id": f"{motion}_{unit['unit_id']}",
+            "motion_type": motion,
+            "unit_id": unit["unit_id"],
+            "rhythm_block_id": unit.get("rhythm_block_id"),
+            "trigger_id": trigger,
+            "start_ms": start_ms + trans_ms,
+            "end_ms": int(cue["end_ms"]),
+            "start_frame": round((start_ms + trans_ms) * fps / 1000),
+            "end_frame": round(int(cue["end_ms"]) * fps / 1000),
+            "dim_opacity": focus["inactive_opacity"],
+            "graph_opacity_during_motion": focus["primary_curve_opacity_during_motion"],
+            "marker_opacity_during_motion": focus["marker_opacity_during_motion"],
+            "schematic_marker": state["schematic_marker"],
+        }
+        if motion == "subcritical_return":
+            path = state["subcritical"]
+            event.update(
+                {
+                    "path_start_x": path["start_x"],
+                    "path_approach_x": path["approach_x"],
+                    "path_end_x": path["return_x"],
+                    "path_start_y": round(curve_y(path["start_x"]), 5),
+                    "path_end_y": round(curve_y(path["return_x"]), 5),
+                    "direction": "approach_then_return_left",
+                    "crosses_threshold": path["crosses_threshold"],
+                    "threshold_x": state["threshold_x"],
+                    "monotonic": False,
+                    "easing": path["easing"],
+                    "marker_scale_end": path["marker_scale_end"],
+                    "marker_fade_end": path["marker_fade_end"],
+                }
+            )
+        elif motion == "supercritical_descent":
+            path = state["supercritical"]
+            event.update(
+                {
+                    "path_start_x": path["start_x"],
+                    "path_end_x": path["end_x"],
+                    "path_start_y": round(curve_y(path["start_x"]), 5),
+                    "path_end_y": round(curve_y(path["end_x"]), 5),
+                    "direction": "downhill_right",
+                    "crosses_threshold": False,
+                    "threshold_x": state["threshold_x"],
+                    "monotonic": path["monotonic"],
+                    "easing": path["easing"],
+                    "marker_scale_end": path["marker_scale_end"],
+                    "marker_fade_end": path["marker_fade_end"],
+                }
+            )
+        events.append(event)
     return {
         "schema_version": 1,
         "camera": "static portrait",

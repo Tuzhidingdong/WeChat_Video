@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .fact_card import load_fact_card, read_json, validate_script_claim_links
+from .master_config import audio_config, theme_config
 from .media import assemble_final_video, mix_final_audio, probe_media
 from .preflight import run_preflight
 from .qa import run_qa
@@ -260,6 +261,7 @@ def run_slice_a(
     scene_spec = {
         "scene_id": "scene_01_energy_competition",
         "font_family": font_family,
+        "cjk_font_family": cjk_font,
         "layout": layout,
         "total_duration_ms": timeline["total_duration_ms"],
         "cue_checkpoints": [
@@ -290,10 +292,28 @@ def run_slice_a(
 
     logger.info("Mixing narration with sparse local SFX and normalizing video.")
     final_mix = run_dir / "final_mix.wav"
+    audio_master = audio_config(str(project_root))
     mix_report = mix_final_audio(
-        narration_wav, timeline["sfx_events"], run_dir, final_mix
+        narration_wav,
+        timeline["sfx_events"],
+        run_dir,
+        final_mix,
+        config=audio_master,
+        timeline=timeline,
     )
     _write_json(run_dir / "audio_mix_report.json", mix_report)
+    eq_ab_source = (
+        project_root
+        / "private"
+        / "voice_profile"
+        / "candidates"
+        / "voice_eq_ab_report.json"
+    )
+    if eq_ab_source.is_file():
+        shutil.copy2(eq_ab_source, run_dir / "voice_eq_ab_report.json")
+    theme_master = theme_config(str(project_root))
+    _write_json(run_dir / "theme_config_snapshot.json", theme_master)
+    _write_json(run_dir / "audio_postprocess_snapshot.json", audio_master)
     expected_frames = round(
         int(timeline["total_sample_count"])
         * int(timeline["fps"])
@@ -306,6 +326,7 @@ def run_slice_a(
         run_dir / "final.mp4",
         run_dir,
         expected_frames,
+        config=audio_master,
     )
     _write_json(run_dir / "assembly_report.json", assembly)
     candidate_quality = (
@@ -332,6 +353,12 @@ def run_slice_a(
             "subtitle_layout": json.loads(
                 (run_dir / "subtitle_layout_report.json").read_text(encoding="utf-8")
             ),
+            "audio_master": audio_master,
+            "theme_master": theme_master,
+            "mix_report": mix_report,
+            "voice_eq_ab": json.loads((run_dir / "voice_eq_ab_report.json").read_text(encoding="utf-8"))
+            if (run_dir / "voice_eq_ab_report.json").is_file()
+            else None,
         },
     )
     approval_label = (
