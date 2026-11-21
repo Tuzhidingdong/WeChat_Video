@@ -847,7 +847,7 @@ def _wait_upload_ready(
     )
 
 
-_DRAFT_LIST_DOM_SCAN = r"""(config) => {
+_DRAFT_LIST_DOM_SCAN = r"""/* __CHANNELS_DRAFT_LIST_DOM_SCAN__ */ (config) => {
     const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
     const isVisible = (element) => {
         if (!element || element.hidden) return false;
