@@ -61,31 +61,27 @@ Run_Slice_A.bat uses --review-sample because the repository's initial Fact Card 
 
 The independent development branch feat/milestone-2-channels-draft-uploader adds a local draft-only uploader. It uses a project-owned Edge profile and the visible official Channels Assistant website. It does not depend on or modify WeChat_control.
 
-### One-time topic approval
+### Draft-only authorization
 
-After syncing this branch and running Setup_Slice_A.bat once, review each scientific Fact Card and source record once:
+The user has granted standing authorization for the automation to upload strict-QA-PASS videos directly as **unpublished drafts**, without a per-video or Fact Card approval prompt. This authorization never permits publishing, sending, scheduling, deleting or overwriting.
 
-1. Double-click Approve_Fact_Card.bat.
-2. Read the scientific question, model scope, claims, conditions, caveats and sources printed by the command.
-3. Type APPROVE FACT CARD <fact_card_id> only after deciding that the topic is scientifically approved.
-
-The local approval is saved under ignored runtime/topic_approvals/ and bound to SHA-256 hashes of the exact Fact Card and source record. It does not rewrite the tracked candidate card. A later change to either file invalidates the approval.
-
-This one-time topic approval is the daily-production authorization. It is not repeated for each video.
+Approve_Fact_Card.bat remains available when a Fact Card is being admitted to the human-approved Verified Topic Pool for future production. That separate topic-governance record is not required for this draft-only review workflow.
 
 ### Dedicated Edge and draft upload
 
 1. Double-click Open_Channels_Session.bat and complete the normal official QR login for 「成核生长」 in the dedicated Edge window.
-2. Run Inspect_Channels_UI.bat to inventory visible account identity, buttons, fields and file inputs across the top document and embedded form iframe. It waits up to 15 seconds for the SPA account node. Confirm the current live selectors before upload.
-3. Generate or select a complete output under outputs/. The uploader requires the one-time Fact Card approval, strict qa_report.json overall_status=PASS and valid channels_draft.json metadata.
-4. Double-click Save_To_Channels_Draft.bat. It chooses the newest eligible output, verifies the account, captures the pre-upload draft list, uploads one MP4, fills metadata and clicks the draft-save control once.
+2. Run Inspect_Channels_UI.bat to inventory visible account identity, buttons, fields and file inputs across the top document and embedded form iframe. It waits up to 15 seconds for the SPA account node.
+3. Generate or select a complete output under outputs/. The uploader requires strict qa_report.json overall_status=PASS, a complete final.mp4 and valid channels_draft.json metadata; no approval record is required.
+4. Double-click Save_To_Channels_Draft.bat to upload the newest eligible existing output. It verifies the account, captures the pre-upload draft list, uploads one MP4, fills metadata and clicks the draft-save control once.
 5. It reads the draft list again and confirms exactly one new row matching the title and explicit draft status. Edge remains open at the draft list.
+
+For a single-click Slice A test from local generation through draft read-back, double-click Run_And_Save_Slice_A_Draft.bat. It creates a fresh Slice A review sample, then uploads that exact run only if generation succeeds and strict QA reports PASS. It cannot fall back to or accidentally upload an older output.
 
 The short title is the Fact Card's explicit channels_title (6–16 characters); the longer scientific title is preserved. The description is derived only from the Fact Card's scientific question and scope.
 
-A --review-sample output remains blocked while the Fact Card has not been approved. After the user approves the exact Fact Card/source pair, an existing review-sample output can be eligible only if it has strict QA PASS and its copied source hashes match the approval. Normal daily production should use the non-review path.
+A --review-sample output may be saved as an unpublished review draft under the user's standing authorization, but it remains scientifically unapproved and must be reviewed before any manual publication. The uploader still blocks incomplete outputs, non-PASS QA, invalid metadata, wrong account identity and possible duplicates.
 
-Approve_Latest_Run.bat is an optional, stricter per-video approval route; it is not required in daily A-mode.
+Approve_Latest_Run.bat remains available as an optional audit/review record; it is not required for draft upload.
 
 If a save result is uncertain, use read-only channels-reconcile; never blindly upload again. The uploader never publishes, schedules, deletes or overwrites.
 
