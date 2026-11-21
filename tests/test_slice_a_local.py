@@ -13,6 +13,7 @@ from wechat_video.fact_card import (
     validate_script_claim_links,
 )
 from wechat_video.model_setup import _model_dir_valid
+from wechat_video.pipeline import _write_channels_metadata
 from wechat_video.preflight import find_font
 from wechat_video.subtitles import _wrap_text, write_subtitles
 from wechat_video.tooling import model_root
@@ -30,6 +31,29 @@ def _layout() -> dict:
 
 def _english_script() -> dict:
     return json.loads((ROOT / "content" / "sample_script.en.json").read_text(encoding="utf-8"))
+
+
+
+
+def test_channels_metadata_job_id_matches_complete_run_directory(tmp_path: Path) -> None:
+    run_dir = tmp_path / "outputs" / "20261121_195519_critical_nucleus"
+    run_dir.mkdir(parents=True)
+    card = {
+        "fact_card_id": "TEST-CNT-001",
+        "title": "临界晶核自由能",
+        "channels_title": "临界半径如何决定成核",
+        "scientific_question": "为什么小晶核可能消失，而较大的晶核可能继续长大？",
+        "scope": "仅讨论经典均匀成核理论中的球形晶核近似。",
+    }
+    script = {"script_id": "TEST-SCRIPT-001"}
+
+    _write_channels_metadata(run_dir, card, script)
+
+    metadata = json.loads(
+        (run_dir / "channels_draft.json").read_text(encoding="utf-8")
+    )
+    assert metadata["job_id"] == run_dir.name
+    assert metadata["title"] == card["channels_title"]
 
 
 def test_repository_fact_card_gate_blocks_pending_card() -> None:
