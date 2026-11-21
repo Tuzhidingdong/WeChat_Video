@@ -13,9 +13,9 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 echo.
-echo Uploading the newest strict-QA-PASS video whose Fact Card has been approved once.
+echo Uploading the newest complete strict-QA-PASS video under standing draft-only authorization.
 echo It will be saved as an UNPUBLISHED draft; the user alone publishes manually.
-echo The uploader verifies the account, snapshots the draft list and saves once.
+echo No per-video or Fact Card approval prompt is required. QA, account identity, duplicate protection and read-back verification remain mandatory.
 echo It never clicks Publish, Send, Schedule, Delete or Overwrite.
 ".venv\Scripts\python.exe" -X utf8 -m wechat_video.cli channels-upload-latest
 set "RC=%ERRORLEVEL%"
