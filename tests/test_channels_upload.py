@@ -19,6 +19,7 @@ from wechat_video.channels_uploader import (
     _fill_field,
     _draft_save_button,
     _draft_snapshot,
+    _open_draft_list_view,
     _video_file_input,
     _wait_for_account_identity,
     _ensure_draft_list_account_identity,
@@ -48,6 +49,8 @@ class _FakeElement:
     def __init__(
         self, *, text="", attrs=None, tag="div", visible=True, enabled=True,
         child_texts=None,
+        on_hover=None,
+        on_click=None,
     ):
         self.text = text
         self.attrs = dict(attrs or {})
@@ -56,6 +59,9 @@ class _FakeElement:
         self.enabled = enabled
         self.child_texts = list(child_texts or [])
         self.clicked = False
+        self.hovered = False
+        self.on_hover = on_hover
+        self.on_click = on_click
 
     def is_visible(self):
         return self.visible
@@ -79,6 +85,13 @@ class _FakeElement:
 
     def click(self, timeout=None):
         self.clicked = True
+        if self.on_click is not None:
+            self.on_click()
+
+    def hover(self, timeout=None):
+        self.hovered = True
+        if self.on_hover is not None:
+            self.on_hover()
 
     def evaluate(self, expression):
         if "tagName.toLowerCase()" in expression:
@@ -186,6 +199,10 @@ class _FakePage:
         self.url = "https://channels.weixin.qq.com/platform/post/create"
         self.on_wait = on_wait
         self.wait_calls = []
+
+    def goto(self, url, wait_until=None, timeout=None):
+        self.url = url
+        self.main_frame.url = url
 
     def wait_for_timeout(self, milliseconds):
         self.wait_calls.append(milliseconds)
@@ -360,6 +377,70 @@ def _draft_list_test_selectors() -> dict:
         ),
         "draft_list_ready_timeout_seconds": 0,
     }
+
+
+def test_open_draft_list_view_uses_platform_navigation_to_mount_spa_frame() -> None:
+    identity = _FakeElement(text="成核生长")
+    draft_root = _FakeElement(text="草稿箱", visible=True)
+    active_tab = _FakeElement(text="草稿箱 (0)", visible=True)
+    header = _FakeElement(text="草稿箱 (0)", visible=True)
+    body = _FakeElement(text="", visible=False, child_texts=[])
+
+    child = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/iframe/post-card.html"
+    )
+
+    def mount_draft_manager():
+        child.url = (
+            "https://channels.weixin.qq.com/micro/content/post/draftListManager"
+        )
+        child.selectors = {
+            "div.finder-page.DraftListManager": [draft_root],
+            "li.weui-desktop-tab__nav_current": [active_tab],
+            "div.post-list-header": [header],
+            "div.list-wrapper.draft-list-wrapper div.post-list-body": [body],
+        }
+
+    nav_entry = _FakeElement(
+        text="草稿箱 (0)",
+        visible=False,
+        on_click=mount_draft_manager,
+    )
+    nav_parent = _FakeElement(
+        visible=True,
+        on_hover=lambda: setattr(nav_entry, "visible", True),
+    )
+    main = _FakeFrame(
+        "https://channels.weixin.qq.com/platform/post/list",
+        selectors={
+            ".finder-ui-desktop-menu__sub__wrp": [nav_parent],
+            ".finder-ui-desktop-sub-menu__item:has-text('草稿箱')": [nav_entry],
+        },
+        texts={("成核生长", True): [identity]},
+    )
+    page = _FakePage([main, child])
+    selectors = _draft_list_test_selectors()
+    selectors.update({
+        "draft_list_nav_parent_selectors": [
+            ".finder-ui-desktop-menu__sub__wrp"
+        ],
+        "draft_list_nav_entry_selectors": [
+            ".finder-ui-desktop-sub-menu__item:has-text('草稿箱')"
+        ],
+        "draft_list_nav_timeout_seconds": 0,
+    })
+    config = {
+        "platform_url": "https://channels.weixin.qq.com/platform",
+        "account_name": "成核生长",
+        "ui_ready_timeout_seconds": 1,
+    }
+
+    _open_draft_list_view(page, config, selectors)
+
+    assert page.url == "https://channels.weixin.qq.com/platform"
+    assert nav_parent.hovered is True
+    assert nav_entry.clicked is True
+    assert child.url.endswith("/micro/content/post/draftListManager")
 
 
 def _make_draft_list_page(
