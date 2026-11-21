@@ -86,11 +86,11 @@ def test_global_timeline_has_explicit_cover_and_measured_audio(tmp_path: Path) -
     assert timeline["speech_units"][0]["start_sample"] == 44_100
     assert timeline["speech_units"][0]["start_ms"] == 1000
     assert timeline["speech_units"][0]["end_ms"] == 2000
-    assert timeline["speech_units"][1]["start_ms"] == 2220
+    assert timeline["speech_units"][1]["start_ms"] == 2200
     assert timeline["speech_units"][1]["sample_count"] == 88_200
-    assert timeline["total_duration_ms"] == 4220
+    assert timeline["total_duration_ms"] == 4200
     assert timeline["audio_boundary_transition"] == {
-        "inter_unit_pause_ms": 220,
+        "inter_unit_pause_ms": 200,
         "speech_edge_fade_ms": 12,
         "fade_curve": "equal_power_sine_squared",
     }
