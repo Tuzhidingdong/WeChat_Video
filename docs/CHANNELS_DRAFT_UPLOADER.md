@@ -10,7 +10,9 @@
 The uploader is an isolated local module. It attaches Playwright to a dedicated Microsoft Edge profile owned by WeChat_Video and operates the visible official Channels Assistant pages:
 
 - Create page: https://channels.weixin.qq.com/platform/post/create
-- Draft list: https://channels.weixin.qq.com/platform/post/list
+- Draft manager: https://channels.weixin.qq.com/platform/post/draftListManager
+
+The normal `/platform/post/list` route is the video-management page, not the draft list. The uploader must not infer the current view from the persistent left-navigation text "草稿箱".
 
 It does not use WeChat_control, its browser profile, code, BAT files, account data, selectors or automation implementation. It does not call private platform APIs.
 
@@ -33,7 +35,7 @@ Approve_Fact_Card.bat remains available for the separate decision to admit a Fac
 3. Run Inspect_Channels_UI.bat. The inspector inventories account identity and controls in the top page and embedded frames without uploading, filling or saving.
 4. Generate/select a complete output under outputs/. The uploader requires strict qa_report.json overall_status=PASS, valid channels_draft.json metadata and a complete final.mp4; no approval record is required.
 5. Double-click Save_To_Channels_Draft.bat to upload the newest eligible existing output. It verifies the account, snapshots the draft list, uploads one MP4, fills metadata and clicks the draft-save control exactly once.
-6. The uploader re-reads the draft list and verifies exactly one new row matching the short title and an explicit draft status. It leaves Edge open at the draft list.
+6. The uploader re-reads the dedicated DraftListManager view and verifies exactly one new title match inside its confirmed draft-list container. The view is accepted only when the page route, child-frame route, `DraftListManager` root, selected `草稿箱 (n)` tab/header, and draft-list body container agree. The visible left-navigation label alone is never accepted as proof. It leaves Edge open at the draft list.
 
 For a single-click Slice A test from generation through draft read-back, double-click Run_And_Save_Slice_A_Draft.bat. It generates a fresh review-sample package, then passes that exact run to the uploader. It cannot fall back to an older output. The sample remains pending scientific review and must be inspected before any manual publication.
 
