@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 import json
+import math
+import os
+import re
 import wave
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
 from .media import probe_media
+from .process import run_checked
+from .tooling import resolve_command, tool_env
+
+
+TARGET_INTEGRATED_LOUDNESS_LUFS = -16.0
+TARGET_TRUE_PEAK_DBTP = -1.5
+# Small allowance for AAC encoding and measurement variation around the requested target.
+INTEGRATED_LOUDNESS_TOLERANCE_LU = 1.0
+TRUE_PEAK_TOLERANCE_DB = 0.3
 
 
 def _stream(data: dict[str, Any], kind: str) -> dict[str, Any] | None:
@@ -20,6 +33,94 @@ def _fps(value: str | None) -> float | None:
         return float(a) / float(b)
     except (ValueError, ZeroDivisionError):
         return None
+
+
+def _stream_duration_seconds(stream: dict[str, Any]) -> float | None:
+    raw_duration = stream.get("duration")
+    if raw_duration not in (None, "", "N/A"):
+        try:
+            value = float(raw_duration)
+        except (TypeError, ValueError):
+            value = math.nan
+        if math.isfinite(value) and value >= 0:
+            return value
+
+    duration_ts = stream.get("duration_ts")
+    time_base = stream.get("time_base")
+    if duration_ts is None or not time_base:
+        return None
+    try:
+        value = Fraction(str(duration_ts)) * Fraction(str(time_base))
+    except (ValueError, ZeroDivisionError):
+        return None
+    seconds = float(value)
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
+
+
+def _expected_frame_count(timeline: dict[str, Any]) -> int:
+    """Quantize the global audio end boundary to the requested video frame rate."""
+    try:
+        samples = int(timeline["total_sample_count"])
+        sample_rate = int(timeline["audio_sample_rate"])
+        fps = Fraction(str(timeline["fps"]))
+    except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
+        raise ValueError(
+            "Timeline must include positive total_sample_count, audio_sample_rate, and fps."
+        ) from exc
+    if samples <= 0 or sample_rate <= 0 or fps <= 0:
+        raise ValueError(
+            "Timeline frame-budget inputs must be positive: "
+            f"samples={samples}, sample_rate={sample_rate}, fps={fps}."
+        )
+    # Fraction + round preserves Python's documented nearest/ties-to-even rule without
+    # introducing an intermediate rounded millisecond duration.
+    return round(Fraction(samples) * fps / sample_rate)
+
+
+def _measure_final_audio_loudness(final_mp4: Path) -> dict[str, float]:
+    """Measure the encoded AAC stream, not only the pre-encode narration WAV."""
+    null_target = "NUL" if os.name == "nt" else "/dev/null"
+    result = run_checked(
+        [
+            resolve_command("ffmpeg"), "-hide_banner", "-nostats", "-i", str(final_mp4),
+            "-map", "0:a:0", "-vn",
+            "-af", "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json",
+            "-f", "null", null_target,
+        ],
+        cwd=final_mp4.parent,
+        timeout_seconds=180,
+        env=tool_env(),
+    )
+    output = (result.stderr or "") + "\n" + (result.stdout or "")
+    matches = re.findall(r"\{\s*\"input_i\"[\s\S]*?\}", output)
+    if not matches:
+        raise RuntimeError("FFmpeg 未返回最终 AAC 音频的 loudnorm 测量 JSON。")
+    try:
+        payload = json.loads(matches[-1])
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("无法解析最终 AAC 音频的 loudnorm 测量结果。") from exc
+
+    fields = {
+        "integrated_loudness_lufs": "input_i",
+        "true_peak_dbtp": "input_tp",
+    }
+    values: dict[str, float] = {}
+    for target, source in fields.items():
+        try:
+            value = float(payload[source])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(f"最终 AAC loudnorm 测量缺少有效字段 {source}。") from exc
+        if not math.isfinite(value):
+            raise RuntimeError(f"最终 AAC loudnorm 测量字段 {source} 非有限值：{value}。")
+        values[target] = value
+
+    try:
+        lra = float(payload.get("input_lra", "nan"))
+    except (TypeError, ValueError):
+        lra = math.nan
+    if math.isfinite(lra):
+        values["loudness_range_lu"] = lra
+    return values
 
 
 def run_qa(
@@ -42,31 +143,76 @@ def run_qa(
 
     width = int(video.get("width", 0))
     height = int(video.get("height", 0))
-    fps = _fps(video.get("avg_frame_rate"))
+    target_fps = float(timeline.get("fps", 0) or 0)
+    avg_fps = _fps(video.get("avg_frame_rate"))
+    nominal_fps = _fps(video.get("r_frame_rate"))
     pix_fmt = video.get("pix_fmt")
     sar = video.get("sample_aspect_ratio")
-    frame_count = int(video.get("nb_read_frames") or 0)
-    video_duration = float(probe["format"].get("duration", 0.0))
-    expected_duration = float(timeline["total_duration_seconds"])
-    audio_duration = float(audio.get("duration") or video_duration)
+    try:
+        frame_count = int(video.get("nb_read_frames") or 0)
+    except (TypeError, ValueError):
+        frame_count = 0
+
+    format_duration = probe.get("format", {}).get("duration")
+    try:
+        video_duration = float(format_duration)
+    except (TypeError, ValueError):
+        video_duration = _stream_duration_seconds(video)
+    if video_duration is None or not math.isfinite(video_duration):
+        video_duration = 0.0
+
+    audio_duration = _stream_duration_seconds(audio)
+    expected_duration = float(timeline.get("total_duration_seconds", 0.0) or 0.0)
     duration_delta = abs(video_duration - expected_duration)
 
     check("portrait_resolution", width == 1080 and height == 1920, f"{width}x{height}")
-    check("constant_30_fps", fps is not None and abs(fps - 30.0) < 0.01, f"avg_frame_rate={video.get('avg_frame_rate')}")
+    cfr_ok = (
+        target_fps > 0
+        and avg_fps is not None
+        and nominal_fps is not None
+        and abs(avg_fps - target_fps) < 0.01
+        and abs(nominal_fps - target_fps) < 0.01
+    )
+    check(
+        "constant_30_fps",
+        cfr_ok,
+        f"target={target_fps:g}; avg_frame_rate={video.get('avg_frame_rate')}; "
+        f"r_frame_rate={video.get('r_frame_rate')}",
+    )
     check("yuv420p", pix_fmt == "yuv420p", f"pix_fmt={pix_fmt}")
     check("square_pixels", sar in {"1:1", "1/1"}, f"sample_aspect_ratio={sar}")
     check("audio_stream_present", audio is not None, f"codec={audio.get('codec_name')}")
+    check(
+        "audio_sample_rate_44100",
+        str(audio.get("sample_rate", "")) == "44100",
+        f"sample_rate={audio.get('sample_rate')}",
+    )
+    check(
+        "audio_mono",
+        int(audio.get("channels", 0) or 0) == 1,
+        f"channels={audio.get('channels')}",
+    )
+    check("video_duration_available", video_duration > 0, f"video_duration={video_duration}")
     check(
         "timeline_duration_match",
         duration_delta <= 0.25,
         f"video={video_duration:.3f}s; timeline={expected_duration:.3f}s; delta={duration_delta:.3f}s",
     )
     check(
-        "audio_video_duration_match",
-        abs(video_duration - audio_duration) <= 0.35,
-        f"video={video_duration:.3f}s; audio={audio_duration:.3f}s",
+        "audio_stream_duration_available",
+        audio_duration is not None and audio_duration > 0,
+        f"audio_stream_duration={audio_duration}",
     )
-    check("one_subtitle_cue_per_speech_unit", subtitle_count == len(timeline["speech_units"]), f"{subtitle_count} vs {len(timeline['speech_units'])}")
+    check(
+        "audio_video_duration_match",
+        audio_duration is not None and abs(video_duration - audio_duration) <= 0.35,
+        f"video={video_duration:.3f}s; audio={audio_duration if audio_duration is not None else 'unavailable'}",
+    )
+    check(
+        "one_subtitle_cue_per_speech_unit",
+        subtitle_count == len(timeline["speech_units"]),
+        f"{subtitle_count} vs {len(timeline['speech_units'])}",
+    )
     check(
         "explicit_one_second_cover",
         timeline["cover"]["start_ms"] == 0 and timeline["cover"]["end_ms"] == 1000,
@@ -79,6 +225,19 @@ def run_qa(
     )
     check("frame_count_available", frame_count > 0, f"nb_read_frames={frame_count}")
 
+    try:
+        expected_frames = _expected_frame_count(timeline)
+        check(
+            "frame_count_matches_global_timeline",
+            frame_count == expected_frames,
+            f"actual={frame_count}; expected={expected_frames}; "
+            f"samples={timeline['total_sample_count']} at {timeline['audio_sample_rate']}Hz; "
+            f"fps={timeline['fps']}",
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        expected_frames = None
+        check("frame_count_matches_global_timeline", False, str(exc))
+
     with wave.open(str(narration_wav), "rb") as wav:
         initial_samples = wav.readframes(wav.getframerate())
     check(
@@ -86,6 +245,27 @@ def run_qa(
         not any(initial_samples),
         "The first 1000 ms contains silence; the cover has no narration.",
     )
+
+    try:
+        final_audio_loudness = _measure_final_audio_loudness(final_mp4)
+        integrated = final_audio_loudness["integrated_loudness_lufs"]
+        true_peak = final_audio_loudness["true_peak_dbtp"]
+        check(
+            "final_aac_integrated_loudness",
+            abs(integrated - TARGET_INTEGRATED_LOUDNESS_LUFS) <= INTEGRATED_LOUDNESS_TOLERANCE_LU,
+            f"measured={integrated:.2f} LUFS; target={TARGET_INTEGRATED_LOUDNESS_LUFS:.1f} "
+            f"±{INTEGRATED_LOUDNESS_TOLERANCE_LU:.1f} LU",
+        )
+        check(
+            "final_aac_true_peak_ceiling",
+            true_peak <= TARGET_TRUE_PEAK_DBTP + TRUE_PEAK_TOLERANCE_DB,
+            f"measured={true_peak:.2f} dBTP; ceiling={TARGET_TRUE_PEAK_DBTP + TRUE_PEAK_TOLERANCE_DB:.1f} dBTP",
+        )
+        loudness_error = None
+    except Exception as exc:
+        final_audio_loudness = None
+        loudness_error = str(exc)
+        check("final_aac_loudness_measurement", False, loudness_error)
 
     duration_warning = not (55.0 <= video_duration <= 65.0)
     if duration_warning:
@@ -97,26 +277,23 @@ def run_qa(
             }
         )
     else:
-        check(
-            "preferred_55_to_65_second_duration",
-            True,
-            f"{video_duration:.2f}s",
-        )
+        check("preferred_55_to_65_second_duration", True, f"{video_duration:.2f}s")
 
     failures = [item for item in checks if item["status"] == "FAIL"]
     warnings = [item for item in checks if item["status"] == "WARN"]
     report = {
         "schema_version": 1,
-        "overall_status": "FAIL" if failures else ("PASS_WITH_WARNINGS" if warnings else "PASS"),
         "final_mp4": str(final_mp4),
         "media_probe": probe,
         "video_summary": {
             "width": width,
             "height": height,
-            "fps": fps,
+            "fps": avg_fps,
+            "nominal_fps": nominal_fps,
             "pixel_format": pix_fmt,
             "sample_aspect_ratio": sar,
             "frame_count": frame_count,
+            "expected_frame_count": expected_frames,
             "duration_seconds": video_duration,
         },
         "audio_summary": {
@@ -124,6 +301,16 @@ def run_qa(
             "sample_rate": audio.get("sample_rate"),
             "channels": audio.get("channels"),
             "duration_seconds": audio_duration,
+            "loudness_after_aac_encoding": final_audio_loudness,
+            "loudness_measurement_error": loudness_error,
+        },
+        "qa_targets": {
+            "integrated_loudness_lufs": TARGET_INTEGRATED_LOUDNESS_LUFS,
+            "integrated_loudness_tolerance_lu": INTEGRATED_LOUDNESS_TOLERANCE_LU,
+            "true_peak_dbtp": TARGET_TRUE_PEAK_DBTP,
+            "true_peak_tolerance_db": TRUE_PEAK_TOLERANCE_DB,
+            "audio_sample_rate": 44100,
+            "audio_channels": 1,
         },
         "checks": checks,
         "manual_review_required": [
@@ -134,6 +321,7 @@ def run_qa(
             "Review the pending Fact Card before treating the sample as scientifically approved.",
         ],
         "user_acceptance_pending": True,
+        "overall_status": "FAIL" if failures else ("PASS_WITH_WARNINGS" if warnings else "PASS"),
     }
     output_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n",
