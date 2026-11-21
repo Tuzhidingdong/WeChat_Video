@@ -6,6 +6,7 @@ import threading
 import wave
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from wechat_video import media as media_module
@@ -85,9 +86,24 @@ def test_global_timeline_has_explicit_cover_and_measured_audio(tmp_path: Path) -
     assert timeline["speech_units"][0]["start_sample"] == 44_100
     assert timeline["speech_units"][0]["start_ms"] == 1000
     assert timeline["speech_units"][0]["end_ms"] == 2000
-    assert timeline["speech_units"][1]["start_ms"] == 2280
+    assert timeline["speech_units"][1]["start_ms"] == 2220
     assert timeline["speech_units"][1]["sample_count"] == 88_200
-    assert timeline["total_duration_ms"] == 4280
+    assert timeline["total_duration_ms"] == 4220
+    assert timeline["audio_boundary_transition"] == {
+        "inter_unit_pause_ms": 220,
+        "speech_edge_fade_ms": 12,
+        "fade_curve": "equal_power_sine_squared",
+    }
+    with wave.open(str(tmp_path / "narration.wav"), "rb") as reader:
+        mixed_pcm = np.frombuffer(reader.readframes(reader.getnframes()), dtype="<i2")
+    first_start = timeline["speech_units"][0]["start_sample"]
+    first_end = timeline["speech_units"][0]["end_sample"]
+    second_start = timeline["speech_units"][1]["start_sample"]
+    assert mixed_pcm[first_start] == 0
+    assert mixed_pcm[first_end - 1] == 0
+    assert np.any(mixed_pcm[first_start + 100:first_end - 100] != 0)
+    assert np.all(mixed_pcm[first_end:second_start] == 0)
+    assert mixed_pcm[second_start] == 0
 
 
 def test_timeline_rejects_mixed_sample_rates(tmp_path: Path) -> None:
@@ -271,3 +287,14 @@ def test_ffmpeg_stage_watchdog_terminates_process_without_progress(
     assert fake_process.terminated is True
     assert progress.is_file()
     assert progress.read_text(encoding="utf-8") == ""
+
+
+
+def test_sfx_edge_fade_reaches_zero_without_changing_clip_duration() -> None:
+    source = np.ones(100, dtype=np.float64)
+    faded = media_module._fade_audio_edges(source, sample_rate=1000, fade_ms=15)
+    assert len(faded) == len(source)
+    assert faded[0] == pytest.approx(0.0)
+    assert faded[-1] == pytest.approx(0.0)
+    assert faded[15] == pytest.approx(1.0)
+    assert faded[-16] == pytest.approx(1.0)
