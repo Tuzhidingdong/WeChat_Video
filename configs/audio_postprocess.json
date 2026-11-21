@@ -53,6 +53,7 @@
     "min_relative_db": -15.0,
     "max_relative_db": -12.0,
     "measurement_window_ms": 250,
+    "edge_fade_ms": 15,
     "soft_low_frequency_only": true
   },
   "ambient_bed": {
