@@ -660,6 +660,21 @@ def _ensure_account_identity(
     )
 
 
+def _ensure_draft_list_account_identity(
+    page: Any,
+    config: dict[str, Any],
+    selectors: dict[str, Any],
+) -> None:
+    """Wait for the draft-list SPA to render before verifying its account identity."""
+    wait_seconds = max(1, int(config.get("ui_ready_timeout_seconds", 15)))
+    _ensure_account_identity(
+        page,
+        str(config["account_name"]),
+        selectors,
+        wait_seconds=wait_seconds,
+    )
+
+
 def _frame_contexts(page: Any) -> list[Any]:
     """Return the top frame followed by child frames, without duplicates."""
     try:
@@ -1250,12 +1265,7 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
             wait_until="domcontentloaded",
             timeout=60_000,
         )
-        _ensure_account_identity(
-            draft_page,
-            str(config["account_name"]),
-            selectors,
-            wait_seconds=0,
-        )
+        _ensure_draft_list_account_identity(draft_page, config, selectors)
         before = _draft_snapshot(draft_page, selectors)
         if _matching_draft_entries(before, str(metadata["title"]), selectors):
             job["state"] = "BLOCKED_DUPLICATE_TITLE"
@@ -1398,7 +1408,7 @@ def reconcile_upload(project_root: Path, job_id: str) -> dict[str, Any]:
     try:
         page = context.new_page()
         page.goto(str(config["draft_list_url"]), wait_until="domcontentloaded", timeout=60_000)
-        _ensure_account_identity(page, str(config["account_name"]), selectors, wait_seconds=0)
+        _ensure_draft_list_account_identity(page, config, selectors)
         after = _draft_snapshot(page, selectors)
         matches = _matching_draft_entries(after, str(job.get("title") or ""), selectors)
         prior = _matching_draft_entries(before, str(job.get("title") or ""), selectors)
