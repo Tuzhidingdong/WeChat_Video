@@ -1223,23 +1223,25 @@ def upload_latest_approved_run(project_root: Path) -> dict[str, Any]:
     project_root = project_root.resolve()
     outputs = project_root / "outputs"
     config, _ = _load_config(project_root)
-    candidates: list[Path] = []
-    if outputs.is_dir():
-        for run_dir in outputs.iterdir():
-            if not run_dir.is_dir():
-                continue
-            try:
-                _validate_run_for_upload(project_root, run_dir, config)
-                candidates.append(run_dir)
-            except (UploadBlockedError, TopicApprovalError, FileNotFoundError, ValueError):
-                continue
-    if not candidates:
-        raise UploadBlockedError(
-            "No output has both strict QA PASS and a valid approved Fact Card. "
-            "Approve the Fact Card once with approve-fact-card, then generate a normal (non-review-sample) video."
-        )
-    run_dir = max(candidates, key=lambda item: item.stat().st_mtime)
-    return upload_run_to_channels(project_root, run_dir)
+    if not outputs.is_dir():
+        raise UploadBlockedError("No outputs/ directory exists.")
+    # Snapshot the existing run order before validation: validating a legacy
+    # output may create its deterministic channels_draft.json and change mtime.
+    ordered_runs = sorted(
+        (item for item in outputs.iterdir() if item.is_dir()),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for run_dir in ordered_runs:
+        try:
+            _validate_run_for_upload(project_root, run_dir, config)
+        except (UploadBlockedError, TopicApprovalError, FileNotFoundError, ValueError):
+            continue
+        return upload_run_to_channels(project_root, run_dir)
+    raise UploadBlockedError(
+        "No output has both strict QA PASS and a valid approved Fact Card. "
+        "Approve the Fact Card once with approve-fact-card, then generate a normal (non-review-sample) video."
+    )
 
 
 def inspect_channels_ui(project_root: Path) -> dict[str, Any]:
