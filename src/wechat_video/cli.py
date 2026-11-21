@@ -204,10 +204,43 @@ def main(argv: list[str] | None = None) -> int:
                 allow_pending_review=True,
             )
             upload = upload_run_to_channels(args.project_root.resolve(), run_dir)
+            upload_report = {
+                "schema_version": 1,
+                "job_id": upload["job_id"],
+                "state": upload["state"],
+                "account_name": upload["account_name"],
+                "title": upload["title"],
+                "verified_draft": upload["verified_draft"],
+                "authorization_basis": upload["authorization_basis"],
+                "automatic_publication": False,
+            }
+            (run_dir / "channels_upload_report.json").write_text(
+                json.dumps(upload_report, ensure_ascii=False, indent=2) + "\\n",
+                encoding="utf-8",
+            )
+            review_status_path = run_dir / "review_status.json"
+            review_status = json.loads(review_status_path.read_text(encoding="utf-8"))
+            review_status["draft_upload_status"] = upload["state"]
+            review_status["draft_upload_authorization"] = upload["authorization_basis"]
+            review_status["automatic_upload"] = True
+            review_status["automatic_publication"] = False
+            review_status_path.write_text(
+                json.dumps(review_status, ensure_ascii=False, indent=2) + "\\n",
+                encoding="utf-8",
+            )
+            review_path = run_dir / "REVIEW.md"
+            with review_path.open("a", encoding="utf-8") as handle:
+                handle.write("\\n## Unpublished Channels draft\\n\\n")
+                handle.write(f"- State: {upload['state']}\\n")
+                handle.write(f"- Account: {upload['account_name']}\\n")
+                handle.write(f"- Title: {upload['title']}\\n")
+                handle.write("- The new row was read back from the actual draft list.\\n")
+                handle.write("- Final publication remains manual.\\n")
             print(json.dumps({
                 "run_dir": str(run_dir),
                 "video": str(run_dir / "final.mp4"),
                 "qa_report": str(run_dir / "qa_report.json"),
+                "channels_upload_report": str(run_dir / "channels_upload_report.json"),
                 "upload": upload,
                 "automatic_publication": False,
             }, ensure_ascii=False, indent=2))
