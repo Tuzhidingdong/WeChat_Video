@@ -35,7 +35,7 @@ Approve_Fact_Card.bat remains available for the separate decision to admit a Fac
 3. Run Inspect_Channels_UI.bat. The inspector inventories account identity and controls in the top page and embedded frames without uploading, filling or saving.
 4. Generate/select a complete output under outputs/. The uploader requires strict qa_report.json overall_status=PASS, valid channels_draft.json metadata and a complete final.mp4; no approval record is required.
 5. Double-click Save_To_Channels_Draft.bat to upload the newest eligible existing output. It verifies the account, snapshots the draft list, uploads one MP4, fills metadata and clicks the draft-save control exactly once.
-6. The uploader re-reads the dedicated DraftListManager view and verifies exactly one new title match inside its confirmed draft-list container. The view is accepted only when the page route, child-frame route, `DraftListManager` root, selected `草稿箱 (n)` tab/header, and draft-list body container agree. The visible left-navigation label alone is never accepted as proof. These checks and row reads execute with read-only `document.querySelectorAll()` / DOM inspection inside the target frame itself, avoiding the observed Playwright CDP cross-origin iframe locator failure. When the displayed draft count is positive, the uploader waits up to 15 seconds for readable visible rows and fails closed if none appear. It leaves Edge open at the draft list.
+6. Before every draft-list read, the uploader opens the official `/platform` shell, verifies the configured account, expands the Content Management navigation group by hover, and clicks its visible `草稿箱` entry. It does not deep-link directly to `/platform/post/draftListManager`: a direct navigation was observed to set the child-frame URL without mounting the SPA list DOM. After the navigation click, it still requires the exact child-frame route, one visible `DraftListManager` root, selected `草稿箱 (n)` tab/header with matching counts, and the draft-list body container. The navigation label or URL alone is never accepted as proof. These checks and row reads execute with read-only `document.querySelectorAll()` / DOM inspection inside the target frame itself, avoiding the observed Playwright CDP cross-origin iframe locator failure. When the displayed draft count is positive, the uploader waits up to 15 seconds for readable visible rows and fails closed if none appear. It leaves Edge open at the draft list.
 
 For a single-click Slice A test from generation through draft read-back, double-click Run_And_Save_Slice_A_Draft.bat. It generates a fresh review-sample package, then passes that exact run to the uploader. It cannot fall back to an older output. The sample remains pending scientific review and must be inspected before any manual publication.
 
@@ -97,3 +97,15 @@ matches exactly and the unique visible `DraftListManager` root, active
 `草稿箱 (n)` tab, matching header count, and draft-list body container all
 pass the same DOM checks as the direct route. The ordinary video-management
 route and any other parent/child route combination remain rejected.
+
+
+### DraftListManager SPA navigation
+
+The official management shell must mount the draft-list micro-application through its
+left navigation. The automation therefore opens `platform_url`, hovers the
+Content Management submenu, clicks the visible `草稿箱` entry, and only then
+checks the dedicated child frame. This avoids the observed failure mode where a
+direct deep link changed the iframe URL but left its document body empty. The
+same navigation helper is used for pre-upload snapshots, post-save readback, and
+read-only reconciliation; none of those steps is allowed to infer success from
+the route alone.
