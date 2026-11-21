@@ -211,6 +211,9 @@ def main(argv: list[str] | None = None) -> int:
                 "account_name": upload["account_name"],
                 "title": upload["title"],
                 "verified_draft": upload["verified_draft"],
+                "save_action": upload.get("save_action"),
+                "mobile_app_visibility_verified": bool(upload.get("mobile_app_visibility_verified", False)),
+                "headless": bool(upload.get("headless", False)),
                 "authorization_basis": upload["authorization_basis"],
                 "automatic_publication": False,
             }
