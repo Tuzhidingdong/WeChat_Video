@@ -28,6 +28,23 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _write_channels_metadata(
+    run_dir: Path,
+    card: dict[str, Any],
+    script: dict[str, Any],
+) -> None:
+    """Write deterministic draft metadata keyed to the complete output directory name."""
+    _write_json(
+        run_dir / "channels_draft.json",
+        build_channels_metadata(
+            card,
+            script,
+            run_dir.name,
+            account_name="成核生长",
+        ),
+    )
+
+
 def _write_script_markdown(path: Path, script: dict[str, Any]) -> None:
     lines = [
         "# Slice A Bilingual Script",
@@ -164,10 +181,7 @@ def run_slice_a(
     shutil.copy2(source_path, run_dir / "source_record.json")
     shutil.copy2(script_path, run_dir / "script.json")
     _write_script_markdown(run_dir / "script_en.md", script)
-    _write_json(
-        run_dir / "channels_draft.json",
-        build_channels_metadata(card, script, run_id, account_name="成核生长"),
-    )
+    _write_channels_metadata(run_dir, card, script)
     layout = read_json(project_root / "configs" / "layout.json")
     _write_json(run_dir / "layout_profile.json", layout)
 
