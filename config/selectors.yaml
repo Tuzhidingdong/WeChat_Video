@@ -38,6 +38,7 @@ draft_list_active_tab_selector: "li.weui-desktop-tab__nav_current"
 draft_list_header_selector: "div.post-list-header"
 draft_list_body_selector: "div.list-wrapper.draft-list-wrapper div.post-list-body"
 draft_list_ready_timeout_seconds: 15
+draft_list_rows_timeout_seconds: 15
 
 preview_selectors:
   - "video"
