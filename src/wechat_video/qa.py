@@ -129,7 +129,9 @@ def run_qa(
     timeline: dict[str, Any],
     subtitle_count: int,
     output_path: Path,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    context = context or {}
     probe = probe_media(final_mp4, count_frames=True)
     video = _stream(probe, "video")
     audio = _stream(probe, "audio")
@@ -278,6 +280,54 @@ def run_qa(
         )
     else:
         check("preferred_55_to_65_second_duration", True, f"{video_duration:.2f}s")
+
+    if context:
+        audio_manifest = context.get("audio_manifest", {})
+        engine = str(audio_manifest.get("engine", ""))
+        check(
+            "personal_voice_engine_truth",
+            "OpenVoice" in engine and "sherpa" not in engine.lower(),
+            f"audio_manifest.engine={engine}",
+        )
+        check(
+            "personal_voice_profile_recorded",
+            bool(audio_manifest.get("voice_profile_fingerprint")),
+            f"profile={audio_manifest.get('voice_profile')}",
+        )
+        cues = timeline["speech_units"]
+        check(
+            "bilingual_subtitle_cues",
+            all(str(cue.get("display_text_zh", "")).strip() for cue in cues),
+            f"{sum(bool(str(c.get('display_text_zh', '')).strip()) for c in cues)}/{len(cues)}",
+        )
+        environment = context.get("environment", {})
+        check(
+            "cjk_glyph_coverage_verified",
+            bool(environment.get("cjk_font", {}).get("verified_codepoints")),
+            str(environment.get("cjk_font", {}).get("family")),
+        )
+        pauses = [s for s in timeline.get("segments", []) if s.get("kind") == "silence"]
+        long_pauses = [s for s in pauses if s.get("duration_ms", 0) >= 500]
+        check(
+            "comprehension_pauses_present",
+            len(long_pauses) >= 2,
+            f"{len(long_pauses)} configured pauses of 500ms or more",
+        )
+        sfx_events = timeline.get("sfx_events", [])
+        total_samples = int(timeline["total_sample_count"])
+        check(
+            "sfx_events_within_global_timeline",
+            all(0 <= int(e["start_sample"]) < int(e["end_sample"]) <= total_samples for e in sfx_events),
+            f"{len(sfx_events)} events",
+        )
+        motion = context.get("motion_manifest", {})
+        event_blocks = {e.get("rhythm_block_id") for e in motion.get("events", [])}
+        expected_blocks = {"HOOK", "CONFLICT", "MECHANISM", "APPLICATION", "TAKEAWAY"}
+        check(
+            "motion_event_in_every_rhythm_block",
+            expected_blocks.issubset(event_blocks),
+            f"blocks={sorted(event_blocks)}",
+        )
 
     failures = [item for item in checks if item["status"] == "FAIL"]
     warnings = [item for item in checks if item["status"] == "WARN"]

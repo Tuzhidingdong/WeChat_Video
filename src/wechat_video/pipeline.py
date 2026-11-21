@@ -8,15 +8,16 @@ from pathlib import Path
 from typing import Any
 
 from .fact_card import load_fact_card, read_json, validate_script_claim_links
-from .media import assemble_final_video, probe_media
+from .media import assemble_final_video, mix_final_audio, probe_media
 from .preflight import run_preflight
 from .qa import run_qa
 from .render import render_critical_nucleus_scene
+from .sfx import generate_sfx
 from .subtitles import write_subtitles
-from .timeline import build_audio_timeline, write_timeline
+from .timeline import attach_editorial_events, build_audio_timeline, write_timeline
 from .tooling import model_root as configured_model_root
 from .tts import generate_speech_units
-from .visual_stages import build_stage_manifest
+from .visual_stages import build_motion_manifest, build_stage_manifest
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
@@ -25,7 +26,7 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
 
 def _write_script_markdown(path: Path, script: dict[str, Any]) -> None:
     lines = [
-        "# Slice A English Script",
+        "# Slice A Bilingual Script",
         "",
         f"- Script ID: {script.get('script_id', '')}",
         f"- Title: {script.get('title', '')}",
@@ -35,11 +36,13 @@ def _write_script_markdown(path: Path, script: dict[str, Any]) -> None:
     for unit in script["speech_units"]:
         lines.extend(
             [
-                f"## {unit['unit_id']}",
+                f"## {unit['unit_id']} — {unit.get('rhythm_block_id', '')}",
                 "",
-                f"- Spoken / displayed text: {unit['spoken_text']}",
+                f"- English: {unit['spoken_text']}",
+                f"- 中文: {unit['display_text_zh']}",
                 f"- Claim IDs: {', '.join(unit['claim_ids'])}",
                 f"- Visual triggers: {', '.join(unit['visual_trigger_ids'])}",
+                f"- Pause after: {unit.get('pause_after_ms', 280)} ms",
                 "",
             ]
         )
@@ -93,9 +96,21 @@ def _build_storyboard(script: dict[str, Any]) -> dict[str, Any]:
                 "unit_id": unit["unit_id"],
                 "claim_ids": unit["claim_ids"],
                 "visual_trigger_ids": unit["visual_trigger_ids"],
+                "rhythm_block_id": unit.get("rhythm_block_id"),
                 "time_source": "audio_timing.json measured speech-unit boundaries",
             }
             for unit in script["speech_units"]
+        ],
+        "rhythm_blocks": script.get("rhythm_blocks", []),
+        "editorial_beats": [
+            {"trigger": key, "purpose": value}
+            for key, value in {
+                "HOOK": "counter-intuitive hook",
+                "CONFLICT": "surface vs bulk conflict",
+                "AREA_SCALING": "r² vs r³ crossover",
+                "CRITICAL_PEAK": "critical-radius peak",
+                "TAKEAWAY": "final practical takeaway",
+            }.items()
         ],
         "registered_template_only": True,
         "no_generated_executable_scene_code": True,
@@ -152,9 +167,24 @@ def run_slice_a(
         run_dir / "audio",
         script["pronunciation_review_text"],
     )
+    voice_manifest_path = run_dir / "voice_generation_manifest.json"
+    voice_manifest = (
+        json.loads(voice_manifest_path.read_text(encoding="utf-8"))
+        if voice_manifest_path.is_file()
+        else {}
+    )
     _write_json(
         run_dir / "audio_manifest.json",
-        {"engine": "sherpa-onnx", "provider": "cpu", "speech_units": tts_results},
+        {
+            "engine": voice_manifest.get("engine", "MeloTTS EN-US -> OpenVoice V2 (personal profile)"),
+            "provider": voice_manifest.get("provider", "cpu"),
+            "voice_profile": voice_manifest.get("voice_profile"),
+            "voice_profile_fingerprint": voice_manifest.get("voice_profile_fingerprint"),
+            "base_speaker": voice_manifest.get("base_speaker"),
+            "watermark_preserved": voice_manifest.get("watermark_preserved"),
+            "cleanup_steps": voice_manifest.get("cleanup_steps", {}),
+            "speech_units": tts_results,
+        },
     )
 
     logger.info("Measuring audio chunks and building the global timeline.")
@@ -169,6 +199,10 @@ def run_slice_a(
         output_wav=narration_wav,
         ffprobe_records=audio_probes,
     )
+    sfx_durations = generate_sfx(
+        run_dir / "sfx", sample_rate=int(timeline["audio_sample_rate"])
+    )
+    attach_editorial_events(timeline, units, sfx_durations)
     write_timeline(run_dir / "audio_timing.json", timeline)
     if not (55_000 <= int(timeline["total_duration_ms"]) <= 65_000):
         logger.warning(
@@ -192,14 +226,36 @@ def run_slice_a(
         timeline["speech_units"], units, fps=int(timeline["fps"])
     )
     _write_json(run_dir / "visual_stage_manifest.json", stage_manifest)
-    logger.info("Visual stages: %s", ", ".join(s["stage_id"] for s in stage_manifest["stages"]))
+    motion_manifest = build_motion_manifest(
+        timeline["speech_units"], units, fps=int(timeline["fps"])
+    )
+    _write_json(run_dir / "motion_event_manifest.json", motion_manifest)
+    logger.info(
+        "Visual stages: %s", ", ".join(s["stage_id"] for s in stage_manifest["stages"])
+    )
 
+    cjk_font = environment["cjk_font"]["family"]
     subtitle_count = write_subtitles(
         timeline,
         run_dir / "captions.srt",
         run_dir / "captions.ass",
         layout,
         font_family,
+        cjk_font_family=cjk_font,
+    )
+    _write_json(
+        run_dir / "subtitle_layout_report.json",
+        {
+            "latin_font": environment["latin_font"],
+            "cjk_font": environment["cjk_font"],
+            "latin_font_size": layout["subtitle"]["latin_font_size"],
+            "cjk_font_size": layout["subtitle"]["cjk_font_size"],
+            "en_y_percent": layout["subtitle"]["en_y_percent"],
+            "zh_y_percent": layout["subtitle"]["zh_y_percent"],
+            "safe_rect": layout["subtitle"]["safe_rect"],
+            "cue_count": subtitle_count,
+            "bilingual_lines_per_cue": 2,
+        },
     )
     scene_spec = {
         "scene_id": "scene_01_energy_competition",
@@ -232,15 +288,35 @@ def run_slice_a(
         },
     )
 
-    logger.info("Normalizing video, assembling narration, and burning subtitles.")
+    logger.info("Mixing narration with sparse local SFX and normalizing video.")
+    final_mix = run_dir / "final_mix.wav"
+    mix_report = mix_final_audio(
+        narration_wav, timeline["sfx_events"], run_dir, final_mix
+    )
+    _write_json(run_dir / "audio_mix_report.json", mix_report)
+    expected_frames = round(
+        int(timeline["total_sample_count"])
+        * int(timeline["fps"])
+        / int(timeline["audio_sample_rate"])
+    )
     assembly = assemble_final_video(
         scene_video,
-        narration_wav,
+        final_mix,
         run_dir / "captions.ass",
         run_dir / "final.mp4",
         run_dir,
+        expected_frames,
     )
     _write_json(run_dir / "assembly_report.json", assembly)
+    candidate_quality = (
+        project_root
+        / "private"
+        / "voice_profile"
+        / "candidates"
+        / "voice_quality_report.json"
+    )
+    if candidate_quality.is_file():
+        shutil.copy2(candidate_quality, run_dir / "voice_quality_report.json")
 
     logger.info("Running media and synchronization QA.")
     qa = run_qa(
@@ -249,6 +325,14 @@ def run_slice_a(
         timeline,
         subtitle_count,
         run_dir / "qa_report.json",
+        context={
+            "audio_manifest": json.loads((run_dir / "audio_manifest.json").read_text(encoding="utf-8")),
+            "environment": environment,
+            "motion_manifest": motion_manifest,
+            "subtitle_layout": json.loads(
+                (run_dir / "subtitle_layout_report.json").read_text(encoding="utf-8")
+            ),
+        },
     )
     approval_label = (
         "NOT_FOR_PUBLICATION_PENDING_USER_FACT_CARD_REVIEW"
@@ -278,11 +362,11 @@ def run_slice_a(
         "",
         "## Manual review required",
         "",
-        "1. Listen to audio/pronunciation_review.wav and every speech unit.",
-        "2. Inspect final.mp4 on a phone-sized display.",
-        "3. Check captions, formula labels, safe-zone margins, and cue synchronization.",
-        "4. Confirm the sign convention and model assumptions in fact_card.json.",
-        "5. Check visual_stage_manifest.json: each cue has one active stage and no previous formula remains on screen.",
+        "1. Compare private/voice_profile/candidates A/B WAVs and judge voice identity and cleanliness.",
+        "2. Listen to audio/pronunciation_review.wav and every speech unit for US-English pronunciation.",
+        "3. Inspect final.mp4 on a phone: English/Chinese subtitles, safe zones, motion and cue synchronization.",
+        "4. Check motion_event_manifest.json against the rendered frames for real motion in every rhythm block.",
+        "5. Confirm the sign convention and thermodynamic-vs-kinetic caveat in fact_card.json.",
         "6. Do not publish this candidate until the Fact Card and video are approved.",
         "",
         "This run does not connect to Edge, WeChat, Flow, OpenCode, or any upload endpoint.",

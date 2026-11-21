@@ -12,7 +12,6 @@ def _wrap_text(text: str, max_chars: int) -> str:
     remaining = text
     while len(remaining) > max_chars:
         window = remaining[: max_chars + 1]
-        # Prefer CJK punctuation, then a word boundary (space) for English text.
         cut = -1
         inclusive = False
         for punctuation in "，。；！？、":
@@ -47,62 +46,83 @@ def _ass_timestamp(ms: int) -> str:
     return f"{hours}:{minutes:02d}:{seconds:02d}.{cs:02d}"
 
 
+def _ass_escape(text: str) -> str:
+    return (
+        text.replace("\\", r"\\")
+        .replace("{", r"\{")
+        .replace("}", r"\}")
+        .replace("\n", r"\N")
+    )
+
+
 def write_subtitles(
     timeline: dict[str, Any],
     srt_path: Path,
     ass_path: Path,
     layout: dict[str, Any],
     font_family: str,
+    cjk_font_family: str | None = None,
 ) -> int:
+    """Write one bilingual cue per speech unit (English top, Chinese below)."""
+    subtitle_config = layout["subtitle"]
     cues = timeline["speech_units"]
-    max_chars = int(layout["subtitle"]["max_line_chars"])
+    en_limit = int(subtitle_config.get("max_line_chars_en", subtitle_config["max_line_chars"]))
+    zh_limit = int(subtitle_config.get("max_line_chars_zh", 12))
+    cjk_family = cjk_font_family or subtitle_config.get("cjk_fonts", [font_family])[0]
+    canvas_width = int(layout["canvas"]["width"])
+    canvas_height = int(layout["canvas"]["height"])
+    en_y = round(canvas_height * float(subtitle_config.get("en_y_percent", 70.5)) / 100)
+    zh_y = round(canvas_height * float(subtitle_config.get("zh_y_percent", 75.5)) / 100)
+    center_x = canvas_width // 2
+
     srt_blocks: list[str] = []
     ass_events: list[str] = []
-
     for index, cue in enumerate(cues, start=1):
-        display = _wrap_text(cue["display_text"], max_chars)
+        english = _wrap_text(cue["display_text"], en_limit)
+        chinese = _wrap_text(cue.get("display_text_zh", ""), zh_limit)
         srt_blocks.append(
             f"{index}\n"
             f"{_srt_timestamp(cue['start_ms'])} --> {_srt_timestamp(cue['end_ms'])}\n"
-            f"{display}\n"
+            f"{english}\n{chinese}\n"
         )
-        ass_text = display.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
-        ass_text = ass_text.replace("\n", r"\N")
+        start = _ass_timestamp(cue["start_ms"])
+        end = _ass_timestamp(cue["end_ms"])
         ass_events.append(
-            f"Dialogue: 0,{_ass_timestamp(cue['start_ms'])},"
-            f"{_ass_timestamp(cue['end_ms'])},Default,,0,0,0,,{ass_text}"
+            f"Dialogue: 0,{start},{end},EN,,0,0,0,,"
+            rf"{{\an5\pos({center_x},{en_y})}}{_ass_escape(english)}"
+        )
+        if chinese:
+            ass_events.append(
+                f"Dialogue: 0,{start},{end},ZH,,0,0,0,,"
+                rf"{{\an5\pos({center_x},{zh_y})}}{_ass_escape(chinese)}"
+            )
+
+    def style(name: str, family: str, size: int) -> str:
+        return (
+            f"Style: {name},{family},{size},"
+            "&H00FFFFFF,&H0000FFFF,&H00101820,&H90000000,"
+            "0,0,0,0,100,100,0,0,1,"
+            f"{int(subtitle_config['outline'])},{int(subtitle_config['shadow'])},"
+            "2,"
+            f"{int(subtitle_config['margin_left'])},{int(subtitle_config['margin_right'])},0,1"
         )
 
-    subtitle_cfg = layout["subtitle"]
     ass = "\n".join(
         [
             "[Script Info]",
             "ScriptType: v4.00+",
             "WrapStyle: 2",
             "ScaledBorderAndShadow: yes",
-            "PlayResX: 1080",
-            "PlayResY: 1920",
+            f"PlayResX: {canvas_width}",
+            f"PlayResY: {canvas_height}",
             "",
             "[V4+ Styles]",
-            (
-                "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
-                "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
-                "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
-                "Alignment, MarginL, MarginR, MarginV, Encoding"
-            ),
-            (
-                "Style: Default,"
-                f"{font_family},"
-                f"{int(subtitle_cfg['font_size'])},"
-                "&H00FFFFFF,&H0000FFFF,&H00101820,&H80000000,"
-                "0,0,0,0,100,100,0,0,1,"
-                f"{int(subtitle_cfg['outline'])},"
-                f"{int(subtitle_cfg['shadow'])},"
-                "2,"
-                f"{int(subtitle_cfg['margin_left'])},"
-                f"{int(subtitle_cfg['margin_right'])},"
-                f"{int(subtitle_cfg['margin_vertical'])},1"
-            ),
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+            "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+            "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+            "Alignment, MarginL, MarginR, MarginV, Encoding",
+            style("EN", font_family, int(subtitle_config.get("latin_font_size", 40))),
+            style("ZH", cjk_family, int(subtitle_config.get("cjk_font_size", 46))),
             "",
             "[Events]",
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",

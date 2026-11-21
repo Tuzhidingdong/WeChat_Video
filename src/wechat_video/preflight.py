@@ -46,7 +46,35 @@ def _font_dirs() -> list[Path]:
     return [p for p in dirs if p.exists()]
 
 
-def find_font(preferred: list[str]) -> tuple[str, str]:
+def font_supports_chars(path: str, text: str) -> bool:
+    """Return True only when the font's cmap contains every non-space codepoint."""
+    try:
+        from fontTools.ttLib import TTCollection, TTFont
+    except ImportError as exc:  # pragma: no cover - fontTools is a declared dependency
+        raise RuntimeError("fontTools is required for glyph coverage checks.") from exc
+
+    font_path = Path(path)
+    try:
+        if font_path.suffix.lower() == ".ttc":
+            fonts = TTCollection(str(font_path)).fonts
+        else:
+            fonts = [TTFont(str(font_path))]
+        codepoints = {ord(char) for char in text if not char.isspace()}
+        for font in fonts:
+            cmap = set()
+            for table in font["cmap"].tables:
+                if table.isUnicode():
+                    cmap.update(table.cmap.keys())
+            if codepoints.issubset(cmap):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def find_font(
+    preferred: list[str], *, required_chars: str | None = None
+) -> tuple[str, str]:
     directories = _font_dirs()
     font_files = [
         path
@@ -62,6 +90,8 @@ def find_font(preferred: list[str]) -> tuple[str, str]:
             hint = hint.lower()
             for name, full_path in lowered:
                 if hint in name:
+                    if required_chars and not font_supports_chars(full_path, required_chars):
+                        continue
                     return family, full_path
 
     if platform.system() != "Windows" and shutil.which("fc-match"):
@@ -189,6 +219,13 @@ def run_preflight(
         raise RuntimeError(
             "当前 FFmpeg 缺少 subtitles/libass 或 loudnorm filter；请更换包含 libass 的构建。"
         )
+    for optional_filter in ("subtitles", "loudnorm"):
+        if optional_filter not in filter_text:
+            raise RuntimeError(f"FFmpeg is missing required filter: {optional_filter}")
+    cleanup_filters = [name for name in ("afftdn", "anlmdn") if name in filter_text]
+    if not cleanup_filters:
+        report["warnings"].append("No local audio denoise filter was detected.")
+    report["available_cleanup_filters"] = cleanup_filters
     report["ffmpeg_version"] = ffmpeg_version
     report["ffprobe_version"] = ffprobe_version
     report["checks"]["ffmpeg_ffprobe_libass_loudnorm"] = "PASS"
@@ -202,30 +239,52 @@ def run_preflight(
     layout = json.loads(
         (project_root / "configs" / "layout.json").read_text(encoding="utf-8")
     )
-    preferred = layout["subtitle"]["preferred_fonts"]
-    family, font_path = find_font(preferred)
-    report["font"] = {"family": family, "file": font_path}
-    report["font_family"] = family
-    report["font_file"] = font_path
-    report["chinese_font"] = {"family": family, "file": font_path}
-    report["checks"]["font_file_present"] = "PASS"
-    report["checks"]["chinese_font_file_present"] = "PASS"
+    subtitle_config = layout["subtitle"]
+    latin_family, latin_path = find_font(subtitle_config["latin_fonts"])
+    cjk_chars = "成核临界半径自由能垒"
+    cjk_family, cjk_path = find_font(
+        subtitle_config["cjk_fonts"], required_chars=cjk_chars
+    )
+    report["font"] = {"family": latin_family, "file": latin_path}
+    report["font_family"] = latin_family
+    report["font_file"] = latin_path
+    report["latin_font"] = {"family": latin_family, "file": latin_path}
+    report["cjk_font"] = {
+        "family": cjk_family,
+        "file": cjk_path,
+        "verified_codepoints": cjk_chars,
+    }
+    report["chinese_font"] = report["cjk_font"]
+    report["checks"]["latin_font_file_present"] = "PASS"
+    report["checks"]["cjk_font_glyphs_present"] = "PASS"
 
-    from .model_setup import _model_dir_valid
-    from .tooling import model_root as configured_model_root
-
-    model_dir = configured_model_root(project_root)
-    ready = _model_dir_valid(model_dir)
-    if require_tts_model and not ready:
+    voice_python = project_root / ".venv-voice" / "python.exe"
+    profile_dir = project_root / "private" / "voice_profile"
+    profile_json = profile_dir / "voice_profile.json"
+    target_se = profile_dir / "target_se.pth"
+    melo_dir = project_root / "assets" / "models" / "melo-en-us"
+    converter = project_root / "tools" / "openvoice" / "checkpoints_v2" / "converter"
+    personal_paths = {
+        "voice_runtime": voice_python,
+        "voice_profile": profile_json,
+        "target_embedding": target_se,
+        "melo_en_checkpoint": melo_dir / "checkpoint.pth",
+        "openvoice_converter": converter / "checkpoint.pth",
+    }
+    missing_personal = [str(key) for key, path in personal_paths.items() if not path.is_file()]
+    if missing_personal:
         raise RuntimeError(
-            f"Offline TTS model is incomplete at {model_dir}. "
-            "Run Setup_Slice_A.bat once to download the English Piper voice."
+            "Personal OpenVoice path is incomplete; missing: " + ", ".join(missing_personal)
         )
-    report["tts_model_root"] = str(model_dir)
-    report["tts_model_engine"] = "sherpa-onnx Piper VITS (en-US)"
-    report["checks"]["offline_tts_model"] = "PASS" if ready else "NOT_READY"
-    if not ready:
-        report["warnings"].append("The English Piper offline TTS model is not ready.")
+    report["personal_voice"] = {
+        "engine": "MeloTTS EN-US -> OpenVoice V2 ToneColorConverter",
+        "provider": "cpu",
+        "runtime": str(voice_python.relative_to(project_root)),
+        "profile": str(profile_json.relative_to(project_root)),
+    }
+    report["checks"]["personal_voice_runtime_and_profile"] = "PASS"
+    report["tts_model_engine"] = "MeloTTS EN-US -> OpenVoice V2 (personal profile)"
+    report["checks"]["offline_tts_model"] = "PASS"
 
     report["checks"]["all_preflight"] = "PASS"
     return report

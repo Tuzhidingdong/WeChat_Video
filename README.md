@@ -9,15 +9,15 @@ One local, Windows-first golden path for a critical-nucleus / free-energy-barrie
 1. Project-local Python .venv bootstrap; global Python is not modified.
 2. Manim Community Edition scene in portrait 1080×1920 / 30 fps.
 3. Personal English narration: MeloTTS EN-US base speech converted by OpenVoice V2 using a one-time, project-local speaker embedding extracted from the user's own recording. The legacy Chinese MeloTTS and Piper test voices are retained only for rollback/diagnostics.
-4. Separate raw_text, display_text, and spoken_text per speech unit.
-5. One WAV per speech unit, plus a pronunciation-review WAV.
+4. Phrase-level speech units with separate raw_text, display_text, spoken_text, and display_text_zh, plus rhythm-block and claim links.
+5. One converted WAV per speech unit, plus a pronunciation-review WAV and local A/B cleanup candidates kept under ignored private paths.
 6. Measured WAV sample counts and per-chunk ffprobe records.
-7. One global audio_timing.json with the explicit 0–1000 ms cover.
-8. Cue-checkpoint-driven Manim visual stages with mutually exclusive VGroups and a `visual_stage_manifest.json`.
-9. Symmetric portrait safe-zone profile (15% margins each side) and hard subtitles (ASS/SRT) with a Latin font.
-10. FFmpeg normalization, two-pass loudness measurement/application, and final MP4 QA.
+7. One global audio_timing.json with the explicit 0–1000 ms cover, configurable per-unit pauses, and sparse local SFX events on the same sample origin.
+8. Cue-checkpoint-driven Manim visual stages with continuous value-driven motion, mutually exclusive ownership, dimming, and `visual_stage_manifest.json` / `motion_event_manifest.json`.
+9. Symmetric portrait safe-zone profile (15% margins each side) and bilingual hard subtitles (ASS/SRT) with separately validated Latin and CJK fonts.
+10. FFmpeg normalization, two-pass loudness measurement/application, exact global frame trim, and final MP4 QA.
 
-The current default production script is `content/sample_script.en.json`; all narration and visible video text are English. The original Chinese script and Fact Card are retained as evidence, not as the default voice path.
+The current default production script is `content/sample_script.en.json`; narration is standard US English and every cue carries a Simplified Chinese subtitle line. The original Chinese Fact Card is retained as the scientific authority and remains pending user review.
 
 This is deliberately not the full daily production product. No topic-pool manager, OpenCode authoring, Google Flow, Edge session, WeChat uploader, upload state machine, or publishing action is included in Slice A.
 
@@ -28,7 +28,7 @@ Prerequisites on Windows:
 - 64-bit Python 3.11 or 3.12.
 - Project-local FFmpeg and ffprobe under `tools/ffmpeg/bin` (libass/subtitles and loudnorm required); `config/tools.local.json` is read by the code and BAT launchers.
 - Project-local portable MiKTeX under `tools/miktex-portable` with `latex`, `dvisvgm`, `standalone`, `amsmath`, `amssymb`, `graphicx`, `xcolor`, `preview` installed; automatic package installation is disabled.
-- A Latin font from the configured list (Arial / Segoe UI / Aptos). The preflight checks that the font file exists; actual glyph appearance still requires user inspection.
+- A Latin font (Arial / Segoe UI / Aptos) and a separate CJK font with verified Simplified Chinese glyph coverage (Microsoft YaHei / SimHei / Noto Sans CJK SC). Preflight checks both independently; phone legibility still requires user review.
 
 Double-click Setup_Slice_A.bat. It reuses .venv and the project-local tools, downloads the official English Piper VITS voice only if missing, then runs preflight. Models are cached under `assets/models/` and ignored by Git. The runtime performs no model downloads and has no online TTS fallback.
 

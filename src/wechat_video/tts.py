@@ -113,7 +113,24 @@ def _generate_with_personal_voice(
     if not voice_python.is_file() or not worker.is_file():
         raise LocalTtsError("Isolated voice runtime is missing (.venv-voice).")
 
-    profile = json.loads(profile_json.read_text(encoding="utf-8"))
+    selection_path = profile_dir / "selection.json"
+    selection = (
+        json.loads(selection_path.read_text(encoding="utf-8"))
+        if selection_path.is_file()
+        else {"selected_profile": "active", "post_conversion_cleanup": "none"}
+    )
+    selected_profile = selection.get("selected_profile", "active")
+    clean_converted = selection.get("post_conversion_cleanup", "none") != "none"
+    if selected_profile == "candidate":
+        candidate_files = (
+            profile_dir / "candidates" / "voice_profile_candidate.json",
+            profile_dir / "candidates" / "target_se_candidate.pth",
+        )
+        if not all(path.is_file() for path in candidate_files):
+            raise LocalTtsError("Selected personal voice candidate is missing; refusing generic fallback.")
+        profile = json.loads(candidate_files[0].read_text(encoding="utf-8"))
+    else:
+        profile = json.loads(profile_json.read_text(encoding="utf-8"))
     run_dir = audio_dir.parent
     script_path = run_dir / "voice_script.json"
     script_path.write_text(
@@ -140,7 +157,10 @@ def _generate_with_personal_voice(
     command = [
         str(voice_python), "-X", "utf8", str(worker), "generate",
         "--script", str(script_path), "--out", str(run_dir),
+        "--profile", selected_profile,
     ]
+    if clean_converted:
+        command.append("--clean-converted")
     result = subprocess.run(
         command,
         cwd=str(root),
@@ -176,10 +196,12 @@ def _generate_with_personal_voice(
                 "channels": int(info.channels),
                 "frames": int(info.frames),
                 "duration_seconds": float(info.duration),
-                "tts_engine": "MeloTTS EN-US -> OpenVoice V2 (user voice profile)",
+                "tts_engine": manifest["engine"],
                 "tts_engine_version": profile["model_revision"],
                 "base_speaker": source["base_speaker"],
-                "provider": "cpu",
+                "voice_profile": selected_profile,
+                "post_conversion_cleanup": source["post_conversion_cleanup"],
+                "provider": manifest.get("provider", "cpu"),
                 "speed": 1.0,
                 "base_generation_seconds": source["base_generation_seconds"],
                 "conversion_seconds": source["conversion_seconds"],
@@ -200,8 +222,13 @@ def generate_speech_units(
     pronunciation_text: str,
 ) -> list[dict[str, Any]]:
     audio_dir.mkdir(parents=True, exist_ok=True)
-    if _voice_profile_paths()[1].joinpath("voice_profile.json").is_file():
-        return _generate_with_personal_voice(units, audio_dir, pronunciation_text)
+    if not _voice_profile_paths()[1].joinpath("voice_profile.json").is_file():
+        raise LocalTtsError(
+            "Personal OpenVoice profile is required; generic/Piper fallback is disabled. "
+            "Run enrollment before producing a Slice A sample."
+        )
+    return _generate_with_personal_voice(units, audio_dir, pronunciation_text)
+    # Legacy sherpa path is intentionally unreachable in the daily production route.
     sherpa, engine = _create_engine(model_root)
     results: list[dict[str, Any]] = []
 

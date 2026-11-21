@@ -6,22 +6,22 @@
 
 - **Milestone:** 1 — Local video-production proof
 - **Slice:** A — One critical-nucleus / free-energy-barrier sample
-- **Implementation state:** Personal OpenVoice V2 + MeloTTS EN-US voice enrolled from the user's recording; centered framing and exclusive visual stages implemented and locally rendered on this branch.
-- **Slice A exit condition:** NOT MET — the user must play the newly generated English MP4 and manually accept it.
-- **Next authorized work:** user playback review of English pronunciation, centered composition, visual-stage transitions, scientific claims, and 55–65 s duration; do not begin Slice B.
+- **Implementation state:** Bilingual short-form upgrade implemented: cleaned personal OpenVoice voice candidate, English narration with Simplified Chinese subtitles, five rhythm blocks, continuous dynamic Manim motion, sparse local SFX, and a new real MP4 rendered on this branch.
+- **Slice A exit condition:** NOT MET — the user must listen to the A/B voice samples and play the bilingual MP4 before accepting it.
+- **Next authorized work:** user review of voice identity/cleanliness, US-English pronunciation, bilingual subtitle legibility, motion timing, and scientific claims; do not begin Slice B.
 
 ## Implemented in this branch
 
 - Project-local Python environment bootstrap (Setup_Slice_A.bat).
 - Local-only runtime entry (Run_Slice_A.bat); no runtime package installation or network fallback.
-- Windows preflight for Python venv, Manim, project-local FFmpeg/ffprobe, libass/loudnorm, portable MiKTeX LaTeX/dvisvgm, Latin font, and offline TTS model files.
+- Windows preflight for Python venv, Manim, project-local FFmpeg/ffprobe, libass/loudnorm plus local denoise filters, portable MiKTeX LaTeX/dvisvgm, independently validated Latin and CJK fonts, and the personal OpenVoice runtime/profile.
 - Default personal English narration: one-time OpenVoice V2 target embedding from `my_voice/voice.m4a`, reused for all speech units; isolated `.venv-voice` (Python 3.9, CPU PyTorch), MeloTTS EN-US base voice; legacy Chinese and Piper voices retained for rollback only.
-- Speech-unit script schema with separate raw/display/spoken forms and claim/visual-trigger links.
-- Per-unit WAV output and independent pronunciation-review WAV.
-- Measured sample counts, per-unit ffprobe metadata, explicit cover, pauses, and global audio timeline.
-- One registered Manim critical-nucleus template with mutually exclusive visual stages and `visual_stage_manifest.json`.
+- Phrase-level bilingual script schema with raw/display/spoken/zh forms, claim links, rhythm blocks, configurable pauses, and SFX triggers.
+- Per-unit converted WAV output, independent pronunciation-review WAV, and separate private A/B cleanup candidates without overwriting the active embedding.
+- Measured sample counts, per-unit ffprobe metadata, explicit cover, configurable silence, sparse SFX events, and one global audio timeline.
+- One registered Manim critical-nucleus template with continuous value-driven motion, mutually exclusive visual stages, focus dimming, and `visual_stage_manifest.json` / `motion_event_manifest.json`.
 - Static-camera portrait safe-zone profile with symmetric 15% side margins and x=0 centered content.
-- SRT/ASS subtitle generation and relative-path FFmpeg burn-in.
+- Bilingual SRT/ASS subtitles with separate Latin/CJK styles, explicit safe-zone placement, and relative-path FFmpeg burn-in.
 - Video/audio assembly and mandatory media QA.
 - Candidate Fact Card plus source records and a clear not-for-publication review status.
 - Core unit tests and GitHub Actions test workflow.

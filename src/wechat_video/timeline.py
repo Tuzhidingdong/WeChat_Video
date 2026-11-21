@@ -7,7 +7,16 @@ from typing import Any
 
 
 COVER_DURATION_MS = 1000
-INTER_UNIT_PAUSE_MS = 280
+DEFAULT_INTER_UNIT_PAUSE_MS = 280
+COMPREHENSION_PAUSE_MIN_MS = 500
+COMPREHENSION_PAUSE_MAX_MS = 800
+
+
+def _pause_ms_for_unit(unit: dict[str, Any]) -> int:
+    value = int(unit.get("pause_after_ms", DEFAULT_INTER_UNIT_PAUSE_MS))
+    if value < 0 or value > 2000:
+        raise ValueError(f"pause_after_ms out of range for {unit.get('unit_id')}: {value}")
+    return value
 
 
 def _round_samples_to_ms(samples: int, sample_rate: int) -> int:
@@ -56,7 +65,6 @@ def build_audio_timeline(
         )
     sample_rate = sample_rates.pop()
     cover_frames = sample_rate * COVER_DURATION_MS // 1000
-    pause_frames = sample_rate * INTER_UNIT_PAUSE_MS // 1000
 
     output_wav.parent.mkdir(parents=True, exist_ok=True)
     segments: list[dict[str, Any]] = [
@@ -115,9 +123,12 @@ def build_audio_timeline(
                     "unit_id": unit["unit_id"],
                     "raw_text": unit["raw_text"],
                     "display_text": unit["display_text"],
+                    "display_text_zh": unit.get("display_text_zh", ""),
                     "spoken_text": unit["spoken_text"],
                     "claim_ids": unit["claim_ids"],
                     "visual_trigger_ids": unit["visual_trigger_ids"],
+                    "rhythm_block_id": unit.get("rhythm_block_id"),
+                    "sfx_trigger_id": unit.get("sfx_trigger_id"),
                     "audio_file": str(path),
                     "sample_rate": sample_rate,
                     "channels": 1,
@@ -133,9 +144,11 @@ def build_audio_timeline(
             cursor = end_sample
 
             if index < len(units) - 1:
+                pause_ms = _pause_ms_for_unit(unit)
+                gap_frames = sample_rate * pause_ms // 1000
                 gap_start = cursor
-                gap_end = cursor + pause_frames
-                writer.writeframes(_silence_bytes(pause_frames, 1, 2))
+                gap_end = cursor + gap_frames
+                writer.writeframes(_silence_bytes(gap_frames, 1, 2))
                 segments.append(
                     {
                         "segment_id": f"pause_after_{unit['unit_id']}",
@@ -144,7 +157,7 @@ def build_audio_timeline(
                         "end_sample": gap_end,
                         "start_ms": _round_samples_to_ms(gap_start, sample_rate),
                         "end_ms": _round_samples_to_ms(gap_end, sample_rate),
-                        "duration_ms": INTER_UNIT_PAUSE_MS,
+                        "duration_ms": pause_ms,
                     }
                 )
                 cursor = gap_end
@@ -165,12 +178,54 @@ def build_audio_timeline(
         "cover": segments[0],
         "segments": segments,
         "speech_units": cue_records,
+        "sfx_events": [],
+        "rhythm_blocks": [],
         "total_sample_count": total_frames,
         "total_duration_ms": _round_samples_to_ms(total_frames, sample_rate),
         "total_duration_seconds": total_frames / sample_rate,
         "cover_to_first_speech_gap_ms": 0,
         "timing_authority": "measured WAV sample counts; ffprobe metadata retained per speech unit",
     }
+
+
+def attach_editorial_events(
+    timeline: dict[str, Any], units: list[dict[str, Any]], sfx_durations_ms: dict[str, int]
+) -> dict[str, Any]:
+    """Attach global-origin SFX events and rhythm blocks to the timeline."""
+    sample_rate = int(timeline["audio_sample_rate"])
+    total_samples = int(timeline["total_sample_count"])
+    events: list[dict[str, Any]] = []
+    for cue, unit in zip(timeline["speech_units"], units):
+        trigger = unit.get("sfx_trigger_id")
+        if not trigger:
+            continue
+        duration_ms = int(sfx_durations_ms.get(trigger, 180))
+        start = int(cue["start_sample"])
+        end = min(total_samples, start + sample_rate * duration_ms // 1000)
+        if end <= start:
+            raise ValueError(f"SFX event {trigger} falls outside the global timeline")
+        events.append(
+            {
+                "event_id": f"sfx_{cue['unit_id']}_{trigger}",
+                "sfx_trigger_id": trigger,
+                "unit_id": cue["unit_id"],
+                "start_sample": start,
+                "end_sample": end,
+                "start_ms": _round_samples_to_ms(start, sample_rate),
+                "end_ms": _round_samples_to_ms(end, sample_rate),
+                "duration_ms": _round_samples_to_ms(end - start, sample_rate),
+                "file": f"sfx/{trigger}.wav",
+                "peak_target": 0.06,
+            }
+        )
+    timeline["sfx_events"] = events
+    timeline["rhythm_blocks"] = []
+    for unit in units:
+        block_id = unit.get("rhythm_block_id")
+        if not timeline["rhythm_blocks"] or timeline["rhythm_blocks"][-1]["block_id"] != block_id:
+            timeline["rhythm_blocks"].append({"block_id": block_id, "unit_ids": []})
+        timeline["rhythm_blocks"][-1]["unit_ids"].append(unit["unit_id"])
+    return timeline
 
 
 def write_timeline(path: Path, timeline: dict[str, Any]) -> None:

@@ -1,84 +1,121 @@
-"""Shared visual-stage definitions for the Slice A critical-nucleus template.
-
-The Manim scene and the pipeline's visual_stage_manifest both use these
-constants so that stage IDs and transition timing cannot drift apart.
-"""
+"""Shared visual-stage and motion-event definitions for the Slice A template."""
 from __future__ import annotations
 
 from typing import Any
 
 
 TRIGGER_TO_STAGE: dict[str, tuple[str, str]] = {
-    "INTRO_QUESTION": ("particle_embryo", "Particle embryo"),
-    "SHOW_TOTAL_FREE_ENERGY": ("energy_competition", "Total free energy"),
-    "SHOW_SCALING": ("area_vs_volume", "Area versus volume"),
-    "SHOW_FREE_ENERGY_CURVE": ("free_energy_landscape", "Free-energy landscape"),
-    "MARK_CRITICAL_RADIUS": ("critical_threshold", "Critical threshold"),
-    "COMPARE_SUB_SUPERCRITICAL": ("critical_threshold", "Critical threshold"),
-    "SHOW_CRITICAL_RADIUS_EQUATION": ("critical_radius_equation", "Critical radius relation"),
-    "SHOW_BARRIER_EQUATION": ("barrier_equation", "Barrier relation"),
-    "MODEL_LIMITS": ("model_assumptions", "Model assumptions and limits"),
+    "SEED_FORM_DISSOLVE": ("particle_embryo", "Tiny seed forms and dissolves"),
+    "SEED_QUESTION": ("particle_embryo", "Critical-size question"),
+    "TWO_TERMS": ("energy_competition", "Two opposing terms"),
+    "SURFACE_COST": ("surface_cost", "Surface-energy cost"),
+    "AREA_SCALING": ("area_scaling", "Area scales as r squared"),
+    "BULK_GAIN": ("bulk_gain", "Bulk free-energy gain"),
+    "VOLUME_SCALING": ("volume_scaling", "Volume scales as r cubed"),
+    "COMPETITION": ("competition", "Live term competition"),
+    "SMALL_R_SURFACE": ("competition", "Small-r surface dominance"),
+    "CURVE_DRAW": ("free_energy_landscape", "Free-energy curve drawing"),
+    "CRITICAL_PEAK": ("critical_threshold", "Critical-radius peak"),
+    "BARRIER_EQ": ("barrier_relation", "Barrier relation"),
+    "MODEL_ASSUMPTION": ("model_scope", "Model assumptions"),
+    "SUBCRITICAL_RETURN": ("threshold_dynamics", "Subcritical return"),
+    "SUPERCRITICAL_DESCENT": ("threshold_dynamics", "Supercritical descent"),
+    "THERMO_CAVEAT": ("thermo_caveat", "Thermodynamic tendency"),
+    "REAL_SYSTEMS": ("real_systems", "Real-system factors"),
+    "CRYSTAL_GROW": ("crystal_growth", "Crystal growth beyond threshold"),
+    "TAKEAWAY": ("takeaway", "Memorable principle"),
+}
+
+TRIGGER_TO_MOTION: dict[str, str] = {
+    "SEED_FORM_DISSOLVE": "seed_assemble_and_dissolve",
+    "SEED_QUESTION": "marker_pulse",
+    "TWO_TERMS": "term_split",
+    "SURFACE_COST": "surface_growth",
+    "AREA_SCALING": "r_squared_rise",
+    "BULK_GAIN": "bulk_release",
+    "VOLUME_SCALING": "r_cubed_rise",
+    "COMPETITION": "term_crossover",
+    "SMALL_R_SURFACE": "surface_dominance",
+    "CURVE_DRAW": "curve_draw",
+    "CRITICAL_PEAK": "peak_reveal",
+    "BARRIER_EQ": "barrier_highlight",
+    "MODEL_ASSUMPTION": "scope_fade",
+    "SUBCRITICAL_RETURN": "subcritical_return",
+    "SUPERCRITICAL_DESCENT": "supercritical_descent",
+    "THERMO_CAVEAT": "caveat_fade",
+    "REAL_SYSTEMS": "context_fade",
+    "CRYSTAL_GROW": "crystal_growth",
+    "TAKEAWAY": "final_resolve",
 }
 
 TRANSITION_MIN_MS = 250
 TRANSITION_MAX_MS = 600
 TRANSITION_DIVISOR = 5000
+DIM_OPACITY = 0.25
+
+EDITORIAL_BEATS = {
+    "HOOK": "counter-intuitive hook",
+    "CONFLICT": "surface vs bulk conflict",
+    "r_squared_rise": "r² vs r³ crossover",
+    "CRITICAL_PEAK": "critical-radius peak",
+    "TAKEAWAY": "final practical takeaway",
+}
 
 
 def stage_for_unit(unit: dict[str, Any]) -> tuple[str, str]:
-    """Resolve one unique stage for a speech unit from its visual triggers."""
     triggers = list(unit.get("visual_trigger_ids") or [])
     if not triggers:
         raise ValueError(f"{unit.get('unit_id')} has no visual_trigger_ids")
     stages = {TRIGGER_TO_STAGE.get(trigger, (None, None))[0] for trigger in triggers}
     if len(stages) != 1 or None in stages:
         raise ValueError(
-            f"{unit.get('unit_id')} maps to ambiguous/unregistered stages: "
-            f"{triggers} -> {sorted(str(s) for s in stages)}"
+            f"{unit.get('unit_id')} maps to ambiguous/unregistered stages: {triggers}"
         )
-    stage_id = next(iter(stages))
-    label = next(label for sid, label in TRIGGER_TO_STAGE.values() if sid == stage_id)
-    return stage_id, label
+    stage_key = next(iter(stages))
+    label = next(label for key, label in TRIGGER_TO_STAGE.values() if key == stage_key)
+    return stage_key, label
 
 
 def transition_ms(duration_ms: int) -> int:
-    """Bounded stage-transition duration derived from measured cue duration."""
     return max(TRANSITION_MIN_MS, min(TRANSITION_MAX_MS, int(duration_ms) // TRANSITION_DIVISOR))
 
 
 def build_stage_manifest(
     cues: list[dict[str, Any]], units: list[dict[str, Any]], fps: int = 30
 ) -> dict[str, Any]:
-    """Build the per-cue visual stage manifest from measured global timing."""
     if len(cues) != len(units):
         raise ValueError("cue/units length mismatch in visual stage manifest")
     stages: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for cue, unit in zip(cues, units):
-        stage_id, label = stage_for_unit(unit)
+        stage_key, label = stage_for_unit(unit)
+        stage_id = f"{stage_key}_{unit['unit_id']}"
         if stage_id in seen_ids:
             raise ValueError(f"duplicate visual stage id: {stage_id}")
         seen_ids.add(stage_id)
         start_ms = int(cue["start_ms"])
         end_ms = int(cue["end_ms"])
         trans_ms = transition_ms(end_ms - start_ms)
-        record = {
-            "stage_id": stage_id,
-            "label": label,
-            "unit_id": unit["unit_id"],
-            "triggers": list(unit["visual_trigger_ids"]),
-            "start_ms": start_ms,
-            "end_ms": end_ms,
-            "start_frame": round(start_ms * fps / 1000),
-            "end_frame": round(end_ms * fps / 1000),
-            "transition_start_frame": round(start_ms * fps / 1000),
-            "transition_end_frame": round((start_ms + trans_ms) * fps / 1000),
-            "transition_duration_ms": trans_ms,
-            "active_stage": stage_id,
-        }
-        stages.append(record)
+        stages.append(
+            {
+                "stage_id": stage_id,
+                "stage_key": stage_key,
+                "label": label,
+                "unit_id": unit["unit_id"],
+                "rhythm_block_id": unit.get("rhythm_block_id"),
+                "triggers": list(unit["visual_trigger_ids"]),
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "start_frame": round(start_ms * fps / 1000),
+                "end_frame": round(end_ms * fps / 1000),
+                "transition_start_frame": round(start_ms * fps / 1000),
+                "transition_end_frame": round((start_ms + trans_ms) * fps / 1000),
+                "transition_duration_ms": trans_ms,
+                "active_stage": stage_id,
+            }
+        )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "template": "critical_nucleus_free_energy_barrier",
         "camera": "static portrait",
         "fps": fps,
@@ -86,5 +123,40 @@ def build_stage_manifest(
         "one_active_stage_per_cue": True,
         "previous_stage_removed_before_next": True,
         "unique_stage_ids": True,
+        "dim_opacity_for_inactive_objects": DIM_OPACITY,
         "stages": stages,
+    }
+
+
+def build_motion_manifest(
+    cues: list[dict[str, Any]], units: list[dict[str, Any]], fps: int = 30
+) -> dict[str, Any]:
+    events: list[dict[str, Any]] = []
+    for cue, unit in zip(cues, units):
+        trigger = unit["visual_trigger_ids"][0]
+        motion = TRIGGER_TO_MOTION.get(trigger)
+        if not motion:
+            raise ValueError(f"No motion event registered for trigger {trigger}")
+        start_ms = int(cue["start_ms"])
+        trans_ms = transition_ms(int(cue["end_ms"]) - start_ms)
+        events.append(
+            {
+                "event_id": f"{motion}_{unit['unit_id']}",
+                "motion_type": motion,
+                "unit_id": unit["unit_id"],
+                "rhythm_block_id": unit.get("rhythm_block_id"),
+                "trigger_id": trigger,
+                "start_ms": start_ms + trans_ms,
+                "end_ms": int(cue["end_ms"]),
+                "start_frame": round((start_ms + trans_ms) * fps / 1000),
+                "end_frame": round(int(cue["end_ms"]) * fps / 1000),
+                "dim_opacity": DIM_OPACITY,
+                "schematic_marker": motion in {"subcritical_return", "supercritical_descent"},
+            }
+        )
+    return {
+        "schema_version": 1,
+        "camera": "static portrait",
+        "continuous_motion": True,
+        "events": events,
     }

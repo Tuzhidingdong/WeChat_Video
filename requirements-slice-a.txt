@@ -3,3 +3,4 @@
 manim==0.22.1
 sherpa-onnx>=1.12,<2
 soundfile>=0.12,<1
+fonttools>=4.40,<5

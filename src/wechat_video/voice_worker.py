@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -66,6 +68,60 @@ def _wav_info(path: Path) -> dict[str, Any]:
         "frames": int(info.frames),
         "duration_seconds": round(float(info.duration), 4),
     }
+
+
+CANDIDATE_DIR = PROFILE_DIR / "candidates"
+FILTERED_REFERENCE = CANDIDATE_DIR / "reference_filtered.wav"
+CANDIDATE_SE = CANDIDATE_DIR / "target_se_candidate.pth"
+CANDIDATE_PROFILE_JSON = CANDIDATE_DIR / "voice_profile_candidate.json"
+SELECTION_JSON = PROFILE_DIR / "selection.json"
+
+
+def acoustic_metrics(path: Path) -> dict[str, Any]:
+    """Non-sensitive acoustic metrics; no transcript or absolute path is emitted."""
+    import numpy as np
+    import soundfile as sf
+
+    samples, rate = sf.read(str(path), dtype="float32", always_2d=False)
+    values = np.asarray(samples, dtype=np.float32).reshape(-1)
+    frame = max(1, int(0.02 * rate))
+    count = len(values) // frame
+    rms_frames = (
+        np.sqrt(np.mean(values[: count * frame].reshape(count, frame) ** 2, axis=1))
+        if count
+        else np.array([float(np.sqrt(np.mean(values**2)))])
+    )
+    sorted_rms = np.sort(rms_frames)
+    noise_floor = float(np.mean(sorted_rms[: max(1, len(sorted_rms) // 5)]))
+    peak = float(np.max(np.abs(values))) if values.size else 0.0
+    total = max(1, values.size)
+    return {
+        "file": str(path.relative_to(ROOT)),
+        "sample_rate": int(rate),
+        "channels": 1 if values.ndim == 1 else int(np.asarray(samples).shape[1]),
+        "frames": int(values.size),
+        "duration_seconds": round(values.size / rate, 4),
+        "peak": round(peak, 5),
+        "peak_dbfs": round(20 * math.log10(peak), 2) if peak > 0 else -120.0,
+        "rms": round(float(np.sqrt(np.mean(values**2))), 5),
+        "rms_dbfs": round(20 * math.log10(float(np.sqrt(np.mean(values**2)))), 2)
+        if values.size
+        else -120.0,
+        "noise_floor": round(noise_floor, 6),
+        "clipping_ratio": round(float(np.mean(np.abs(values) >= 0.999)), 6),
+    }
+
+
+def _ffmpeg_filter_copy(source: Path, target: Path, filter_chain: str) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            str(FFMPEG), "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(source), "-af", filter_chain,
+            "-c:a", "pcm_s16le", str(target),
+        ],
+        check=True,
+    )
 
 
 def _load_converter():
@@ -276,18 +332,25 @@ def cmd_enroll(args: argparse.Namespace) -> int:
 def cmd_generate(args: argparse.Namespace) -> int:
     import torch
 
-    profile_json = PROFILE_DIR / "voice_profile.json"
-    target_se_path = PROFILE_DIR / "target_se.pth"
+    profile_choice = getattr(args, "profile", "active")
+    clean_converted = bool(getattr(args, "clean_converted", False))
+    if profile_choice == "candidate":
+        profile_json = CANDIDATE_PROFILE_JSON
+        target_se_path = CANDIDATE_SE
+    else:
+        profile_json = PROFILE_DIR / "voice_profile.json"
+        target_se_path = PROFILE_DIR / "target_se.pth"
     if not profile_json.is_file() or not target_se_path.is_file():
-        raise RuntimeError("Voice profile missing; run enrollment first.")
+        raise RuntimeError(f"Voice profile ({profile_choice}) missing; no generic fallback is allowed.")
     profile = json.loads(profile_json.read_text(encoding="utf-8"))
 
     script_path = Path(args.script)
     out_dir = Path(args.out)
     base_dir = out_dir / "base_melotts"
+    raw_dir = out_dir / "converted_user_voice_raw"
     converted_dir = out_dir / "converted_user_voice"
-    base_dir.mkdir(parents=True, exist_ok=True)
-    converted_dir.mkdir(parents=True, exist_ok=True)
+    for path in (base_dir, raw_dir, converted_dir):
+        path.mkdir(parents=True, exist_ok=True)
 
     converter = _load_converter()
     source_se = torch.load(str(SRC_SE_PATH), map_location="cpu")
@@ -303,6 +366,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
         unit_id = unit["unit_id"]
         text = unit["spoken_text"]
         base_path = base_dir / f"{unit_id}.wav"
+        raw_path = raw_dir / f"{unit_id}.wav"
         final_path = converted_dir / f"{unit_id}.wav"
         t0 = time.time()
         model.tts_to_file(text, speaker_id, str(base_path), speed=1.0)
@@ -311,9 +375,15 @@ def cmd_generate(args: argparse.Namespace) -> int:
             audio_src_path=str(base_path),
             src_se=source_se,
             tgt_se=target_se,
-            output_path=str(final_path),
+            output_path=str(raw_path),
             message="@MyShell",
         )
+        if clean_converted:
+            _ffmpeg_filter_copy(raw_path, final_path, "afftdn=nf=-25")
+            if _wav_info(final_path)["frames"] != _wav_info(raw_path)["frames"]:
+                raise RuntimeError(f"Post-conversion cleanup changed sample count for {unit_id}")
+        else:
+            shutil.copy2(raw_path, final_path)
         t2 = time.time()
         info = _wav_info(final_path)
         results.append(
@@ -321,7 +391,9 @@ def cmd_generate(args: argparse.Namespace) -> int:
                 "unit_id": unit_id,
                 "spoken_text": text,
                 "base_wav": str(base_path.relative_to(ROOT)),
+                "raw_converted_wav": str(raw_path.relative_to(ROOT)),
                 "final_wav": str(final_path.relative_to(ROOT)),
+                "post_conversion_cleanup": "afftdn=nf=-25" if clean_converted else "none",
                 **info,
                 "base_generation_seconds": round(t1 - t0, 3),
                 "conversion_seconds": round(t2 - t1, 3),
@@ -334,22 +406,33 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
     review_text = script["pronunciation_review_text"]
     base_review = base_dir / "pronunciation_review.wav"
+    raw_review = raw_dir / "pronunciation_review.wav"
     final_review = converted_dir / "pronunciation_review.wav"
     model.tts_to_file(review_text, speaker_id, str(base_review), speed=1.0)
     converter.convert(
         audio_src_path=str(base_review),
         src_se=source_se,
         tgt_se=target_se,
-        output_path=str(final_review),
+        output_path=str(raw_review),
         message="@MyShell",
     )
+    if clean_converted:
+        _ffmpeg_filter_copy(raw_review, final_review, "afftdn=nf=-25")
+    else:
+        shutil.copy2(raw_review, final_review)
 
     manifest = {
         "schema_version": 1,
         "engine": "MeloTTS EN-US -> OpenVoice V2 ToneColorConverter (CPU)",
+        "provider": "cpu",
+        "voice_profile": profile_choice,
         "voice_profile_fingerprint": profile["fingerprint"],
         "base_speaker": speaker_key,
         "watermark_preserved": True,
+        "cleanup_steps": {
+            "reference": "filtered candidate" if profile_choice == "candidate" else "original 16k mono",
+            "post_conversion": "afftdn=nf=-25" if clean_converted else "none",
+        },
         "units": results,
         "pronunciation_review": _wav_info(final_review),
     }
@@ -360,6 +443,144 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+AB_BASE = CANDIDATE_DIR / "ab_base_en_us.wav"
+AB_ACTIVE = CANDIDATE_DIR / "ab_active_profile.wav"
+AB_CANDIDATE = CANDIDATE_DIR / "ab_candidate_profile.wav"
+AB_CLEANED = CANDIDATE_DIR / "ab_candidate_converted_cleaned.wav"
+DIAGNOSTIC_ORIGINAL = CANDIDATE_DIR / "diagnostic_original.wav"
+
+
+def _prepare_se_extractor():
+    import importlib
+
+    wt_module = importlib.import_module("whisper_timestamped.transcribe")
+    wt_module.get_vad_segments = _vad_segments_local
+    from openvoice import se_extractor
+
+    return se_extractor
+
+
+def cmd_diagnose(args: argparse.Namespace) -> int:
+    CANDIDATE_DIR.mkdir(parents=True, exist_ok=True)
+    if not DIAGNOSTIC_ORIGINAL.exists():
+        subprocess.run(
+            [
+                str(FFMPEG), "-hide_banner", "-loglevel", "error", "-y",
+                "-i", str(DEFAULT_REFERENCE), "-vn", "-ac", "1", "-ar", "16000",
+                "-c:a", "pcm_s16le", str(DIAGNOSTIC_ORIGINAL),
+            ],
+            check=True,
+        )
+    stages = {
+        "original_m4a_decoded": DIAGNOSTIC_ORIGINAL,
+        "active_reference_wav": PROFILE_DIR / "reference_input.wav",
+        "filtered_reference_candidate": FILTERED_REFERENCE,
+        "melotts_base": AB_BASE,
+        "active_profile_conversion": AB_ACTIVE,
+        "candidate_profile_conversion": AB_CANDIDATE,
+        "candidate_post_cleaned": AB_CLEANED,
+    }
+    metrics = {
+        name: acoustic_metrics(path) for name, path in stages.items() if path.is_file()
+    }
+    report = {"schema_version": 1, "stages": metrics}
+    (CANDIDATE_DIR / "voice_quality_report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_clean_candidate(args: argparse.Namespace) -> int:
+    import torch
+
+    CANDIDATE_DIR.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            str(FFMPEG), "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(DEFAULT_REFERENCE), "-vn",
+            "-af", "highpass=f=80,afftdn=nf=-28",
+            "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(FILTERED_REFERENCE),
+        ],
+        check=True,
+    )
+    filtered_info = acoustic_metrics(FILTERED_REFERENCE)
+    reference_info = acoustic_metrics(PROFILE_DIR / "reference_input.wav")
+
+    converter = _load_converter()
+    se_extractor = _prepare_se_extractor()
+    target_se, audio_name = se_extractor.get_se(
+        str(FILTERED_REFERENCE),
+        converter,
+        vad=True,
+        target_dir=str(CANDIDATE_DIR / "processed"),
+    )
+    torch.save(target_se.cpu(), str(CANDIDATE_SE))
+
+    model = _load_melo()
+    speaker_key, speaker_id = _base_speaker_choice(model)
+    source_se = torch.load(str(SRC_SE_PATH), map_location="cpu")
+    active_se = torch.load(str(PROFILE_DIR / "target_se.pth"), map_location="cpu")
+
+    model.tts_to_file(AB_TEXT, speaker_id, str(AB_BASE), speed=1.0)
+    converter.convert(
+        audio_src_path=str(AB_BASE), src_se=source_se, tgt_se=active_se,
+        output_path=str(AB_ACTIVE), message="@MyShell",
+    )
+    converter.convert(
+        audio_src_path=str(AB_BASE), src_se=source_se, tgt_se=target_se,
+        output_path=str(AB_CANDIDATE), message="@MyShell",
+    )
+    _ffmpeg_filter_copy(AB_CANDIDATE, AB_CLEANED, "afftdn=nf=-25")
+
+    active_metrics = acoustic_metrics(AB_ACTIVE)
+    candidate_metrics = acoustic_metrics(AB_CANDIDATE)
+    cleaned_metrics = acoustic_metrics(AB_CLEANED)
+    noise_gain = active_metrics["noise_floor"] - cleaned_metrics["noise_floor"]
+    duration_ok = abs(cleaned_metrics["duration_seconds"] - active_metrics["duration_seconds"]) <= 0.02
+    clipping_ok = cleaned_metrics["clipping_ratio"] <= active_metrics["clipping_ratio"] + 0.0001
+    selected = "candidate" if (noise_gain >= 0.000001 and duration_ok and clipping_ok) else "active"
+    post_cleanup = selected == "candidate"
+    selection = {
+        "schema_version": 1,
+        "selected_profile": selected,
+        "post_conversion_cleanup": "afftdn=nf=-25" if post_cleanup else "none",
+        "reference_noise_floor_delta": round(
+            filtered_info["noise_floor"] - reference_info["noise_floor"], 6
+        ),
+        "converted_noise_floor_delta": round(noise_gain, 6),
+        "duration_preserved": duration_ok,
+        "clipping_not_worse": clipping_ok,
+        "reason": "objective metrics only; user listening still required",
+        "candidate_fingerprint": hashlib.sha256(
+            (MODEL_REVISION + "|" + _sha256(FILTERED_REFERENCE)).encode("utf-8")
+        ).hexdigest(),
+        "se_audio_name": audio_name,
+    }
+    SELECTION_JSON.write_text(
+        json.dumps(selection, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    CANDIDATE_PROFILE_JSON.write_text(
+        json.dumps(
+            {
+                "schema": ENROLLMENT_SCHEMA,
+                "profile": "candidate",
+                "fingerprint": selection["candidate_fingerprint"],
+                "model_revision": MODEL_REVISION,
+                "base_speaker": speaker_key,
+                "reference": "filtered candidate (never overwrites active profile)",
+                "watermark_preserved": True,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print("CLEAN_CANDIDATE_OK", json.dumps(selection, ensure_ascii=False))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="wechat-video-voice-worker")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -367,9 +588,13 @@ def build_parser() -> argparse.ArgumentParser:
     enroll = sub.add_parser("enroll")
     enroll.add_argument("--reference", default=str(DEFAULT_REFERENCE))
     enroll.add_argument("--force", action="store_true")
+    sub.add_parser("diagnose")
+    sub.add_parser("clean-candidate")
     generate = sub.add_parser("generate")
     generate.add_argument("--script", default=str(ROOT / "content" / "sample_script.en.json"))
     generate.add_argument("--out", required=True)
+    generate.add_argument("--profile", choices=("active", "candidate"), default="active")
+    generate.add_argument("--clean-converted", action="store_true")
     return parser
 
 
@@ -379,6 +604,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_preflight(args)
     if args.command == "enroll":
         return cmd_enroll(args)
+    if args.command == "diagnose":
+        return cmd_diagnose(args)
+    if args.command == "clean-candidate":
+        return cmd_clean_candidate(args)
     if args.command == "generate":
         return cmd_generate(args)
     return 2

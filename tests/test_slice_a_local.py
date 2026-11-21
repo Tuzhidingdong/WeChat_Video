@@ -76,7 +76,7 @@ def test_visual_stage_mapping_is_unique_and_manifest_consistent() -> None:
         stage["transition_start_frame"] <= stage["transition_end_frame"] <= stage["end_frame"]
         for stage in manifest["stages"]
     )
-    assert stage_for_unit(script["speech_units"][4])[0] == "critical_threshold"
+    assert stage_for_unit(script["speech_units"][8])[0] == "critical_threshold"
 
 
 def test_layout_uses_symmetric_portrait_content_band() -> None:
@@ -115,8 +115,8 @@ def test_subtitles_use_global_origin_and_english_font(tmp_path: Path) -> None:
     srt = (work / "captions.srt").read_text(encoding="utf-8-sig")
     ass = (work / "captions.ass").read_text(encoding="utf-8-sig")
     assert "00:00:01,000 --> 00:00:02,500" in srt
-    assert "Dialogue: 0,0:00:01.00,0:00:02.50,Default" in ass
-    assert "Style: Default,Arial" in ass
+    assert "Dialogue: 0,0:00:01.00,0:00:02.50,EN," in ass
+    assert "Style: EN,Arial" in ass
     assert not CJK.search(srt) and not CJK.search(ass)
 
 
