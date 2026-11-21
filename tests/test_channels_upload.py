@@ -18,6 +18,7 @@ from wechat_video.channels_uploader import (
     _visible_locator,
     _fill_field,
     _draft_save_button,
+    _draft_snapshot,
     _video_file_input,
     _wait_for_account_identity,
     _ensure_draft_list_account_identity,
@@ -36,12 +37,16 @@ from wechat_video.topic_approval import (
 
 
 class _FakeElement:
-    def __init__(self, *, text="", attrs=None, tag="div", visible=True, enabled=True):
+    def __init__(
+        self, *, text="", attrs=None, tag="div", visible=True, enabled=True,
+        child_texts=None,
+    ):
         self.text = text
         self.attrs = dict(attrs or {})
         self.tag = tag
         self.visible = visible
         self.enabled = enabled
+        self.child_texts = list(child_texts or [])
         self.clicked = False
 
     def is_visible(self):
@@ -72,6 +77,8 @@ class _FakeElement:
             return self.tag
         if "matches('a,button,[role=button]')" in expression:
             return False
+        if "Array.from(element.children)" in expression:
+            return list(self.child_texts)
         raise NotImplementedError(expression)
 
 
@@ -272,6 +279,112 @@ def test_draft_match_requires_title_and_explicit_draft_status() -> None:
     matches = _matching_draft_entries(snapshot, "临界半径如何决定成核", selectors)
     assert len(matches) == 1
     assert "草稿" in matches[0]
+
+
+def test_draft_match_uses_verified_draft_manager_membership_without_row_status_label() -> None:
+    selectors = {"draft_status_texts": ["草稿", "草稿箱"]}
+    verified_draft_snapshot = {
+        "view_type": "draft_list",
+        "view_verified": True,
+        "entries": ["临界半径如何决定成核 2026-11-21 20:30"],
+    }
+    video_list_snapshot = {
+        "view_type": "video_list",
+        "view_verified": True,
+        "entries": ["临界半径如何决定成核 2026-11-21 20:30"],
+    }
+
+    assert len(
+        _matching_draft_entries(
+            verified_draft_snapshot, "临界半径如何决定成核", selectors
+        )
+    ) == 1
+    assert _matching_draft_entries(
+        video_list_snapshot, "临界半径如何决定成核", selectors
+    ) == []
+
+
+def _draft_list_test_selectors() -> dict:
+    return {
+        "draft_list_path": "/platform/post/draftListManager",
+        "draft_list_frame_path": "/micro/content/post/draftListManager",
+        "draft_list_root_selector": "div.finder-page.DraftListManager",
+        "draft_list_active_tab_selector": "li.weui-desktop-tab__nav_current",
+        "draft_list_header_selector": "div.post-list-header",
+        "draft_list_body_selector": (
+            "div.list-wrapper.draft-list-wrapper div.post-list-body"
+        ),
+        "draft_list_ready_timeout_seconds": 0,
+    }
+
+
+def _make_draft_list_page(*, draft_count: int, entries: list[str] | None = None):
+    main = _FakeFrame("https://channels.weixin.qq.com/platform/post/draftListManager")
+    root = _FakeElement(text="草稿箱", visible=True)
+    active_tab = _FakeElement(text=f"草稿箱 ({draft_count})", visible=True)
+    header = _FakeElement(text=f"草稿箱 ({draft_count})", visible=True)
+    body_texts = list(entries or [])
+    body = _FakeElement(
+        text=" ".join(body_texts),
+        visible=bool(draft_count),
+        child_texts=body_texts,
+    )
+    child = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/draftListManager",
+        selectors={
+            "div.finder-page.DraftListManager": [root],
+            "li.weui-desktop-tab__nav_current": [active_tab],
+            "div.post-list-header": [header],
+            "div.list-wrapper.draft-list-wrapper div.post-list-body": [body],
+        },
+    )
+    page = _FakePage([main, child])
+    page.url = "https://channels.weixin.qq.com/platform/post/draftListManager"
+    return page
+
+
+def test_draft_snapshot_accepts_verified_zero_count_when_list_body_is_hidden() -> None:
+    page = _make_draft_list_page(draft_count=0)
+
+    snapshot = _draft_snapshot(page, _draft_list_test_selectors())
+
+    assert snapshot["view_type"] == "draft_list"
+    assert snapshot["view_verified"] is True
+    assert snapshot["draft_count"] == 0
+    assert snapshot["entries"] == []
+    assert snapshot["view_evidence"]["frame_path"] == (
+        "/micro/content/post/draftListManager"
+    )
+
+
+def test_draft_snapshot_reads_entries_from_confirmed_draft_list_body() -> None:
+    page = _make_draft_list_page(
+        draft_count=1,
+        entries=["临界半径如何决定成核 2026-11-21 20:30"],
+    )
+
+    snapshot = _draft_snapshot(page, _draft_list_test_selectors())
+    matches = _matching_draft_entries(
+        snapshot,
+        "临界半径如何决定成核",
+        {"draft_status_texts": ["草稿", "草稿箱"]},
+    )
+
+    assert snapshot["draft_count"] == 1
+    assert len(snapshot["entries"]) == 1
+    assert len(matches) == 1
+
+
+def test_draft_snapshot_rejects_video_management_route_even_if_nav_mentions_drafts() -> None:
+    main = _FakeFrame("https://channels.weixin.qq.com/platform/post/list")
+    video_frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/list"
+    )
+    page = _FakePage([main, video_frame])
+    page.url = "https://channels.weixin.qq.com/platform/post/list"
+
+    with pytest.raises(UploadBlockedError, match="dedicated draft manager"):
+        _draft_snapshot(page, _draft_list_test_selectors())
 
 
 def test_pending_sample_requires_explicit_human_approval(tmp_path: Path) -> None:
