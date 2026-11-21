@@ -233,7 +233,10 @@ def test_qa_accepts_context_only_with_true_personal_voice(tmp_path: Path, monkey
         "audio_manifest": {
             "engine": "MeloTTS EN-US -> OpenVoice V2 ToneColorConverter (CPU)",
             "voice_profile_fingerprint": "abc",
-            "cleanup_steps": {"clarity_eq": voice_eq_filter_chain(audio_master)},
+            "cleanup_steps": {
+                "clarity_eq": voice_eq_filter_chain(audio_master),
+                "post_conversion": "none (disabled by default profile)",
+            },
         },
         "environment": {"cjk_font": {"verified_codepoints": "成核"}},
         "motion_manifest": {

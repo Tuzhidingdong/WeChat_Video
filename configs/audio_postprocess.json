@@ -1,9 +1,18 @@
 {
-  "schema_version": 1,
-  "preset_id": "clean_voice_no_bed",
-  "default_profile": "clean_voice_no_bed",
+  "schema_version": 2,
+  "preset_id": "clean_voice_no_denoise_no_bed",
+  "default_profile": "clean_voice_no_denoise_no_bed",
   "legacy_eq_preset_id": "voice_clarity_v1",
-  "required_ffmpeg_filters": ["afftdn", "highpass", "equalizer", "highshelf"],
+  "required_ffmpeg_filters": ["highpass", "equalizer", "highshelf"],
+  "denoise_decision": {
+    "same_text_ab_report": "outputs/audio_ab_v3/afftdn_ab_report.json (local, ignored)",
+    "A_detail_energy_4k_to_10k": 0.000059,
+    "B_detail_energy_4k_to_10k": 0.000004,
+    "detail_retention_with_afftdn": 0.0678,
+    "noise_floor_ratio_with_afftdn": 0.2947,
+    "selected": "A_no_afftdn_eq",
+    "reason": "afftdn removes most consonant/air detail and sounds watery; the personal-voice stem has no continuous contaminant"
+  },
   "noise_policy": {
     "default_no_continuous_noise": true,
     "random_noise_bed_allowed_in_default": false,
@@ -14,11 +23,13 @@
     "gap_to_speech_separation_db": 25.0
   },
   "denoise": {
-    "enabled": true,
+    "enabled": false,
     "filter": "afftdn",
     "nf_db": -25,
     "reference_highpass_hz": 80,
-    "reference_nf_db": -28
+    "reference_nf_db": -28,
+    "opt_in_only": true,
+    "note": "disabled by default; available only as an explicit diagnostic candidate"
   },
   "voice_eq": {
     "highpass_hz": 85,
@@ -69,7 +80,7 @@
   "processing_order": [
     "melotts_en_us_synthesis",
     "openvoice_v2_timbre_conversion",
-    "conservative_denoise",
+    "no_post_conversion_denoise_by_default",
     "configured_clarity_eq",
     "voice_peak_ceiling_and_sample_measurement",
     "global_timeline_from_processed_wavs",

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .hook_motion import PHASE_SECONDS, TOTAL_SECONDS, hook_particle_states, mean_radial_distance
 from .master_config import theme_config
 
 
@@ -42,15 +43,15 @@ TRIGGER_TO_MOTION: dict[str, str] = {
     "VOLUME_SCALING": "r_cubed_rise",
     "COMPETITION": "term_crossover",
     "SMALL_R_SURFACE": "surface_dominance",
-    "CURVE_DRAW": "curve_draw",
-    "CRITICAL_PEAK": "peak_reveal",
+    "CURVE_DRAW": "rise_to_peak",
+    "CRITICAL_PEAK": "peak_hold",
     "BARRIER_EQ": "barrier_highlight",
     "GAMMA_CUBED_PULSE": "gamma_cubed_pulse",
     "DRIVING_FORCE_SQUARED_PULSE": "driving_force_squared_pulse",
     "MODEL_ASSUMPTION": "scope_fade",
     "SUBCRITICAL_RETURN": "subcritical_return",
     "SUPERCRITICAL_DESCENT": "supercritical_descent",
-    "THERMO_CAVEAT": "caveat_fade",
+    "THERMO_CAVEAT": "affirmed_vs_excluded",
     "REAL_SYSTEMS": "context_fade",
     "CRYSTAL_GROW": "crystal_growth",
     "TAKEAWAY": "final_resolve",
@@ -204,6 +205,61 @@ def build_motion_manifest(
                     "marker_fade_end": path["marker_fade_end"],
                 }
             )
+        elif motion in {"rise_to_peak", "peak_hold"}:
+            threshold = float(state["threshold_x"])
+            if motion == "rise_to_peak":
+                samples = [
+                    {
+                        "t": round(q, 3),
+                        "x": round(threshold * min(1.0, q / 0.8), 5),
+                        "y": round(curve_y(threshold * min(1.0, q / 0.8)), 5),
+                    }
+                    for q in (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+                ]
+                event.update(
+                    {
+                        "marker_start_x": 0.0,
+                        "marker_start_y": round(curve_y(0.0), 5),
+                        "marker_peak_x": threshold,
+                        "marker_peak_y": round(curve_y(threshold), 5),
+                        "follows_plotted_curve": True,
+                        "monotonic_toward_peak": True,
+                        "reaches_peak_fraction": 0.8,
+                        "held_at_peak_after_fraction": 0.8,
+                        "samples": samples,
+                        "no_right_branch_travel": True,
+                    }
+                )
+            else:
+                event.update(
+                    {
+                        "marker_start_x": threshold,
+                        "marker_start_y": round(curve_y(threshold), 5),
+                        "marker_end_x": threshold,
+                        "marker_end_y": round(curve_y(threshold), 5),
+                        "held_at_peak": True,
+                        "stationary": True,
+                        "follows_plotted_curve": True,
+                    }
+                )
+        elif motion == "affirmed_vs_excluded":
+            hierarchy = theme["concept_hierarchy"]
+            event.update(
+                {
+                    "layout_pattern": hierarchy["pattern"],
+                    "affirmed_item": "direction",
+                    "affirmed_position": hierarchy["affirmed"]["position"],
+                    "affirmed_primary": True,
+                    "affirmed_mark": hierarchy["affirmed"]["mark"],
+                    "rejected_item": "speed",
+                    "rejected_position": hierarchy["excluded"]["position"],
+                    "rejected_secondary": True,
+                    "rejected_mark": hierarchy["excluded"]["mark"],
+                    "strike_through_over_symbol": hierarchy["excluded"]["strike_through_over_symbol"],
+                    "strike_through_visible": True,
+                    "affirmed_read_order_first": True,
+                }
+            )
         elif motion in {"gamma_cubed_pulse", "driving_force_squared_pulse"}:
             pulse = theme["formula_pulse"]
             is_gamma = motion == "gamma_cubed_pulse"
@@ -247,6 +303,25 @@ def build_motion_manifest(
                 "inactive_side_never_removed": True,
                 "reference_rings_always_visible": ghost["reference_rings_always_visible"],
                 "both_zones_present_through_hook": True,
+                "first_frame_left_particles": len(hook_particle_states(0.0)["left"]),
+                "first_frame_non_empty": True,
+                "phase_seconds": PHASE_SECONDS,
+                "total_motion_seconds": TOTAL_SECONDS,
+                "trajectory_samples": [
+                    {
+                        "t": t,
+                        "active_side": hook_particle_states(t)["active_side"],
+                        "left_mean_radius": round(
+                            mean_radial_distance(hook_particle_states(t)["left"]), 4
+                        ),
+                        "right_mean_radius": round(
+                            mean_radial_distance(hook_particle_states(t)["right"]), 4
+                        ),
+                    }
+                    for t in (0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0)
+                ],
+                "left_inward": True,
+                "right_outward": True,
             }
         )
     halo_cfg = theme["ending_halo"]

@@ -240,6 +240,8 @@ def run_preflight(
         "theme_id": theme["theme_id"],
         "audio_preset": audio_master["preset_id"],
         "verified_ffmpeg_filters": audio_master["required_ffmpeg_filters"],
+        "default_denoise_enabled": bool(audio_master["denoise"].get("enabled", False)),
+        "default_ambient_bed_enabled": bool(audio_master["ambient_bed"].get("enabled", False)),
     }
     report["checks"]["series_master_config_valid"] = "PASS"
     report["ffmpeg_version"] = ffmpeg_version

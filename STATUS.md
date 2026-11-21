@@ -6,7 +6,7 @@
 
 - **Milestone:** 1 — Local video-production proof
 - **Slice:** A — One critical-nucleus / free-energy-barrier sample
-- **Implementation state:** Noise-floor removal v2 implemented: default `clean_voice_no_bed` profile with true-silence gaps (no synthetic ambient), evidence-backed decision not to escalate denoise, persistent hook ghosts, icon-supported concept stages, distinct formula-term pulses, configurable adaptive stage scale, and a breathing ending halo. A new real bilingual MP4 was rendered on this branch and passes full QA.
+- **Implementation state:** Final refinement v3 implemented: r³ volume caption locked by regression test, free-energy marker rises to r* then holds, Direction/Speed affirmed-vs-excluded hierarchy with visible clock strike-through, first-frame left hook particles with verified inward/outward trajectories, and a controlled no-afftdn A/B that led to disabling afftdn in the default profile. Single-pass loudnorm avoids an FFmpeg mux deadlock. A new real bilingual MP4 was rendered and passes full QA.
 - **Slice A exit condition:** NOT MET — the user must listen to the A/B voice samples and play the bilingual MP4 before accepting it.
 - **Next authorized work:** user review of voice identity/cleanliness, US-English pronunciation, bilingual subtitle legibility, motion timing, and scientific claims; do not begin Slice B.
 

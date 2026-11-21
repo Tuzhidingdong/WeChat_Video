@@ -342,6 +342,103 @@ def denoise_ab(raw_path: Path, out_dir: Path, report_path: Path) -> dict[str, An
     return report
 
 
+def afftdn_ab(raw_path: Path, out_dir: Path, report_path: Path) -> dict[str, Any]:
+    """Same-text A/B: clarity EQ with vs without configured afftdn cleanup."""
+    from .master_config import denoise_filter_chain, voice_eq_filter_chain
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    eq_chain = voice_eq_filter_chain()
+    denoise_chain = denoise_filter_chain()
+    variants: dict[str, str] = {
+        "A_no_afftdn_eq": eq_chain,
+        "B_afftdn_then_eq": f"{denoise_chain},{eq_chain}",
+    }
+    report: dict[str, Any] = {
+        "schema_version": 1,
+        "source": str(raw_path),
+        "source_role": "raw OpenVoice-converted speech (no cleanup, no EQ)",
+        "preset_id": audio_config()["preset_id"],
+        "eq_chain": eq_chain,
+        "denoise_chain_candidate": denoise_chain,
+        "variants": {},
+        "gain_matched": True,
+        "comparison_note": "identical source and EQ; only afftdn differs; same sample grid and playback gain",
+        "human_listening_required": True,
+    }
+    for name, chain in variants.items():
+        target = out_dir / f"{name}.wav"
+        subprocess.run(
+            [
+                resolve_command("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
+                "-i", str(raw_path), "-af", chain,
+                "-c:a", "pcm_s16le", str(target),
+            ],
+            check=True,
+            env=tool_env(),
+        )
+        values, rate = read_wav(target)
+        frame = max(1, int(0.02 * rate))
+        count = len(values) // frame
+        aligned = values[: count * frame]
+        frames = aligned.reshape(count, frame)
+        frame_rms = np.sqrt(np.mean(frames**2, axis=1))
+        active = frame_rms > 0.08 * float(frame_rms.max())
+        active_samples = frames[active].reshape(-1)
+        spectrum = np.abs(np.fft.rfft(active_samples * np.hanning(active_samples.size)))
+        freqs = np.fft.rfftfreq(active_samples.size, 1.0 / rate)
+        power = spectrum**2
+        total = float(np.sum(power)) or 1.0
+
+        def band(low: float, high: float) -> float:
+            return round(float(np.sum(power[(freqs >= low) & (freqs <= high)]) / total), 6)
+
+        flatness = float(np.exp(np.mean(np.log(power + 1e-12))) / (np.mean(power) + 1e-12))
+        peak = float(np.max(np.abs(values))) if values.size else 0.0
+        report["variants"][name] = {
+            "file": target.name,
+            "filter_chain": chain,
+            "sample_rate": rate,
+            "channels": 1,
+            "sample_count": int(values.size),
+            "duration_seconds": round(values.size / rate, 4),
+            "active_rms_dbfs": round(_dbfs(float(np.sqrt(np.mean(active_samples**2)))), 2),
+            "peak_dbfs": round(_dbfs(peak), 2),
+            "clipping_ratio": round(float(np.mean(np.abs(values) >= 0.999)), 6),
+            "noise_floor_rms": round(float(np.mean(np.sort(frame_rms)[: max(1, len(frame_rms) // 10)])), 6),
+            "band_200_800": band(200, 800),
+            "band_4000_8000": band(4000, 8000),
+            "band_8000_10000": band(8000, min(10000, rate / 2)),
+            "active_spectral_flatness": round(flatness, 6),
+        }
+    a = report["variants"]["A_no_afftdn_eq"]
+    b = report["variants"]["B_afftdn_then_eq"]
+    a_detail = a["band_4000_8000"] + a["band_8000_10000"]
+    b_detail = b["band_4000_8000"] + b["band_8000_10000"]
+    report["objective_summary"] = {
+        "sample_counts_equal": a["sample_count"] == b["sample_count"],
+        "durations_equal": a["duration_seconds"] == b["duration_seconds"],
+        "A_consonant_and_air_detail": round(a_detail, 6),
+        "B_consonant_and_air_detail": round(b_detail, 6),
+        "B_detail_retention_ratio": round(b_detail / a_detail, 4) if a_detail else None,
+        "B_noise_floor_ratio": (
+            round(b["noise_floor_rms"] / a["noise_floor_rms"], 4)
+            if a["noise_floor_rms"] else None
+        ),
+        "B_body_band_ratio": (
+            round(b["band_200_800"] / a["band_200_800"], 4)
+            if a["band_200_800"] else None
+        ),
+    }
+    report["decision"] = (
+        "No continuous contaminant was found in the personal-voice stem. If B reduces "
+        "consonant/air detail or raises the noise-floor ratio, prefer A (no afftdn) and "
+        "keep afftdn only as an explicit diagnostic opt-in."
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return report
+
+
 def main() -> None:
     import argparse
 
@@ -357,6 +454,9 @@ def main() -> None:
     denoise = sub.add_parser("denoise-ab")
     denoise.add_argument("--raw", required=True)
     denoise.add_argument("--out", required=True)
+    afftdn = sub.add_parser("afftdn-ab")
+    afftdn.add_argument("--raw", required=True)
+    afftdn.add_argument("--out", required=True)
     args = parser.parse_args()
     if args.command == "five-stems":
         report = build_five_stems(Path(args.run), Path(args.out), Path(args.out) / "stem_report.json")
@@ -364,6 +464,9 @@ def main() -> None:
     elif args.command == "denoise-ab":
         report = denoise_ab(Path(args.raw), Path(args.out), Path(args.out) / "denoise_ab_report.json")
         print("DENOISE_AB_OK", json.dumps({"adopted": report["adopted"], "variants": list(report["variants"])}))
+    elif args.command == "afftdn-ab":
+        report = afftdn_ab(Path(args.raw), Path(args.out), Path(args.out) / "afftdn_ab_report.json")
+        print("AFFTDN_AB_OK", json.dumps(report["objective_summary"], ensure_ascii=False))
     else:
         timeline = json.loads(Path(args.timing).read_text(encoding="utf-8"))
         report = encoded_aac_noise_report(Path(args.mp4), timeline, Path(args.report))

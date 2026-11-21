@@ -117,11 +117,27 @@
     "dim_opacity": 0.65,
     "restore_opacity": 1.0
   },
+  "concept_hierarchy": {
+    "pattern": "affirmed_concept_vs_excluded_misconception",
+    "affirmed": {
+      "position": "upper",
+      "weight": "primary",
+      "mark": "check"
+    },
+    "excluded": {
+      "position": "lower_right",
+      "weight": "secondary",
+      "mark": "crossed_out",
+      "strike_through_over_symbol": true
+    },
+    "read_order": "affirmed_first",
+    "topic_specific_labels_stored_outside_template": true
+  },
   "concept_visuals": {
     "text_only_hold_limit_seconds": 1.5,
     "sphere_label_zh": "球形晶核",
     "direction_label_zh": "方向",
-    "speed_label_zh": "快慢"
+    "speed_label_zh": "速度"
   },
   "ending_halo": {
     "enabled": true,

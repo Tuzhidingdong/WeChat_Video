@@ -33,6 +33,12 @@ from manim import (
     linear,
 )
 
+from ..hook_motion import (
+    LEFT_X_OFFSET,
+    RIGHT_X_OFFSET,
+    TOTAL_SECONDS,
+    hook_particle_states,
+)
 from ..master_config import theme_color, theme_config
 from ..visual_stages import stage_for_unit, transition_ms
 
@@ -189,74 +195,59 @@ class CriticalNucleusScene(Scene):
         self.add(badge)
 
         # ------------------------------------------------------------------ hook
-        # Both comparison zones exist for the whole 0-5 s hook. The inactive side
-        # is a dim ghost, never removed, and both reference rings stay visible.
-        hook_left = ValueTracker(0.0)
-        hook_right = ValueTracker(0.0)
-        hook_active = ValueTracker(0.0)  # 0 = left failure active, 1 = right success active
+        # Driven by the pure hook_motion states: left orange particles are already
+        # visible at frame 0, contract inward and fade over 0-2 s; right cyan
+        # particles emerge near the centre and grow outward over 2-4 s. Both rings
+        # and both zones stay present, with the inactive side as a 0.22 ghost.
+        hook_t = ValueTracker(0.0)
         hook_scale = [1.0]
+        left_x, right_x = cx + LEFT_X_OFFSET, cx + RIGHT_X_OFFSET
 
-        def _side_is_active(succeeds: bool) -> bool:
-            return (hook_active.get_value() >= 0.5) == succeeds
-
-        def hook_particles(center_x: float, succeeds: bool, tracker: ValueTracker) -> VGroup:
-            p = tracker.get_value()
-            opacity = ghost_cfg["active_opacity"] if _side_is_active(succeeds) else ghost_cfg["inactive_opacity"]
+        def hook_particles_for(side: str) -> VGroup:
+            states = hook_particle_states(hook_t.get_value())[side]
+            center_x = left_x if side == "left" else right_x
+            color = resistance if side == "left" else favorable
             dots: list[Dot] = []
-            for index, (dx, dy) in enumerate(
-                [(-0.35, 0.25), (0.0, 0.4), (0.32, 0.2), (-0.25, -0.2),
-                 (0.2, -0.15), (0.35, -0.4), (-0.05, -0.42)]
-            ):
-                appear = min(1.0, max(0.0, p * 2.0 - index * 0.06))
-                if succeeds:
-                    scale = 0.7 + 0.7 * p
-                    radius = 0.07 * appear
-                    color = favorable
-                else:
-                    scale = 0.7
-                    shrink = 1.0 if p < 0.55 else max(0.0, 1 - (p - 0.55) / 0.45)
-                    radius = 0.07 * appear * shrink
-                    color = resistance
-                if radius <= 0.001:
+            for state in states:
+                if state["opacity"] <= 0.001 or state["radius"] <= 0.0005:
                     continue
                 dots.append(
-                    Dot([center_x + dx * scale, cy + dy * scale, 0], radius=radius, color=color)
-                    .set_opacity(opacity)
+                    Dot(
+                        [center_x + state["dx"], cy + state["dy"], 0],
+                        radius=state["radius"],
+                        color=color,
+                    ).set_opacity(state["opacity"])
                 )
             return VGroup(*dots)
 
-        def hook_ring(center_x: float, succeeds: bool) -> Circle:
-            stroke_opacity = (
-                0.45 if _side_is_active(succeeds) else float(ghost_cfg["inactive_opacity"])
-            )
+        def hook_ring_for(side: str) -> Circle:
+            is_active = hook_particle_states(hook_t.get_value())["active_side"] == side
+            stroke_opacity = 0.45 if is_active else float(ghost_cfg["inactive_opacity"])
+            center_x = left_x if side == "left" else right_x
             return Circle(
                 radius=0.72, color=neutral, stroke_width=1,
                 stroke_opacity=stroke_opacity,
             ).move_to([center_x, cy, 0])
 
-        def hook_label(center_x: float, succeeds: bool) -> Text:
-            opacity = ghost_cfg["active_opacity"] if _side_is_active(succeeds) else ghost_cfg["inactive_opacity"]
+        def hook_label_for(side: str) -> Text:
+            is_active = hook_particle_states(hook_t.get_value())["active_side"] == side
+            opacity = ghost_cfg["active_opacity"] if is_active else ghost_cfg["inactive_opacity"]
+            center_x = left_x if side == "left" else right_x
             return Text(
-                "grows" if succeeds else "fades", font=font, font_size=22,
-                color=favorable if succeeds else resistance,
+                "grows" if side == "right" else "fades", font=font, font_size=22,
+                color=favorable if side == "right" else resistance,
             ).set_opacity(opacity).move_to([center_x, cy - 1.15, 0])
 
-        left_x, right_x = cx - 1.45, cx + 1.45
-        left_dots = always_redraw(lambda: _scale_about(
-            hook_particles(left_x, False, hook_left), hook_scale[0], centre
-        ))
-        right_dots = always_redraw(lambda: _scale_about(
-            hook_particles(right_x, True, hook_right), hook_scale[0], centre
-        ))
-        left_ring = always_redraw(lambda: _scale_about(hook_ring(left_x, False), hook_scale[0], centre))
-        right_ring = always_redraw(lambda: _scale_about(hook_ring(right_x, True), hook_scale[0], centre))
-        left_label = always_redraw(lambda: _scale_about(hook_label(left_x, False), hook_scale[0], centre))
-        right_label = always_redraw(lambda: _scale_about(hook_label(right_x, True), hook_scale[0], centre))
+        left_dots = always_redraw(lambda: _scale_about(hook_particles_for("left"), hook_scale[0], centre))
+        right_dots = always_redraw(lambda: _scale_about(hook_particles_for("right"), hook_scale[0], centre))
+        left_ring = always_redraw(lambda: _scale_about(hook_ring_for("left"), hook_scale[0], centre))
+        right_ring = always_redraw(lambda: _scale_about(hook_ring_for("right"), hook_scale[0], centre))
+        left_label = always_redraw(lambda: _scale_about(hook_label_for("left"), hook_scale[0], centre))
+        right_label = always_redraw(lambda: _scale_about(hook_label_for("right"), hook_scale[0], centre))
         hook_group = VGroup(left_dots, right_dots, left_ring, right_ring, left_label, right_label)
 
-        # Evaluate at full growth to find the largest safe stage factor for the hook.
-        hook_left.set_value(1.0)
-        hook_right.set_value(1.0)
+        # Find the largest safe stage factor at the widest geometry (t = 4 s).
+        hook_t.set_value(TOTAL_SECONDS)
         for item in hook_group.get_family():
             if getattr(item, "updaters", None):
                 item.update()
@@ -266,16 +257,20 @@ class CriticalNucleusScene(Scene):
             {"stage": "binary_hook", "applied": round(hook_factor, 4), "target": target_scale}
         )
         _assert_safe_zone(hook_group, "binary_hook", box)
-        self.play(FadeIn(hook_group), run_time=0.25)
-        hook_left.set_value(0.0)
-        hook_right.set_value(0.0)
+        # Rewind to frame 0 and add directly (no FadeIn) so the left particles are
+        # already visible in the very first rendered frame.
+        hook_t.set_value(0.0)
+        for item in hook_group.get_family():
+            if getattr(item, "updaters", None):
+                item.update()
+        self.add(hook_group)
         self.play(
-            hook_left.animate.set_value(1.0),
-            hook_right.animate.set_value(1.0),
-            run_time=0.65,
+            hook_t.animate.set_value(TOTAL_SECONDS),
+            run_time=TOTAL_SECONDS,
             rate_func=linear,
         )
         hook_visible = True
+        cursor_ms = round(TOTAL_SECONDS * 1000)
 
         # ------------------------------------------------------------ breathing halo
         halo_scale = [1.0]
@@ -299,9 +294,12 @@ class CriticalNucleusScene(Scene):
 
         current: list[Any] = []
         current_stage: str | None = None
-        cursor_ms = 1000
 
         for checkpoint in spec["cue_checkpoints"]:
+            stage_key, _ = stage_for_unit(checkpoint)
+            if stage_key in HOOK_STAGES:
+                # The whole 0-4 s hook animation was already played above.
+                continue
             start_ms = int(checkpoint["start_ms"])
             end_ms = int(checkpoint["end_ms"])
             if start_ms < cursor_ms:
@@ -309,26 +307,11 @@ class CriticalNucleusScene(Scene):
             if start_ms > cursor_ms:
                 self.wait((start_ms - cursor_ms) / 1000.0)
 
-            stage_key, _ = stage_for_unit(checkpoint)
             trans_ms = transition_ms(end_ms - start_ms)
             trans = trans_ms / 1000.0
             hold_ms = end_ms - start_ms - trans_ms
             hold_s = max(0.0, hold_ms / 1000.0)
             tracker = ValueTracker(0.0)
-
-            if stage_key in HOOK_STAGES:
-                # Consume the same transition budget as other cues so the scene
-                # stays locked to the measured global timeline.
-                self.wait(trans)
-                succeeds = stage_key == "seed_success"
-                hook_active.set_value(1.0 if succeeds else 0.0)
-                side_tracker = hook_right if succeeds else hook_left
-                side_tracker.set_value(0.0)
-                self.play(side_tracker.animate.set_value(1.0), run_time=hold_s, rate_func=linear)
-                cursor_ms = start_ms + trans_ms + max(0, hold_ms)
-                current_stage = stage_key
-                current = []
-                continue
 
             transition_animations: list[Any] = [FadeOut(item) for item in current]
             if hook_visible:
@@ -598,6 +581,19 @@ class CriticalNucleusScene(Scene):
                     dash_length=0.09, color=critical, stroke_width=3,
                 )
                 children.extend([line, marker, short_line("r*", critical, 28, cy - 2.9)])
+            elif stage_key == "free_energy_landscape":
+                # Narration says free energy "rises at first": start at the curve
+                # origin (0,0), climb along the plotted curve to r* = 1, then hold.
+                # Never travel down the right-hand branch during this beat.
+                reach_fraction = 0.8
+
+                def rising_marker() -> VGroup:
+                    p = tracker.get_value()
+                    x = min(1.0, p / reach_fraction)
+                    y = 3 * x**2 - 2 * x**3
+                    return VGroup(Dot(axes.c2p(x, y), color=critical, radius=0.09))
+
+                children.append(scaled_redraw(rising_marker))
             else:
                 subcritical = stage_key == "subcritical_return"
                 path = state_motion["subcritical" if subcritical else "supercritical"]
@@ -711,12 +707,14 @@ class CriticalNucleusScene(Scene):
             animated = True
 
         elif stage_key == "thermo_caveat":
-            # Free-energy direction stays visible; speed is explicitly crossed out.
+            # Affirmed-vs-excluded hierarchy: the established Direction conclusion
+            # is primary and upper; the excluded Speed claim is secondary, lower
+            # right, and its clock carries a drawn, unmistakable strike-through.
             mini_axes = Axes(
                 x_range=[0, 2.0, 0.5], y_range=[-0.2, 1.2, 0.5],
-                x_length=2.6, y_length=1.5, tips=False,
+                x_length=3.0, y_length=1.5, tips=False,
                 axis_config={"color": neutral, "stroke_width": 1},
-            ).move_to([cx - 0.55, cy + 0.2, 0])
+            ).move_to([cx, cy + 0.25, 0])
             mini_curve = mini_axes.plot(
                 lambda x: 3 * x**2 - 2 * x**3, x_range=[0, 1.5],
                 color=favorable, stroke_width=3,
@@ -728,40 +726,49 @@ class CriticalNucleusScene(Scene):
                 arrow = Arrow(
                     mini_axes.c2p(1.1, 3 * 1.1**2 - 2 * 1.1**3),
                     mini_axes.c2p(end_x, 3 * end_x**2 - 2 * end_x**3),
-                    color=favorable, stroke_width=3, buff=0,
+                    color=favorable, stroke_width=4, buff=0,
                 )
                 return VGroup(arrow)
 
             check = VGroup(
-                Line([0, 0, 0], [0.14, -0.14, 0], color=favorable, stroke_width=3),
-                Line([0.14, -0.14, 0], [0.4, 0.22, 0], color=favorable, stroke_width=3),
-            ).move_to([cx - 1.0, cy - 1.15, 0])
+                Line([0, 0, 0], [0.18, -0.18, 0], color=favorable, stroke_width=5),
+                Line([0.18, -0.18, 0], [0.5, 0.28, 0], color=favorable, stroke_width=5),
+            ).move_to([cx - 1.7, cy + 1.55, 0])
 
             def crossed_clock() -> VGroup:
                 p = tracker.get_value()
-                centre_clock = np.array([cx + 1.25, cy + 0.2, 0.0])
-                clock = Circle(radius=0.38, color=resistance, stroke_width=2).move_to(centre_clock)
+                centre_clock = np.array([cx + 1.5, cy - 1.15, 0.0])
+                clock = Circle(radius=0.36, color=resistance, stroke_width=3).move_to(centre_clock)
                 hands = VGroup(
-                    Line(centre_clock, centre_clock + np.array([0, 0.24, 0]), color=resistance, stroke_width=2),
-                    Line(centre_clock, centre_clock + np.array([0.18, 0.05, 0]), color=resistance, stroke_width=2),
+                    Line(centre_clock, centre_clock + np.array([0, 0.22, 0]), color=resistance, stroke_width=2),
+                    Line(centre_clock, centre_clock + np.array([0.17, 0.04, 0]), color=resistance, stroke_width=2),
                 )
-                slash = Line(
-                    centre_clock + np.array([-0.3, -0.3, 0]),
-                    centre_clock + np.array([0.3, 0.3, 0]),
-                    color=resistance, stroke_width=3,
-                ).set_opacity(max(0.0, min(1.0, (p - 0.35) / 0.4)))
+                # Diagonal slash is drawn across the clock face itself, not next to it.
+                slash_progress = max(0.0, min(1.0, (p - 0.2) / 0.35))
+                slash_start = centre_clock + np.array([-0.34, -0.34, 0.0])
+                slash_end = slash_start + np.array(
+                    [0.68 * slash_progress, 0.68 * slash_progress, 0.0]
+                )
+                slash = Line(slash_start, slash_end, color=resistance, stroke_width=6)
                 return VGroup(clock, hands, slash)
+
+            # A small cross precedes the excluded "Speed" label.
+            speed_cross = VGroup(
+                Line([-0.11, -0.11, 0], [0.11, 0.11, 0], color=resistance, stroke_width=4),
+                Line([-0.11, 0.11, 0], [0.11, -0.11, 0], color=resistance, stroke_width=4),
+            ).move_to([cx + 0.45, cy - 1.95, 0])
 
             children = [
                 mini_axes,
                 mini_curve,
                 scaled_redraw(direction_arrow),
                 check,
+                short_line("Direction", favorable, 28, cy + 1.75),
+                short_line(concept_cfg["direction_label_zh"], favorable, 24, cy + 1.4, use_cjk=True),
                 scaled_redraw(crossed_clock),
-                short_line("Direction", favorable, 22, cy - 1.55),
-                short_line(concept_cfg["direction_label_zh"], favorable, 20, cy - 1.85, use_cjk=True),
-                short_line("Speed", resistance, 22, cy + 1.35),
-                short_line(concept_cfg["speed_label_zh"], resistance, 20, cy + 1.65, use_cjk=True),
+                speed_cross,
+                short_line("Speed", resistance, 20, cy - 1.95),
+                short_line(concept_cfg["speed_label_zh"], resistance, 18, cy - 2.25, use_cjk=True),
             ]
             animated = True
 

@@ -37,8 +37,10 @@ def test_master_configs_are_complete_and_domain_neutral() -> None:
     assert theme["focus_rules"]["primary_curve_opacity_during_motion"] == 1.0
     assert theme["hook_pattern"]["static_title_card_allowed"] is False
     assert "critical radius" in " ".join(theme["semantic_roles"]["critical"]).lower()
-    assert audio["preset_id"] == "clean_voice_no_bed"
-    assert audio["default_profile"] == "clean_voice_no_bed"
+    assert audio["preset_id"] == "clean_voice_no_denoise_no_bed"
+    assert audio["default_profile"] == "clean_voice_no_denoise_no_bed"
+    assert audio["denoise"]["enabled"] is False
+    assert "afftdn" not in audio["required_ffmpeg_filters"]
     assert audio["ambient_bed"]["enabled"] is False
     assert audio["noise_policy"]["default_no_continuous_noise"] is True
     assert "ambient_bed_duck_and_mix" not in audio["processing_order"]

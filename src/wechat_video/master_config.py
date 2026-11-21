@@ -34,8 +34,8 @@ def theme_config(root: str | None = None) -> dict[str, Any]:
             "semantic_roles", "portrait_grid", "subtitle_rules",
             "dimension_visual_mapping", "hook_pattern", "state_curve_motion",
             "focus_rules", "stage_scale", "hook_ghost", "formula_pulse",
-            "concept_visuals", "ending_halo", "motion_accent_rules",
-            "formula_symbol_roles",
+            "concept_hierarchy", "concept_visuals", "ending_halo",
+            "motion_accent_rules", "formula_symbol_roles",
         ),
     )
 

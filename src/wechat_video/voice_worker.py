@@ -395,7 +395,10 @@ def cmd_generate(args: argparse.Namespace) -> int:
     import torch
 
     profile_choice = getattr(args, "profile", "active")
-    clean_converted = bool(getattr(args, "clean_converted", False))
+    # The default audio profile disables post-conversion afftdn. The CLI flag is
+    # only an opt-in candidate and has no effect unless the config enables it.
+    denoise_enabled = bool(audio_config()["denoise"].get("enabled", False))
+    clean_converted = bool(getattr(args, "clean_converted", False)) and denoise_enabled
     if profile_choice == "candidate":
         profile_json = CANDIDATE_PROFILE_JSON
         target_se_path = CANDIDATE_SE
@@ -457,7 +460,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
                 "base_wav": str(base_path.relative_to(ROOT)),
                 "raw_converted_wav": str(raw_path.relative_to(ROOT)),
                 "final_wav": str(final_path.relative_to(ROOT)),
-                "post_conversion_cleanup": denoise_filter_chain() if clean_converted else "none",
+                "post_conversion_cleanup": denoise_filter_chain() if clean_converted else "none (disabled by default profile)",
                 "voice_eq": eq_report,
                 **info,
                 "base_generation_seconds": round(t1 - t0, 3),
@@ -498,7 +501,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
         "watermark_preserved": True,
         "cleanup_steps": {
             "reference": "filtered candidate" if profile_choice == "candidate" else "original 16k mono",
-            "post_conversion": denoise_filter_chain() if clean_converted else "none",
+            "post_conversion": denoise_filter_chain() if clean_converted else "none (disabled by default profile)",
             "clarity_eq": voice_eq_filter_chain(),
             "preset_id": audio_config()["preset_id"],
         },

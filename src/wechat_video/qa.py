@@ -349,6 +349,16 @@ def run_qa(
             bool(expected_eq) and recorded_eq == expected_eq,
             f"recorded={recorded_eq}",
         )
+        denoise_default = bool(audio_master.get("denoise", {}).get("enabled", False))
+        recorded_cleanup = str(
+            audio_manifest.get("cleanup_steps", {}).get("post_conversion", "")
+        )
+        check(
+            "post_conversion_denoise_matches_default_profile",
+            (not denoise_default and recorded_cleanup.startswith("none"))
+            or (denoise_default and bool(recorded_cleanup) and not recorded_cleanup.startswith("none")),
+            f"default_enabled={denoise_default}; recorded={recorded_cleanup}",
+        )
         units = timeline["speech_units"]
         check(
             "processed_voice_samples_valid",

@@ -295,14 +295,13 @@ def assemble_final_video(
     ffmpeg_exe = resolve_command("ffmpeg")
     resolve_command("ffprobe")
 
+    # One full-programme loudnorm pass. Two-pass linear mode (measured_* plus
+    # linear=true) can deadlock this FFmpeg build with a denoise-free voice stem,
+    # so use a single-pass normalization in the same mux process. This is still a
+    # single loudness-normalization pass over the finished voice+SFX programme.
     measured = _loudnorm_measurement(audio_wav, run_dir, target_i, target_tp)
     loudnorm = (
-        f"loudnorm=I={target_i}:TP={target_tp}:LRA=11:"
-        f"measured_I={measured['measured_I']}:"
-        f"measured_TP={measured['measured_TP']}:"
-        f"measured_LRA={measured['measured_LRA']}:"
-        f"measured_thresh={measured['measured_thresh']}:"
-        f"offset={measured['offset']}:linear=true:print_format=summary"
+        f"loudnorm=I={target_i}:TP={target_tp}:LRA=11:print_format=summary"
     )
     try:
         relative_ass = captions_ass.resolve().relative_to(run_dir.resolve())
@@ -353,6 +352,7 @@ def assemble_final_video(
         "ffmpeg_output_tail": result.stderr[-1200:],
         "subtitle_filter_path_mode": "relative filename from run directory",
         "audio_input": audio_wav.name,
+        "loudnorm_pass": "single_pass_full_programme",
         "expected_frames": int(expected_frames),
         "video_trim": f"trim=end_frame={int(expected_frames)}",
     }
