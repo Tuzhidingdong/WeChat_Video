@@ -352,6 +352,18 @@ def test_upload_validation_uses_standing_draft_authorization_without_topic_appro
     assert not (tmp_path / "runtime" / "approvals" / f"{run_dir.name}.json").exists()
 
 
+def test_upload_validation_still_requires_strict_qa_pass_without_approval(
+    tmp_path: Path,
+) -> None:
+    run_dir = _make_run(tmp_path, qa_status="PASS_WITH_WARNINGS")
+    config = json.loads(
+        (tmp_path / "config" / "channels_upload.json").read_text(encoding="utf-8")
+    )
+
+    with pytest.raises(UploadBlockedError, match="strict PASS"):
+        _validate_run_for_upload(tmp_path, run_dir, config)
+
+
 def test_upload_validation_rejects_metadata_changed_after_fact_card_approval(
     tmp_path: Path,
 ) -> None:
