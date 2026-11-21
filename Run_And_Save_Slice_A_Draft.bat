@@ -30,7 +30,8 @@ set "RC=%ERRORLEVEL%"
 if "%RC%"=="0" (
   echo.
   echo [OK] The generated video was read back as an unpublished Channels draft.
-  echo Review it in the open Edge window. Final publication remains manual.
+  echo Check the draft in WeChat on your phone. Phone-side visibility is not verified by this PC workflow.
+  echo Final publication remains manual; no publish action was taken.
 ) else (
   echo.
   echo [STOP] The workflow failed or was blocked. No automatic retry was attempted.
