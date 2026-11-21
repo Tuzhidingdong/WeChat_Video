@@ -109,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     approve_card = sub.add_parser(
         "approve-fact-card",
-        help="Approve one Fact Card/source pair once for future QA-gated draft production.",
+        help="Record a one-time topic-governance approval for the human-approved Verified Topic Pool.",
     )
     approve_card.add_argument("--project-root", type=Path, default=root)
     approve_card.add_argument(
@@ -121,7 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     approve = sub.add_parser(
         "approve-run",
-        help="Record explicit human approval of one QA-passed video and its Fact Card.",
+        help="Record an optional local review receipt for one QA-passed video and its Fact Card.",
     )
     approve.add_argument("--project-root", type=Path, default=root)
     approve.add_argument("--run-dir", type=Path, required=True)
@@ -129,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     upload = sub.add_parser(
         "channels-upload",
-        help="Upload one explicitly approved, QA-passed run and save it as an unpublished draft.",
+        help="Upload one strict-QA-PASS run and save it as an unpublished draft.",
     )
     upload.add_argument("--project-root", type=Path, default=root)
     upload.add_argument("--run-dir", type=Path, required=True)
@@ -143,7 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     upload_latest = sub.add_parser(
         "channels-upload-latest",
-        help="Upload only the newest explicitly approved run; duplicate protection remains active.",
+        help="Upload the newest strict-QA-PASS run; duplicate protection remains active.",
     )
     upload_latest.add_argument("--project-root", type=Path, default=root)
 
@@ -239,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
                 approved_by=args.approved_by,
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
-            print("Local approval recorded. This exact artifact package is now eligible for draft upload.")
+            print("Optional local review receipt recorded for this exact artifact package.")
             return 0
         if args.command == "approve-run":
             result = approve_run(
