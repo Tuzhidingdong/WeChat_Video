@@ -1151,7 +1151,7 @@ def _validate_run_for_upload(
         metadata = _read_json(metadata_path)
         if metadata != expected_metadata:
             raise UploadBlockedError(
-                "channels_draft.json differs from the exact Fact Card-derived metadata. "
+                "channels_draft.json differs from the Fact Card-derived metadata. "
                 "Do not upload edited copy; update channels_title or the source Fact Card, then regenerate the package."
             )
     else:
