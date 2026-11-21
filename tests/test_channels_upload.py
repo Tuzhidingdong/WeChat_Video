@@ -425,7 +425,8 @@ def test_open_draft_list_view_uses_platform_navigation_to_mount_spa_frame() -> N
             ".finder-ui-desktop-menu__sub__wrp"
         ],
         "draft_list_nav_entry_selectors": [
-            ".finder-ui-desktop-sub-menu__item:has-text('草稿箱')"
+            ".finder-ui-desktop-sub-menu__item:text-is('草稿箱')",
+            ".finder-ui-desktop-sub-menu__item:has-text('草稿箱')",
         ],
         "draft_list_nav_timeout_seconds": 0,
     })
@@ -1003,7 +1004,8 @@ def test_live_description_selector_matches_empty_contenteditable_and_spa_wait_is
         ".finder-ui-desktop-menu__sub__wrp"
     ]
     assert selectors["draft_list_nav_entry_selectors"] == [
-        ".finder-ui-desktop-sub-menu__item:has-text('草稿箱')"
+        ".finder-ui-desktop-sub-menu__item:text-is('草稿箱')",
+        ".finder-ui-desktop-sub-menu__item:has-text('草稿箱')",
     ]
     assert selectors["draft_list_root_selector"] == (
         "div.finder-page.DraftListManager"
