@@ -20,30 +20,24 @@ Each generated review package carries channels_draft.json. The short title uses 
 
 Run Setup_Slice_A.bat once after syncing this branch. Playwright, psutil and PyYAML are installed inside the project's .venv. The uploader attaches to the installed Microsoft Edge; it does not download a second browser and does not install globally.
 
-## 3. Normal daily authorization
+## 3. Standing draft-only authorization
 
-Approve each scientific Fact Card and source record once:
+The user has granted standing authorization for this project to upload strict-QA-PASS outputs as **unpublished drafts** without a per-video or Fact Card approval prompt. This is not authorization to publish, send, schedule, delete or overwrite.
 
-1. Double-click Approve_Fact_Card.bat.
-2. Read the scientific question, model scope, claims, conditions, caveats and source list printed by the CLI.
-3. Type the exact phrase APPROVE FACT CARD <fact_card_id> only after deciding the topic is scientifically acceptable.
-
-The approval is stored under ignored runtime/topic_approvals/. It binds the exact Fact Card and source-record SHA-256 hashes. The tracked Fact Card remains unchanged. If either source file changes, the old approval becomes invalid and the card must be reviewed again.
-
-This is a one-time topic approval, not a per-video approval. Thereafter, each generated video must independently pass strict technical QA before it can be uploaded as a draft.
+Approve_Fact_Card.bat remains available for the separate decision to admit a Fact Card into the human-approved Verified Topic Pool. That approval is not required for the draft-only review workflow.
 
 ## 4. Edge session and draft upload
 
 1. Double-click Open_Channels_Session.bat. It creates or reuses the dedicated Edge profile at runtime/edge-profile, with CDP bound only to 127.0.0.1.
 2. Complete the official QR login manually for the intended 「成核生长」 account.
-3. Run Inspect_Channels_UI.bat. The inspector waits up to 15 seconds for the signed-in account node and inventories controls separately for the top page and embedded frames without uploading, filling or saving. Verify account identity and live controls; report selector mismatches before any upload. The description editor selector matches an empty-valued contenteditable attribute, as used by the live editor.
-4. Generate/select a complete output under outputs/. The uploader requires a valid one-time Fact Card approval, strict qa_report.json overall_status=PASS, valid channels_draft.json metadata and a complete final.mp4.
-5. Double-click Save_To_Channels_Draft.bat. It selects the newest eligible output, verifies the account, snapshots the draft list, uploads one MP4, fills metadata and clicks the draft-save control exactly once.
+3. Run Inspect_Channels_UI.bat. The inspector inventories account identity and controls in the top page and embedded frames without uploading, filling or saving.
+4. Generate/select a complete output under outputs/. The uploader requires strict qa_report.json overall_status=PASS, valid channels_draft.json metadata and a complete final.mp4; no approval record is required.
+5. Double-click Save_To_Channels_Draft.bat to upload the newest eligible existing output. It verifies the account, snapshots the draft list, uploads one MP4, fills metadata and clicks the draft-save control exactly once.
 6. The uploader re-reads the draft list and verifies exactly one new row matching the short title and an explicit draft status. It leaves Edge open at the draft list.
 
-A previous --review-sample output is eligible only after the user has approved that exact Fact Card/source pair and the output package passes strict QA. The ordinary non-review production path must also verify the same one-time topic approval.
+For a single-click Slice A test from generation through draft read-back, double-click Run_And_Save_Slice_A_Draft.bat. It generates a fresh review-sample package, then passes that exact run to the uploader. It cannot fall back to an older output. The sample remains pending scientific review and must be inspected before any manual publication.
 
-Approve_Latest_Run.bat remains an optional stricter per-video approval path. It is not required for the daily A-mode flow.
+Approve_Latest_Run.bat remains available as an optional per-video audit record, but it is not required for draft upload.
 
 ## 5. State and recovery
 
@@ -65,6 +59,6 @@ Reconciliation never uploads, never clicks save and never retries. The same job 
 
 ## 7. Verification boundary
 
-GitHub Actions runs portable unit tests, including a frame-split creator-page fixture. Local Windows verification has confirmed the dedicated Edge/CDP lifecycle, the 「成核生长」 account identity, the short-title and file inputs, and the draft-save control. The remaining local Windows checks are to sync this frame-aware fix, rerun the full test suite, and then verify the live description editor and save/preview/list selectors before the first upload.
+GitHub Actions runs portable unit tests, including a frame-split creator-page fixture. Local Windows verification has confirmed the dedicated Edge/CDP lifecycle, the 「成核生长」 account identity, the short-title and file inputs, and the draft-save control. The new one-click Slice A route and standing-authorization behavior are code changes; they still require local sync and a real Windows run.
 
 A passing unit test, UI inventory or toast message is not proof of a real draft. Success means the newly-created unpublished draft has been read back from the actual account's draft list and matched to the job.
