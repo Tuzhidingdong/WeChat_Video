@@ -128,5 +128,5 @@ These are diagnostic commands only; normal sample production uses the BAT launch
 - No access to the user's ordinary Edge profile or to any WeChat_Control browser/session data.
 - The separate draft uploader uses only its own ignored Edge profile and the visible Channels Assistant website.
 - No cookies, passwords or authentication tokens are exported or written to tracked files.
-- Draft upload is allowed only for an explicitly approved, strict-QA-PASS package; publication and scheduling remain prohibited.
+- The user's standing instruction allows strict-QA-PASS packages to be saved as unpublished drafts without approval prompts; publication, scheduling, deletion and overwrite remain prohibited.
 - TASK_PLAN.md remains the frozen V5 authority. Implementation progress is recorded in STATUS.md.
