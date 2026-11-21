@@ -79,8 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
     session.add_argument(
         "--wait-login-seconds",
         type=int,
-        default=0,
-        help="Optional bounded wait for the expected account name after manual QR login.",
+        default=5,
+        help="Brief bounded wait for the expected account name after the page loads; QR login remains manual.",
     )
 
     inspect = sub.add_parser(

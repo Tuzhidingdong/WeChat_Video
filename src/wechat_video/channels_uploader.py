@@ -421,7 +421,7 @@ def _connect_playwright(websocket_url: str):
         raise
 
 
-def open_channels_session(project_root: Path, *, wait_login_seconds: int = 0) -> dict[str, Any]:
+def open_channels_session(project_root: Path, *, wait_login_seconds: int = 5) -> dict[str, Any]:
     """Open the official creator page in a dedicated Edge profile for manual login."""
     project_root = project_root.resolve()
     config, selectors = _load_config(project_root)
@@ -840,7 +840,8 @@ def approve_run(
     if approval_path.exists():
         previous = _read_json(approval_path)
         if all(previous.get(key) == record.get(key) for key in (
-            "video_sha256", "fact_card_sha256", "source_record_sha256", "qa_report_sha256"
+            "video_sha256", "fact_card_sha256", "source_record_sha256",
+            "qa_report_sha256", "channels_metadata_sha256"
         )):
             raise UploadBlockedError("This exact run already has an approval record.")
         raise UploadBlockedError("An approval record already exists for this run ID; resolve it manually.")
@@ -885,7 +886,7 @@ def _validate_run_for_upload(
         raise UploadBlockedError("channels_draft.json job_id does not match the output directory.")
     if metadata.get("account_name") != config.get("account_name"):
         raise UploadBlockedError("Draft metadata account does not match configured target account.")
-    if len(str(metadata["title"])) > int(config.get("title_max_chars", 50)):
+    if len(str(metadata["title"])) > int(config.get("title_max_chars", 16)):
         raise UploadBlockedError("Draft title exceeds the configured platform character limit.")
     if len(str(metadata["title"])) < int(config.get("title_min_chars", 6)):
         raise UploadBlockedError("Draft title is shorter than the configured platform minimum.")

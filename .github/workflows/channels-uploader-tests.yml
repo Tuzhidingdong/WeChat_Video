@@ -16,14 +16,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install portable unit-test dependencies
-        run: |
-          python -m pip install --disable-pip-version-check \
-            pytest "numpy<3" PyYAML psutil playwright
-      - name: Run portable tests (local models/fonts are validated on Windows)
-        run: |
-          python -m pytest -q \
-            tests/test_core.py \
-            tests/test_qa_hardening.py \
-            tests/test_final_refinement_v3.py \
-            tests/test_channels_upload.py
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check pytest PyYAML
+      - name: Run repository tests
+        run: python -m pytest -q

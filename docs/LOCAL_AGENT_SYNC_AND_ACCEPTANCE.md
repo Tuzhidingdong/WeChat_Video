@@ -16,7 +16,7 @@ The user has assigned all GitHub code development to the ChatGPT developer. The 
 1. Read `docs/CHANNELS_DRAFT_UPLOADER.md`, `STATUS.md` and the existing V5 constraints.
 2. Confirm the synchronized commit SHA and branch.
 3. Confirm `Setup_Slice_A.bat` detects/installs Playwright, psutil and PyYAML inside the project .venv. Do not install globally.
-4. Run `.venv\Scripts\python.exe -X utf8 -m pytest -q` once. Report the complete pass/fail summary.
+4. Run `.venv\Scripts\python.exe -X utf8 -m pytest -q` once. Report the complete pass/fail summary. The GitHub CI workflow intentionally runs only portable tests; the local full suite also checks Windows fonts, local TTS models and the user's private voice-profile artifacts.
 5. Run the existing project preflight once only if the local runtime is already set up. Do not render another video as part of uploader acceptance.
 6. Double-click or invoke `Open_Channels_Session.bat` only to confirm that the dedicated Edge profile launches/reuses safely. If QR login is needed, let the user perform the normal login.
 7. Run `Inspect_Channels_UI.bat` after login. Report the visible button names, text-box placeholders and file-input accept types, and whether the exact account name 「成核生长」 was detected. If actual controls differ from `config/selectors.yaml`, report observed differences; do not edit the selector/code yourself.
@@ -27,7 +27,7 @@ The user has assigned all GitHub code development to the ChatGPT developer. The 
 - Do not run Slice A production BATs or generate another video.
 - Do not approve a Fact Card or video on the user's behalf.
 - Do not run `Approve_Latest_Run.bat` or create an approval JSON.
-- Do not run `Save_To_Channels_Draft.bat`, upload a video or click any draft-save control.
+- Do not run `Approve_Latest_Run.bat` or `Save_To_Channels_Draft.bat`; do not upload a video or click any draft-save control. The user must review the Fact Card, video and generated short-title/description and explicitly approve the exact output package first.
 - Never click Publish, Send, Schedule, delete or overwrite.
 - Do not upload any MP4, WAV, screenshot, voice recording, speaker embedding, model or cache to GitHub.
 - No coding, no commits, no pushes and no hidden workers.
@@ -43,4 +43,4 @@ Return only:
 - sanitized UI control inventory and any selector mismatch;
 - confirmation that no approval, upload or publication action occurred.
 
-The developer will implement any required code/selector corrections on GitHub. The user retains final content approval and all publish authority.
+The developer will implement any required code/selector corrections on GitHub. The user retains final content approval, the first real draft-save action and all publish authority.

@@ -17,7 +17,7 @@
   "require_preview_ready": true,
   "require_explicit_draft_status": true,
   "title_min_chars": 6,
-  "title_max_chars": 50,
+  "title_max_chars": 16,
   "description_max_chars": 1000,
   "default_tags": ["#成核生长", "#科学动画", "#材料科学"],
   "safety": {

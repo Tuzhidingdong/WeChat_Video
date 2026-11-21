@@ -34,6 +34,10 @@ def _make_run(root: Path, *, qa_status: str = "PASS") -> Path:
             "jobs_dir": "runtime/upload_jobs",
             "approvals_dir": "runtime/approvals",
             "selectors_file": "config/selectors.yaml",
+            "title_min_chars": 6,
+            "title_max_chars": 16,
+            "description_max_chars": 1000,
+            "default_tags": ["#成核生长"],
             "safety": {
                 "allow_publish": False,
                 "allow_schedule": False,
@@ -43,7 +47,9 @@ def _make_run(root: Path, *, qa_status: str = "PASS") -> Path:
             },
         },
     )
-    (config_dir / "selectors.yaml").write_text("account_identity:\\n  exact_text: 成核生长\\n", encoding="utf-8")
+    (config_dir / "selectors.yaml").write_text(
+        "account_identity:\n  exact_text: 成核生长\n", encoding="utf-8"
+    )
 
     run_dir = root / "outputs" / "20261121_120000_example"
     run_dir.mkdir(parents=True)
@@ -53,6 +59,7 @@ def _make_run(root: Path, *, qa_status: str = "PASS") -> Path:
         {
             "fact_card_id": "TEST-001",
             "title": "测试科学视频：界面能与体相收益",
+            "channels_title": "临界半径如何决定成核",
             "scientific_question": "为什么界面代价与体相收益会相互竞争？",
             "scope": "仅在本测试定义的模型条件下讨论。",
             "claims": [{"claim_id": "C1", "statement": "测试事实。"}],
@@ -71,16 +78,18 @@ def _make_run(root: Path, *, qa_status: str = "PASS") -> Path:
     return run_dir
 
 
-def test_channels_metadata_uses_only_fact_card_text() -> None:
+def test_channels_metadata_uses_explicit_short_title_and_only_fact_card_text() -> None:
     card = {
         "fact_card_id": "CNT-1",
         "title": "临界晶核：界面代价与体相收益",
+        "channels_title": "临界半径如何决定成核",
         "scientific_question": "为什么有些小晶核会消失，而更大的晶核可能继续长大？",
         "scope": "仅讨论经典均匀成核理论的球形近似。",
     }
     script = {"script_id": "S1", "title": "ignored for facts"}
     result = build_channels_metadata(card, script, "job_1")
-    assert result["title"] == card["title"]
+    assert result["title"] == card["channels_title"]
+    assert 6 <= len(result["title"]) <= 16
     assert card["scientific_question"] in result["description"]
     assert card["scope"] in result["description"]
     assert result["source"] == "fact_card_and_script_metadata"
@@ -88,10 +97,14 @@ def test_channels_metadata_uses_only_fact_card_text() -> None:
     validate_channels_metadata(result)
 
 
-def test_metadata_rejects_invalid_short_title() -> None:
-    with pytest.raises(ValueError, match="6–50"):
+def test_metadata_rejects_short_title_outside_6_to_16_chars() -> None:
+    with pytest.raises(ValueError, match="6–16"):
         validate_channels_metadata(
-            {"job_id": "j1", "title": "short", "description": "description"}
+            {"job_id": "j1", "title": "这个标题长度明显超过十六个字符了", "description": "description"}
+        )
+    with pytest.raises(ValueError, match="6–16"):
+        validate_channels_metadata(
+            {"job_id": "j1", "title": "短", "description": "description"}
         )
 
 
@@ -99,11 +112,11 @@ def test_draft_match_requires_title_and_explicit_draft_status() -> None:
     selectors = {"draft_status_texts": ["草稿", "草稿箱"]}
     snapshot = {
         "entries": [
-            "临界晶核：界面代价与体相收益 已发布",
-            "临界晶核：界面代价与体相收益 草稿 2026-11-21",
+            "临界半径如何决定成核 已发布",
+            "临界半径如何决定成核 草稿 2026-11-21",
         ]
     }
-    matches = _matching_draft_entries(snapshot, "临界晶核：界面代价与体相收益", selectors)
+    matches = _matching_draft_entries(snapshot, "临界半径如何决定成核", selectors)
     assert len(matches) == 1
     assert "草稿" in matches[0]
 

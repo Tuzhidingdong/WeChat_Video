@@ -18,15 +18,18 @@ def build_channels_metadata(
 ) -> dict[str, Any]:
     """Build draft copy only from the approved Fact Card and script metadata.
 
-    This function does not invent additional scientific claims. A title may be
-    explicitly supplied as channels_title on the Fact Card; otherwise the
-    Fact Card title is used. Description sentences are copied from the card.
+    This function does not invent scientific claims. The 6–16 character
+    short-title field must be explicitly supplied as channels_title when the
+    full Fact Card title is longer. Description text is copied from the Fact
+    Card's scientific question and scope.
     """
     title = str(fact_card.get("channels_title") or fact_card.get("title") or "").strip()
     question = str(fact_card.get("scientific_question") or "").strip()
     scope = str(fact_card.get("scope") or "").strip()
     if not title or not question or not scope:
-        raise ValueError("Fact Card must include title, scientific_question, and scope for Channels metadata.")
+        raise ValueError(
+            "Fact Card must include title, scientific_question, and scope for Channels metadata."
+        )
 
     selected_tags = tags if tags is not None else DEFAULT_TAGS
     normalized_tags = []
@@ -56,17 +59,28 @@ def build_channels_metadata(
     return metadata
 
 
-def validate_channels_metadata(metadata: dict[str, Any]) -> None:
+def validate_channels_metadata(
+    metadata: dict[str, Any],
+    *,
+    min_title_chars: int = 6,
+    max_title_chars: int = 16,
+    max_description_chars: int = 1000,
+) -> None:
     title = str(metadata.get("title") or "").strip()
     description = str(metadata.get("description") or "").strip()
     if not title:
-        raise ValueError("Channels draft title is empty.")
-    if not 6 <= len(title) <= 50:
-        raise ValueError(f"Channels short title must contain 6–50 characters; got {len(title)}.")
+        raise ValueError("Channels draft short title is empty.")
+    if not min_title_chars <= len(title) <= max_title_chars:
+        raise ValueError(
+            f"Channels short title must contain {min_title_chars}–{max_title_chars} characters; "
+            f"got {len(title)}."
+        )
     if not description:
         raise ValueError("Channels draft description is empty.")
-    if len(description) > 1000:
-        raise ValueError(f"Channels description exceeds 1000 characters; got {len(description)}.")
+    if len(description) > max_description_chars:
+        raise ValueError(
+            f"Channels description exceeds {max_description_chars} characters; got {len(description)}."
+        )
     if re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", title + description):
         raise ValueError("Channels metadata contains control characters.")
     if not metadata.get("job_id"):

@@ -75,7 +75,7 @@ The user syncs this branch, runs Setup_Slice_A.bat once, then Run_Slice_A.bat. U
 
 The development branch `feat/milestone-2-channels-draft-uploader` now contains a guarded local uploader path. This section records code presence only; it does not mark the V5 milestone exit condition or the live upload proof as complete.
 
-- Deterministic `channels_draft.json` metadata is generated from the Fact Card's title, scientific question and scope.
+- Deterministic `channels_draft.json` metadata uses the Fact Card's explicit `channels_title` (6–16 characters), scientific question and scope; the existing longer scientific title is preserved.
 - The dedicated Edge/Playwright uploader, local session registry, semantic selector config, draft snapshot and post-save reconciliation are implemented in source.
 - Strict QA PASS and an explicit, typed user approval record bound to the exact media/Fact Card/source/QA/metadata hashes are required.
 - Ambiguous save results become `UPLOAD_UNKNOWN`; reconciliation is read-only and never retries.

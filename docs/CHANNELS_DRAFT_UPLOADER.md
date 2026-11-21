@@ -14,7 +14,7 @@ The uploader is an isolated local module. It attaches Playwright to a dedicated 
 
 It does not use WeChat_Control, its browser profile, code, BAT files, account data, selectors or automation implementation. It does not call private platform APIs.
 
-The generated review package carries `channels_draft.json`. Its title is taken from Fact Card `channels_title` or `title`; the description is built only from the Fact Card's scientific question and scope. It does not add scientific claims.
+The generated review package carries `channels_draft.json`. The short title uses the Fact Card's explicit `channels_title` (6–16 characters); the longer scientific Fact Card title remains unchanged. The description is built only from the Fact Card's scientific question and scope. It does not add scientific claims. New Fact Cards with no valid short title are blocked rather than silently truncated.
 
 ## 2. One-time local setup
 

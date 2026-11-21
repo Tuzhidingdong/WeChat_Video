@@ -68,7 +68,7 @@ After syncing that branch and running `Setup_Slice_A.bat`:
 3. Review the complete generated MP4, Fact Card, source record and draft copy. `Approve_Latest_Run.bat` prints the scientific claims and requires an explicit typed approval phrase.
 4. Run `Save_To_Channels_Draft.bat`. The command uploads only the newest explicitly approved run, saves an unpublished draft once and reads the new row back from the draft list.
 
-An ordinary `--review-sample` run is still blocked from upload until the user explicitly approves that exact Fact Card and video package. A strict media QA PASS alone is not approval. On an uncertain save, use the read-only `channels-reconcile` command; never blindly upload again.
+Short-title input is checked against the 6–16 character field limit. The selected short title must be explicitly present in Fact Card `channels_title`. An ordinary `--review-sample` run is still blocked from upload until the user explicitly approves that exact Fact Card and video package. A strict media QA PASS alone is not approval. On an uncertain save, use the read-only `channels-reconcile` command; never blindly upload again.
 
 Implementation details and local acceptance steps: `docs/CHANNELS_DRAFT_UPLOADER.md`.
 
