@@ -64,3 +64,24 @@ Reconciliation never uploads, never clicks save and never retries. The same job 
 GitHub Actions runs portable unit tests, including a frame-split creator-page fixture. Local Windows verification has confirmed the dedicated Edge/CDP lifecycle, the 「成核生长」 account identity, the short-title and file inputs, and the draft-save control. The new one-click Slice A route and standing-authorization behavior are code changes; they still require local sync and a real Windows run.
 
 A passing unit test, UI inventory or toast message is not proof of a real draft. Success means the newly-created unpublished draft has been read back from the actual account's draft list and matched to the job.
+
+
+## Headless operation and draft persistence
+
+Automated uploads use the dedicated project Edge profile in `--headless=new`
+mode by default (`headless: true` in `config/channels_upload.json`). The
+automation does not create visible browser windows or bring upload/draft tabs
+to the foreground. The separate manual-login command deliberately opens a
+headed window so a QR code can be scanned. A running headed session cannot be
+silently converted to headless mode: close only the project-owned Edge window
+for this profile manually before an automated run. The automation will never
+terminate an existing browser process or start a second process against an
+active profile.
+
+After metadata entry, the uploader clicks the unique enabled `保存草稿`
+control once. It never retries that click. Persistence is confirmed only when
+exactly one new matching title is read back from the official
+DraftListManager page. This desktop readback confirms that the web draft record
+exists; it does not independently prove that the WeChat mobile client displays
+it. Check the target phone after the run rather than treating desktop readback
+as proof of mobile visibility.
