@@ -15,7 +15,6 @@
   "draft_verify_attempts": 5,
   "draft_verify_interval_seconds": 2,
   "require_preview_ready": true,
-  "require_explicit_draft_status": true,
   "title_min_chars": 6,
   "title_max_chars": 16,
   "description_max_chars": 1000,
