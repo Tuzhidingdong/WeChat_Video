@@ -28,15 +28,16 @@ draft_save_button_text:
   - "存草稿"
   - "保存草稿"
 
-draft_tab_text:
-  - "草稿箱"
-  - "草稿"
-
-draft_row_selectors:
-  - "main [role='row']"
-  - "main tr"
-  - "main article"
-  - "main li"
+# These selectors are confirmed from the actual DraftListManager DOM.
+# The left-nav text "草稿箱" is not used as view evidence: it is present on
+# the ordinary video-management page too.
+draft_list_path: "/platform/post/draftListManager"
+draft_list_frame_path: "/micro/content/post/draftListManager"
+draft_list_root_selector: "div.finder-page.DraftListManager"
+draft_list_active_tab_selector: "li.weui-desktop-tab__nav_current"
+draft_list_header_selector: "div.post-list-header"
+draft_list_body_selector: "div.list-wrapper.draft-list-wrapper div.post-list-body"
+draft_list_ready_timeout_seconds: 15
 
 preview_selectors:
   - "video"
@@ -58,4 +59,3 @@ draft_status_texts:
   - "草稿"
   - "草稿箱"
 
-draft_list_ready_selector: null
