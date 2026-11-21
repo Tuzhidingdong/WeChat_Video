@@ -66,6 +66,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=root / "content" / "sample_script.en.json",
     )
     run.add_argument("--output-root", type=Path, default=Path("outputs"))
+
+    run_and_upload = sub.add_parser(
+        "run-slice-a-and-upload-draft",
+        help="Generate the current Slice A review sample and save it as an unpublished draft.",
+    )
+    run_and_upload.add_argument("--project-root", type=Path, default=root)
+    run_and_upload.add_argument(
+        "--fact-card",
+        type=Path,
+        default=root / "fact_cards" / "critical_nucleus_free_energy_candidate.json",
+    )
+    run_and_upload.add_argument(
+        "--script",
+        type=Path,
+        default=root / "content" / "sample_script.en.json",
+    )
+    run_and_upload.add_argument("--output-root", type=Path, default=Path("outputs"))
     run.add_argument(
         "--review-sample",
         action="store_true",
@@ -177,6 +194,24 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Video: {run_dir / 'final.mp4'}")
             print(f"Report: {run_dir / 'qa_report.json'}")
             print(f"Channels metadata: {run_dir / 'channels_draft.json'}")
+            return 0
+        if args.command == "run-slice-a-and-upload-draft":
+            run_dir = run_slice_a(
+                args.project_root,
+                card_path=args.fact_card,
+                script_path=args.script,
+                output_root=args.output_root,
+                allow_pending_review=True,
+            )
+            upload = upload_run_to_channels(args.project_root.resolve(), run_dir)
+            print(json.dumps({
+                "run_dir": str(run_dir),
+                "video": str(run_dir / "final.mp4"),
+                "qa_report": str(run_dir / "qa_report.json"),
+                "upload": upload,
+                "automatic_publication": False,
+            }, ensure_ascii=False, indent=2))
+            print("Verified unpublished draft. No Publish/Send/Schedule action was performed.")
             return 0
         if args.command == "channels-session":
             result = open_channels_session(
