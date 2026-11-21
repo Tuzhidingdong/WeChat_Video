@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from .audio_diagnostics import encoded_aac_noise_report
-from .fact_card import load_fact_card, read_json, validate_script_claim_links
+from .channels_metadata import build_channels_metadata_for_run_dir
+from .fact_card import FactCardError, load_fact_card, read_json, validate_script_claim_links
 from .master_config import audio_config, theme_config
 from .media import assemble_final_video, mix_final_audio, probe_media
 from .preflight import run_preflight
@@ -16,6 +17,7 @@ from .qa import run_qa
 from .render import render_critical_nucleus_scene
 from .sfx import generate_sfx
 from .subtitles import write_subtitles
+from .topic_approval import verify_fact_card_approval
 from .timeline import attach_editorial_events, build_audio_timeline, write_timeline
 from .tooling import model_root as configured_model_root
 from .tts import generate_speech_units
@@ -24,6 +26,23 @@ from .visual_stages import build_motion_manifest, build_stage_manifest
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_channels_metadata(
+    run_dir: Path,
+    card: dict[str, Any],
+    script: dict[str, Any],
+) -> None:
+    """Write deterministic draft metadata keyed to the complete output directory name."""
+    _write_json(
+        run_dir / "channels_draft.json",
+        build_channels_metadata_for_run_dir(
+            card,
+            script,
+            run_dir,
+            account_name="成核生长",
+        ),
+    )
 
 
 def _write_script_markdown(path: Path, script: dict[str, Any]) -> None:
@@ -135,8 +154,18 @@ def run_slice_a(
     card, source_doc, pending = load_fact_card(
         card_path,
         source_path,
-        allow_pending_review=allow_pending_review,
+        allow_pending_review=True,
     )
+    topic_approval = verify_fact_card_approval(
+        project_root, card_path, source_path
+    )
+    if pending and topic_approval is not None:
+        pending = False
+    elif pending and not allow_pending_review:
+        raise FactCardError(
+            "Fact Card 尚未获批准。请先运行 approve-fact-card 一次性批准该选题；"
+            "审阅样片仍可使用 --review-sample，但不得上传。"
+        )
     script = read_json(script_path)
     validate_script_claim_links(script, card)
 
@@ -152,6 +181,7 @@ def run_slice_a(
     shutil.copy2(source_path, run_dir / "source_record.json")
     shutil.copy2(script_path, run_dir / "script.json")
     _write_script_markdown(run_dir / "script_en.md", script)
+    _write_channels_metadata(run_dir, card, script)
     layout = read_json(project_root / "configs" / "layout.json")
     _write_json(run_dir / "layout_profile.json", layout)
 
@@ -367,17 +397,32 @@ def run_slice_a(
             else None,
         },
     )
-    approval_label = (
-        "NOT_FOR_PUBLICATION_PENDING_USER_FACT_CARD_REVIEW"
-        if pending
-        else "LOCAL_SAMPLE_PENDING_USER_VIDEO_ACCEPTANCE"
-    )
+    if pending:
+        approval_label = "NOT_FOR_PUBLICATION_PENDING_USER_FACT_CARD_REVIEW"
+    elif qa.get("overall_status") == "PASS":
+        approval_label = "QA_GATED_UNPUBLISHED_DRAFT_ELIGIBLE"
+    else:
+        approval_label = "NOT_UPLOAD_ELIGIBLE_QA_FAILED"
+
     _write_json(
         run_dir / "review_status.json",
         {
-            "fact_card_approval_status": card["approval_status"],
+            "fact_card_approval_status": (
+                "APPROVED_LOCAL_HASH_BOUND"
+                if topic_approval and topic_approval.get("approval_type") == "local_hash_bound"
+                else card["approval_status"]
+            ),
+            "topic_approval_record": (
+                {
+                    "approval_type": topic_approval.get("approval_type"),
+                    "approved_by": topic_approval.get("approved_by"),
+                    "approved_at": topic_approval.get("approved_at"),
+                }
+                if topic_approval
+                else None
+            ),
             "sample_status": approval_label,
-            "user_video_acceptance": "PENDING",
+            "user_video_acceptance": "NOT_REQUIRED_FOR_DRAFT; USER_REVIEW_BEFORE_PUBLISH",
             "automatic_upload": False,
             "automatic_publication": False,
         },
@@ -393,14 +438,15 @@ def run_slice_a(
         f"- Fact Card status: {card['approval_status']}",
         f"- Review boundary: {approval_label}",
         "",
-        "## Manual review required",
+        "## Review notes before publication",
         "",
         "1. Compare private/voice_profile/candidates A/B WAVs and judge voice identity and cleanliness.",
         "2. Listen to audio/pronunciation_review.wav and every speech unit for US-English pronunciation.",
         "3. Inspect final.mp4 on a phone: English/Chinese subtitles, safe zones, motion and cue synchronization.",
         "4. Check motion_event_manifest.json against the rendered frames for real motion in every rhythm block.",
         "5. Confirm the sign convention and thermodynamic-vs-kinetic caveat in fact_card.json.",
-        "6. Do not publish this candidate until the Fact Card and video are approved.",
+        "6. The user's standing instruction authorizes strict-QA-PASS outputs to be uploaded as unpublished drafts without a separate approval prompt.",
+        "7. The user reviews the saved unpublished draft and manually publishes; no automatic publication occurs.",
         "",
         "This run does not connect to Edge, WeChat, Flow, OpenCode, or any upload endpoint.",
     ]

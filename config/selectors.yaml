@@ -1,0 +1,61 @@
+# Semantic-first selectors for the official Channels Assistant UI.
+# These defaults deliberately avoid hashed/dynamic CSS class names.
+# Verify/adjust only after inspecting the current account UI. Never add a
+# Publish/Send selector: this automation is draft-save only.
+
+account_identity:
+  selector: null
+  exact_text: "成核生长"
+
+video_file_input:
+  - "input[type='file'][accept*='video']"
+  - "input[type='file']"
+
+title_input:
+  - "input[placeholder*='短标题']"
+  - "textarea[placeholder*='短标题']"
+  - "input[placeholder*='标题']"
+  - "textarea[placeholder*='标题']"
+
+description_input:
+  - "[contenteditable][data-placeholder='添加描述']"
+  - "[contenteditable][data-placeholder*='描述']"
+  - "[contenteditable][data-placeholder*='内容']"
+  - "textarea[placeholder*='描述']"
+  - "textarea[placeholder*='内容']"
+
+draft_save_button_text:
+  - "存草稿"
+  - "保存草稿"
+
+# These selectors are confirmed from the actual DraftListManager DOM.
+# The left-nav text "草稿箱" is not used as view evidence: it is present on
+# the ordinary video-management page too.
+draft_list_path: "/platform/post/draftListManager"
+draft_list_frame_path: "/micro/content/post/draftListManager"
+draft_list_root_selector: "div.finder-page.DraftListManager"
+draft_list_active_tab_selector: "li.weui-desktop-tab__nav_current"
+draft_list_header_selector: "div.post-list-header"
+draft_list_body_selector: "div.list-wrapper.draft-list-wrapper div.post-list-body"
+draft_list_ready_timeout_seconds: 15
+
+preview_selectors:
+  - "video"
+  - "[aria-label*='视频预览']"
+  - "[data-testid*='video-preview']"
+
+upload_complete_texts:
+  - "上传完成"
+  - "上传成功"
+  - "视频上传完成"
+
+upload_error_texts:
+  - "上传失败"
+  - "视频上传失败"
+  - "网络异常"
+  - "文件格式不支持"
+
+draft_status_texts:
+  - "草稿"
+  - "草稿箱"
+

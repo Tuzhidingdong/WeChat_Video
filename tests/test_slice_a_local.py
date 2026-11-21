@@ -32,6 +32,7 @@ def _english_script() -> dict:
     return json.loads((ROOT / "content" / "sample_script.en.json").read_text(encoding="utf-8"))
 
 
+
 def test_repository_fact_card_gate_blocks_pending_card() -> None:
     card = ROOT / "fact_cards" / "critical_nucleus_free_energy_candidate.json"
     sources = ROOT / "fact_cards" / "sources.json"

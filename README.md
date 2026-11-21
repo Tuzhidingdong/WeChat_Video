@@ -21,7 +21,7 @@ The current default production script is `content/sample_script.en.json`; narrat
 
 Local-only audio diagnostics (five gain-matched stems, aggressive-denoise A/B, the no-afftdn vs afftdn same-text A/B, and post-AAC noise inspection) live in `wechat_video.audio_diagnostics`; all outputs stay under ignored `outputs/` or `private/` paths. The noise floor was proven to come from the disabled synthetic ambient stem, not the personal voice. A controlled A/B showed afftdn removed ~93% of 4–10 kHz consonant/air detail, so it was disabled in the default profile. No gate, expander, AGC, cloud TTS, source-separation model, or continuous bed is used. The final video applies one single-pass full-programme loudnorm during mux; two-pass linear loudnorm could deadlock this FFmpeg build with a denoise-free voice stem.
 
-This is deliberately not the full daily production product. No topic-pool manager, OpenCode authoring, Google Flow, Edge session, WeChat uploader, upload state machine, or publishing action is included in Slice A.
+The local video renderer remains a one-template Slice A implementation; the full Verified Topic Pool, OpenCode authoring, five-template library and daily scheduler are not yet integrated. A separate development branch adds a guarded, local-only Channels draft uploader. It does not make a pending Fact Card or review-only sample eligible for upload.
 
 ## First-time setup (one time)
 
@@ -55,7 +55,37 @@ The output is written to a new timestamped folder under outputs/, containing:
 - environment_report.json, scene_render_manifest.json, and assembly_report.json
 - qa_report.json, review_status.json, REVIEW.md, and run.log
 
-Run_Slice_A.bat uses --review-sample because the repository's initial Fact Card is a candidate pending your review. The resulting package is explicitly marked NOT_FOR_PUBLICATION_PENDING_USER_FACT_CARD_REVIEW. It is not a Verified Topic Pool entry and must not be uploaded or published. The normal CLI path rejects an unapproved card unless the review-sample flag is explicitly supplied.
+Run_Slice_A.bat uses --review-sample because the repository's initial Fact Card is a candidate pending your review. The resulting package is marked NOT_FOR_PUBLICATION_PENDING_USER_FACT_CARD_REVIEW and the standalone BAT only writes local files. Under the user's standing draft-only authorization, Run_And_Save_Slice_A_Draft.bat may send that exact package to the unpublished draft box after strict QA PASS; it remains a review item and must not be manually published until its scientific content is checked. The normal CLI path rejects an unapproved card unless the review-sample flag is explicitly supplied.
+
+## Saving a QA-passed MP4 as an unpublished Channels draft
+
+The independent development branch feat/milestone-2-channels-draft-uploader adds a local draft-only uploader. It uses a project-owned Edge profile and the visible official Channels Assistant website. It does not depend on or modify WeChat_control.
+
+### Draft-only authorization
+
+The user has granted standing authorization for the automation to upload strict-QA-PASS videos directly as **unpublished drafts**, without a per-video or Fact Card approval prompt. This authorization never permits publishing, sending, scheduling, deleting or overwriting.
+
+Approve_Fact_Card.bat remains available when a Fact Card is being admitted to the human-approved Verified Topic Pool for future production. That separate topic-governance record is not required for this draft-only review workflow.
+
+### Dedicated Edge and draft upload
+
+1. Double-click Open_Channels_Session.bat and complete the normal official QR login for 「成核生长」 in the dedicated Edge window.
+2. Run Inspect_Channels_UI.bat to inventory visible account identity, buttons, fields and file inputs across the top document and embedded form iframe. It waits up to 15 seconds for the SPA account node.
+3. Generate or select a complete output under outputs/. The uploader requires strict qa_report.json overall_status=PASS, a complete final.mp4 and valid channels_draft.json metadata; no approval record is required.
+4. Double-click Save_To_Channels_Draft.bat to upload the newest eligible existing output. It verifies the account, captures the pre-upload draft list, uploads one MP4, fills metadata and clicks the draft-save control once.
+5. It reads the draft list again and confirms exactly one new row matching the title and explicit draft status. Edge remains open at the draft list.
+
+For a single-click Slice A test from local generation through draft read-back, double-click Run_And_Save_Slice_A_Draft.bat. It creates a fresh Slice A review sample, then uploads that exact run only if generation succeeds and strict QA reports PASS. It cannot fall back to or accidentally upload an older output.
+
+The short title is the Fact Card's explicit channels_title (6–16 characters); the longer scientific title is preserved. The description is derived only from the Fact Card's scientific question and scope.
+
+A --review-sample output may be saved as an unpublished review draft under the user's standing authorization, but it remains scientifically unapproved and must be reviewed before any manual publication. The uploader still blocks incomplete outputs, non-PASS QA, invalid metadata, wrong account identity and possible duplicates.
+
+Approve_Latest_Run.bat remains available as an optional audit/review record; it is not required for draft upload.
+
+If a save result is uncertain, use read-only channels-reconcile; never blindly upload again. The uploader never publishes, schedules, deletes or overwrites.
+
+Implementation and local acceptance details: docs/CHANNELS_DRAFT_UPLOADER.md.
 
 ## What this prototype explains
 
@@ -95,6 +125,8 @@ These are diagnostic commands only; normal sample production uses the BAT launch
 ## Safety boundary
 
 - No paid APIs, paid model fallback, online TTS, paid Flow credits, or new hardware.
-- No browser automation, cookies, user credentials, or Edge profile.
-- No upload, scheduling, final-send click, or automatic publication.
+- No access to the user's ordinary Edge profile or to any WeChat_Control browser/session data.
+- The separate draft uploader uses only its own ignored Edge profile and the visible Channels Assistant website.
+- No cookies, passwords or authentication tokens are exported or written to tracked files.
+- The user's standing instruction allows strict-QA-PASS packages to be saved as unpublished drafts without approval prompts; publication, scheduling, deletion and overwrite remain prohibited.
 - TASK_PLAN.md remains the frozen V5 authority. Implementation progress is recorded in STATUS.md.
