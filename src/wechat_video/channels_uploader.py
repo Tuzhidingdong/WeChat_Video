@@ -896,18 +896,29 @@ def _validate_run_for_upload(
                 "This Fact Card has not been approved. Run approve-fact-card once before daily draft production."
             ) from exc
     metadata_path = run_dir / "channels_draft.json"
+    expected_metadata = build_channels_metadata(
+        card,
+        script,
+        run_dir.name,
+        account_name=str(config["account_name"]),
+        tags=list(config.get("default_tags", [])),
+    )
     if metadata_path.is_file():
         metadata = _read_json(metadata_path)
+        if metadata != expected_metadata:
+            raise UploadBlockedError(
+                "channels_draft.json differs from the exact approved Fact Card-derived metadata. "
+                "Do not upload edited copy; update channels_title/Fact Card and explicitly re-approve the card."
+            )
     else:
-        metadata = build_channels_metadata(
-            card,
-            script,
-            run_dir.name,
-            account_name=str(config["account_name"]),
-            tags=list(config.get("default_tags", [])),
-        )
+        metadata = expected_metadata
         _write_json_atomic(metadata_path, metadata)
-    validate_channels_metadata(metadata)
+    validate_channels_metadata(
+        metadata,
+        min_title_chars=int(config.get("title_min_chars", 6)),
+        max_title_chars=int(config.get("title_max_chars", 16)),
+        max_description_chars=int(config.get("description_max_chars", 1000)),
+    )
     if metadata.get("job_id") != run_dir.name:
         raise UploadBlockedError("channels_draft.json job_id does not match the output directory.")
     if metadata.get("account_name") != config.get("account_name"):
