@@ -1552,11 +1552,20 @@ def _collect_ui_inventory(
                 "file_inputs": frame_files,
             })
 
-        controls_ready = any(
-            item["control_counts"]["buttons_visible"] > 0
-            and item["control_counts"]["textboxes_visible"] > 0
-            and item["control_counts"]["file_inputs_total"] > 0
-            for item in frame_inventory
+        # A creator form may legitimately distribute its controls across
+        # the top document and embedded frames; readiness is page-wide.
+        totals = {
+            key: sum(item["control_counts"][key] for item in frame_inventory)
+            for key in (
+                "buttons_visible",
+                "textboxes_visible",
+                "file_inputs_total",
+            )
+        }
+        controls_ready = (
+            totals["buttons_visible"] > 0
+            and totals["textboxes_visible"] > 0
+            and totals["file_inputs_total"] > 0
         )
         if controls_ready or time.monotonic() >= deadline:
             return frame_inventory, buttons, textboxes, files, controls_ready
