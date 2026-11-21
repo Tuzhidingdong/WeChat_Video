@@ -431,7 +431,7 @@ def run_slice_a(
         "3. Inspect final.mp4 on a phone: English/Chinese subtitles, safe zones, motion and cue synchronization.",
         "4. Check motion_event_manifest.json against the rendered frames for real motion in every rhythm block.",
         "5. Confirm the sign convention and thermodynamic-vs-kinetic caveat in fact_card.json.",
-        "6. Draft upload requires a valid one-time Fact Card approval and strict QA PASS.",
+        "6. The user's standing instruction authorizes strict-QA-PASS outputs to be uploaded as unpublished drafts without a separate approval prompt.",
         "7. The user reviews the saved unpublished draft and manually publishes; no automatic publication occurs.",
         "",
         "This run does not connect to Edge, WeChat, Flow, OpenCode, or any upload endpoint.",
