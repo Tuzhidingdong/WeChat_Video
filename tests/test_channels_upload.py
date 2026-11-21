@@ -16,6 +16,8 @@ from wechat_video.channels_uploader import (
     _draft_save_button,
     _video_file_input,
     _wait_for_account_identity,
+    _account_identity_evidence,
+    _login_required_hint,
     _collect_ui_inventory,
     approve_run,
 )
@@ -88,19 +90,31 @@ class _FakeLocator:
 
 
 class _FakeFrame:
-    def __init__(self, url, *, selectors=None, roles=None, texts=None, inspection=None):
+    def __init__(
+        self,
+        url,
+        *,
+        selectors=None,
+        roles=None,
+        texts=None,
+        inspection=None,
+        identity_matches=None,
+    ):
         self.url = url
         self.selectors = dict(selectors or {})
         self.roles = dict(roles or {})
         self.texts = dict(texts or {})
         self.inspection = dict(inspection or {})
+        self.identity_matches = list(identity_matches or [])
         self.last_evaluate_expression = ""
 
     def locator(self, selector):
         return _FakeLocator(self.selectors.get(selector, []))
 
-    def evaluate(self, expression):
+    def evaluate(self, expression, *args):
         self.last_evaluate_expression = expression
+        if "__CHANNELS_ACCOUNT_IDENTITY_SCAN__" in expression:
+            return self.identity_matches
         return self.inspection
 
     def get_by_role(self, role, name=None, exact=None):
@@ -512,6 +526,65 @@ def test_account_identity_waits_and_checks_child_frames() -> None:
         {"account_identity": {"exact_text": "成核生长"}},
         wait_seconds=0,
     ) is True
+
+
+def test_account_identity_uses_visible_lower_left_dom_text_and_accessible_attributes() -> None:
+    main = _FakeFrame(
+        "https://channels.weixin.qq.com/platform/post/create",
+        identity_matches=[{
+            "tag": "span",
+            "evidence_type": "visible_text",
+            "matched_value": "成核生长",
+            "region": "lower_left",
+            "semantic_account_surface": False,
+            "left": 12,
+            "top": 930,
+            "width": 80,
+            "height": 20,
+        }],
+    )
+    page = _FakePage([main])
+
+    evidence = _account_identity_evidence(main, "成核生长")
+    assert evidence[0]["region"] == "lower_left"
+    assert _wait_for_account_identity(
+        page, "成核生长", {"account_identity": {"exact_text": "成核生长"}}, wait_seconds=0
+    ) is True
+    assert "__CHANNELS_ACCOUNT_IDENTITY_SCAN__" in main.last_evaluate_expression
+
+
+def test_account_identity_rejects_matching_name_outside_account_region() -> None:
+    frame = _FakeFrame(
+        "https://channels.weixin.qq.com/platform/post/create",
+        identity_matches=[{
+            "tag": "p",
+            "evidence_type": "visible_text",
+            "matched_value": "成核生长",
+            "region": "other",
+            "semantic_account_surface": False,
+        }],
+    )
+    assert _account_identity_evidence(frame, "成核生长") == []
+
+
+def test_login_required_hint_requires_explicit_login_prompt() -> None:
+    class BodyFrame:
+        url = "https://channels.weixin.qq.com/platform/post/create"
+
+        def __init__(self, text):
+            self.text = text
+
+        def locator(self, selector):
+            assert selector == "body"
+            return _FakeElement(text=self.text)
+
+    class BodyPage:
+        def __init__(self, body_text):
+            self.frames = [BodyFrame(body_text)]
+            self.main_frame = self.frames[0]
+
+    assert _login_required_hint(BodyPage("登录后可查看账号信息")) is False
+    assert _login_required_hint(BodyPage("请登录后继续")) is True
 
 
 def test_live_description_selector_matches_empty_contenteditable_and_spa_wait_is_15_seconds() -> None:
