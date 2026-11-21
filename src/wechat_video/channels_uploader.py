@@ -876,6 +876,7 @@ _DRAFT_LIST_DOM_SCAN = r"""(config) => {
     const body = containers.length === 1 ? containers[0] : null;
     const rowTexts = body
         ? Array.from(body.children)
+            .filter(isVisible)
             .map((child) => normalize(child.innerText || child.textContent || ""))
             .filter(Boolean)
         : [];
