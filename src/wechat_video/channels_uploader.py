@@ -847,93 +847,189 @@ def _wait_upload_ready(
     )
 
 
-def _select_draft_tab(page: Any, selectors: dict[str, Any]) -> None:
-    for name in selectors.get("draft_tab_text", ["草稿箱", "草稿"]):
-        matches = []
-        for frame in _frame_contexts(page):
-            try:
-                locator = frame.get_by_text(str(name), exact=True)
-                for index in range(min(locator.count(), 8)):
-                    candidate = locator.nth(index)
-                    if candidate.is_visible():
-                        matches.append(candidate)
-            except Exception:
+def _draft_count(text: str) -> int | None:
+    """Parse the count from the verified draft-list tab/header label."""
+    match = re.search(r"草稿箱\s*[（(]\s*(\d+)\s*[）)]", str(text))
+    return int(match.group(1)) if match else None
+
+
+def _draft_list_view_evidence(
+    page: Any,
+    selectors: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Return strong DOM evidence that the dedicated DraftListManager view is active.
+
+    The left navigation always contains the text '草稿箱', even on the normal
+    video-management page. It is therefore not evidence of the current view.
+    """
+    page_path = str(selectors.get("draft_list_path") or "/platform/post/draftListManager")
+    frame_path = str(
+        selectors.get("draft_list_frame_path")
+        or "/micro/content/post/draftListManager"
+    )
+    parsed_page = urlparse(str(getattr(page, "url", "")))
+    if parsed_page.hostname != "channels.weixin.qq.com":
+        return None
+    if parsed_page.path.rstrip("/") != page_path.rstrip("/"):
+        return None
+
+    root_selector = str(selectors.get("draft_list_root_selector") or "")
+    active_tab_selector = str(selectors.get("draft_list_active_tab_selector") or "")
+    header_selector = str(selectors.get("draft_list_header_selector") or "")
+    body_selector = str(selectors.get("draft_list_body_selector") or "")
+    if not all((root_selector, active_tab_selector, header_selector, body_selector)):
+        return None
+
+    for frame in _frame_contexts(page):
+        parsed_frame = urlparse(str(getattr(frame, "url", "")))
+        if parsed_frame.hostname != "channels.weixin.qq.com":
+            continue
+        if parsed_frame.path.rstrip("/") != frame_path.rstrip("/"):
+            continue
+        try:
+            roots = frame.locator(root_selector)
+            if roots.count() != 1 or not roots.first.is_visible():
                 continue
-        if len(matches) == 1:
-            matches[0].click(timeout=5_000)
-            page.wait_for_timeout(500)
-            return
-        if len(matches) > 1:
-            clickable = []
-            for candidate in matches:
-                try:
-                    if candidate.evaluate(
-                        "(el) => el.matches('a,button,[role=button]') || Boolean(el.closest('a,button,[role=button]'))"
-                    ):
-                        clickable.append(candidate)
-                except Exception:
-                    continue
-            if len(clickable) == 1:
-                clickable[0].click(timeout=5_000)
-                page.wait_for_timeout(500)
-                return
-    body = _body_text(page)
-    if not any(token in body for token in ("草稿箱", "草稿")):
-        raise UploadBlockedError(
-            "Could not verify the draft-list view across page frames. Inspect the account UI and adjust config/selectors.yaml."
-        )
+
+            active_tabs = frame.locator(active_tab_selector)
+            active_texts: list[str] = []
+            for index in range(min(active_tabs.count(), 8)):
+                candidate = active_tabs.nth(index)
+                if candidate.is_visible():
+                    active_texts.append(
+                        re.sub(r"\s+", " ", candidate.inner_text(timeout=2_000)).strip()
+                    )
+            active_counts = {
+                count for count in (_draft_count(text) for text in active_texts)
+                if count is not None
+            }
+            if len(active_counts) != 1:
+                continue
+
+            headers = frame.locator(header_selector)
+            header_texts: list[str] = []
+            for index in range(min(headers.count(), 8)):
+                candidate = headers.nth(index)
+                if candidate.is_visible():
+                    header_texts.append(
+                        re.sub(r"\s+", " ", candidate.inner_text(timeout=2_000)).strip()
+                    )
+            header_counts = {
+                count for count in (_draft_count(text) for text in header_texts)
+                if count is not None
+            }
+            if len(header_counts) != 1 or header_counts != active_counts:
+                continue
+
+            containers = frame.locator(body_selector)
+            if containers.count() != 1:
+                continue
+
+            return {
+                "frame": frame,
+                "page_path": parsed_page.path,
+                "frame_path": parsed_frame.path,
+                "active_tab_text": next(
+                    text for text in active_texts if _draft_count(text) is not None
+                ),
+                "header_text": next(
+                    text for text in header_texts if _draft_count(text) is not None
+                ),
+                "draft_count": next(iter(active_counts)),
+                "list_container_present": True,
+            }
+        except Exception:
+            continue
+    return None
+
+
+def _wait_for_draft_list_view(
+    page: Any,
+    selectors: dict[str, Any],
+) -> dict[str, Any]:
+    """Wait for the exact draft manager route and its view-specific DOM signals."""
+    timeout_seconds = max(0, int(selectors.get("draft_list_ready_timeout_seconds", 15)))
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        evidence = _draft_list_view_evidence(page, selectors)
+        if evidence is not None:
+            return evidence
+        if time.monotonic() >= deadline:
+            break
+        page.wait_for_timeout(500)
+
+    frame_urls = [
+        str(getattr(frame, "url", "")) for frame in _frame_contexts(page)
+    ]
+    raise UploadBlockedError(
+        "The page could not be verified as the dedicated draft manager. "
+        "Expected page path '/platform/post/draftListManager', child frame path "
+        "'/micro/content/post/draftListManager', DraftListManager root, selected "
+        "'草稿箱 (n)' tab/header, and the draft-list body container. "
+        f"Current page URL: {getattr(page, 'url', '')}; frame URLs: {frame_urls}"
+    )
 
 
 def _draft_snapshot(page: Any, selectors: dict[str, Any]) -> dict[str, Any]:
-    ready_selector = selectors.get("draft_list_ready_selector")
-    if ready_selector:
-        found = False
-        for frame in _frame_contexts(page):
-            try:
-                frame.locator(str(ready_selector)).wait_for(state="visible", timeout=2_000)
-                found = True
-                break
-            except Exception:
-                continue
-        if not found:
-            raise UploadBlockedError("The configured draft-list ready selector did not appear in any page frame.")
-
-    _select_draft_tab(page, selectors)
-    body = _body_text(page)
-    if not any(token in body for token in ("草稿箱", "草稿")):
-        raise UploadBlockedError("The page frames do not identify the current view as the draft list.")
-
+    """Read the actual draft list only after its dedicated view is positively identified."""
+    evidence = _wait_for_draft_list_view(page, selectors)
+    frame = evidence["frame"]
+    body_selector = str(selectors["draft_list_body_selector"])
+    container = frame.locator(body_selector).first
     entries: list[str] = []
-    for selector in selectors.get("draft_row_selectors", []):
-        frame_entries: list[str] = []
-        for frame in _frame_contexts(page):
-            try:
-                rows = frame.locator(str(selector))
-                count = rows.count()
-                if count:
-                    frame_entries = [
-                        re.sub(r"\s+", " ", rows.nth(index).inner_text(timeout=2_000)).strip()
-                        for index in range(min(count, 500))
-                    ]
-                    frame_entries = [item for item in frame_entries if item]
-                    if frame_entries:
-                        break
-            except Exception:
-                continue
-        if frame_entries:
-            entries = frame_entries
-            break
 
-    if not entries:
-        entries = [
-            re.sub(r"\s+", " ", line).strip()
-            for line in body.splitlines()
-            if line.strip()
-        ][:500]
+    if evidence["draft_count"] > 0:
+        try:
+            if not container.is_visible():
+                raise UploadBlockedError(
+                    "The draft manager reports existing drafts, but its draft-list body is not visible."
+                )
+            raw_entries = container.evaluate(
+                "(element) => Array.from(element.children).map((child) => "
+                "String(child.innerText || child.textContent || '').replace(/\\s+/g, ' ').trim())"
+            )
+            if isinstance(raw_entries, list):
+                entries = [
+                    re.sub(r"\s+", " ", str(item)).strip()
+                    for item in raw_entries
+                    if str(item).strip()
+                ]
+        except UploadBlockedError:
+            raise
+        except Exception:
+            entries = []
+
+        if not entries:
+            try:
+                container_text = re.sub(
+                    r"\s+", " ", container.inner_text(timeout=2_000)
+                ).strip()
+            except Exception:
+                container_text = ""
+            if container_text:
+                entries = [container_text]
+
+        if not entries:
+            raise UploadBlockedError(
+                "The draft manager reports "
+                f"{evidence['draft_count']} draft(s), but no draft-list entries could be read. "
+                "Refusing to treat an unreadable list as empty."
+            )
+
     return {
         "captured_at": _now(),
         "url": page.url,
-        "frame_urls": [str(getattr(frame, "url", "")) for frame in _frame_contexts(page)],
+        "frame_urls": [str(getattr(item, "url", "")) for item in _frame_contexts(page)],
+        "view_type": "draft_list",
+        "view_verified": True,
+        "view_evidence": {
+            "page_path": evidence["page_path"],
+            "frame_path": evidence["frame_path"],
+            "active_tab_text": evidence["active_tab_text"],
+            "header_text": evidence["header_text"],
+            "list_container_present": evidence["list_container_present"],
+        },
+        "draft_count": evidence["draft_count"],
         "entries": entries,
     }
 
@@ -943,11 +1039,22 @@ def _matching_draft_entries(
     title: str,
     selectors: dict[str, Any],
 ) -> list[str]:
+    """Match title occurrences in a verified draft view, with legacy strict fallback."""
+    verified_draft_view = (
+        snapshot.get("view_type") == "draft_list"
+        and snapshot.get("view_verified") is True
+    )
     status_words = [str(x) for x in selectors.get("draft_status_texts", ["草稿"])]
-    matches = []
+    matches: list[str] = []
     for entry in snapshot.get("entries", []):
         text = str(entry)
-        if title in text and any(status in text for status in status_words):
+        if title not in text:
+            continue
+        if verified_draft_view:
+            # Membership in the independently verified DraftListManager is
+            # itself draft-state evidence; row text need not repeat '草稿'.
+            matches.extend([text] * text.count(title))
+        elif any(status in text for status in status_words):
             matches.append(text)
     return matches
 
