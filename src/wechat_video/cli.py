@@ -215,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
                 "automatic_publication": False,
             }
             (run_dir / "channels_upload_report.json").write_text(
-                json.dumps(upload_report, ensure_ascii=False, indent=2) + "\\n",
+                json.dumps(upload_report, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
             review_status_path = run_dir / "review_status.json"
@@ -225,17 +225,17 @@ def main(argv: list[str] | None = None) -> int:
             review_status["automatic_upload"] = True
             review_status["automatic_publication"] = False
             review_status_path.write_text(
-                json.dumps(review_status, ensure_ascii=False, indent=2) + "\\n",
+                json.dumps(review_status, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
             review_path = run_dir / "REVIEW.md"
             with review_path.open("a", encoding="utf-8") as handle:
-                handle.write("\\n## Unpublished Channels draft\\n\\n")
-                handle.write(f"- State: {upload['state']}\\n")
-                handle.write(f"- Account: {upload['account_name']}\\n")
-                handle.write(f"- Title: {upload['title']}\\n")
-                handle.write("- The new row was read back from the actual draft list.\\n")
-                handle.write("- Final publication remains manual.\\n")
+                handle.write("\n## Unpublished Channels draft\n\n")
+                handle.write(f"- State: {upload['state']}\n")
+                handle.write(f"- Account: {upload['account_name']}\n")
+                handle.write(f"- Title: {upload['title']}\n")
+                handle.write("- The new row was read back from the actual draft list.\n")
+                handle.write("- Final publication remains manual.\n")
             print(json.dumps({
                 "run_dir": str(run_dir),
                 "video": str(run_dir / "final.mp4"),
