@@ -1116,19 +1116,23 @@ def _validate_run_for_upload(
     source_path = run_dir / "source_record.json"
     card = _read_json(card_path)
     script = _read_json(run_dir / "script.json")
+    # The user has granted standing authorization for draft-only uploads.
+    # This is not a scientific approval and does not authorize publication.
+    approval: dict[str, Any] = {
+        "approval_type": "standing_user_draft_only_authorization",
+        "approved_by": None,
+        "approved_at": None,
+        "channels_title": None,
+    }
+    # A valid one-time topic approval may still supply canonical metadata for
+    # older outputs, but neither topic nor per-run approval is required to
+    # create an unpublished review draft under the user's standing instruction.
     try:
-        approval = verify_fact_card_approval(project_root, card_path, source_path)
-    except TopicApprovalError as exc:
-        raise UploadBlockedError(str(exc)) from exc
-    if approval is None:
-        # Backward-compatible, stricter one-off approval remains available;
-        # daily automation uses a one-time hash-bound Fact Card approval.
-        try:
-            approval, _ = _approval_record(project_root, config, run_dir)
-        except UploadBlockedError as exc:
-            raise UploadBlockedError(
-                "This Fact Card has not been approved. Run approve-fact-card once before daily draft production."
-            ) from exc
+        topic_approval = verify_fact_card_approval(project_root, card_path, source_path)
+    except TopicApprovalError:
+        topic_approval = None
+    if topic_approval is not None:
+        approval["channels_title"] = topic_approval.get("channels_title")
     metadata_path = run_dir / "channels_draft.json"
     metadata_card = dict(card)
     if approval.get("channels_title") and not metadata_card.get("channels_title"):
@@ -1182,7 +1186,7 @@ def _existing_session_only(project_root: Path) -> tuple[dict[str, Any], str]:
 
 
 def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
-    """Upload one approved, QA-passed video and save it as an unpublished draft."""
+    """Upload one strict-QA-passed video as an unpublished draft under standing user authorization."""
     project_root = project_root.resolve()
     run_dir = run_dir.resolve()
     config, selectors = _load_config(project_root)
@@ -1209,8 +1213,10 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
         "title": metadata["title"],
         "video_path": str((run_dir / "final.mp4").resolve()),
         "video_sha256": _sha256(run_dir / "final.mp4"),
-        "approval_by": approval["approved_by"],
-        "approval_at": approval["approved_at"],
+        "approval_type": approval["approval_type"],
+        "approval_by": approval.get("approved_by"),
+        "approval_at": approval.get("approved_at"),
+        "authorization_basis": "standing_user_instruction_draft_only",
         "qa_status": qa["overall_status"],
         "created_at": _now(),
         "save_click_count": 0,
@@ -1470,7 +1476,7 @@ def approve_latest_run(
 
 
 def upload_latest_approved_run(project_root: Path) -> dict[str, Any]:
-    """Upload the newest strict-QA-PASS output whose Fact Card has one-time approval."""
+    """Upload the newest strict-QA-PASS output under standing draft-only authorization."""
     project_root = project_root.resolve()
     outputs = project_root / "outputs"
     config, _ = _load_config(project_root)
@@ -1490,8 +1496,7 @@ def upload_latest_approved_run(project_root: Path) -> dict[str, Any]:
             continue
         return upload_run_to_channels(project_root, run_dir)
     raise UploadBlockedError(
-        "No output has both strict QA PASS and a valid approved Fact Card. "
-        "Approve the Fact Card once with approve-fact-card, then generate a normal (non-review-sample) video."
+        "No complete output with strict QA PASS and valid Channels metadata is available under outputs/. "
     )
 
 
