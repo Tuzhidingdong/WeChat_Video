@@ -31,6 +31,7 @@ from manim import (
     ValueTracker,
     always_redraw,
     linear,
+    smooth,
 )
 
 from ..hook_motion import (
@@ -347,7 +348,7 @@ class CriticalNucleusScene(Scene):
                 if not halo_visible:
                     transition_animations.append(FadeIn(halo))
                     halo_visible = True
-            self.play(*transition_animations, run_time=trans)
+            self.play(*transition_animations, run_time=trans, rate_func=smooth)
 
             hold_animations: list[Any] = []
             if hold_s > 0 and animated:
