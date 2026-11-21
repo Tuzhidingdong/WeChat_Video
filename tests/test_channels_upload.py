@@ -334,30 +334,21 @@ def test_fact_card_approval_is_one_time_and_hash_bound_to_sources(tmp_path: Path
         verify_fact_card_approval(tmp_path, card_path, source_path)
 
 
-def test_upload_validation_accepts_one_time_topic_approval_without_daily_video_approval(
+def test_upload_validation_uses_standing_draft_authorization_without_topic_approval(
     tmp_path: Path,
 ) -> None:
     run_dir = _make_run(tmp_path)
-    fact_dir = tmp_path / "fact_cards"
-    fact_dir.mkdir(parents=True)
-    card_path = fact_dir / "test_card.json"
-    source_path = fact_dir / "sources.json"
-    import shutil
-
-    shutil.copy2(run_dir / "fact_card.json", card_path)
-    shutil.copy2(run_dir / "source_record.json", source_path)
-    approve_fact_card(
-        tmp_path,
-        card_path,
-        approved_by="test-user",
-        confirmation="APPROVE FACT CARD TEST-001",
+    config = json.loads(
+        (tmp_path / "config" / "channels_upload.json").read_text(encoding="utf-8")
     )
 
-    config = json.loads((tmp_path / "config" / "channels_upload.json").read_text(encoding="utf-8"))
-    metadata, qa, approval = _validate_run_for_upload(tmp_path, run_dir, config)
+    metadata, qa, authorization = _validate_run_for_upload(tmp_path, run_dir, config)
+
     assert metadata["title"] == "临界半径如何决定成核"
     assert qa["overall_status"] == "PASS"
-    assert approval["approval_type"] == "local_hash_bound"
+    assert authorization["approval_type"] == "standing_user_draft_only_authorization"
+    assert authorization["approved_by"] is None
+    assert not (tmp_path / "runtime" / "topic_approvals" / "TEST-001.json").exists()
     assert not (tmp_path / "runtime" / "approvals" / f"{run_dir.name}.json").exists()
 
 
@@ -395,7 +386,7 @@ def test_upload_validation_rejects_metadata_changed_after_fact_card_approval(
     config = json.loads(
         (tmp_path / "config" / "channels_upload.json").read_text(encoding="utf-8")
     )
-    with pytest.raises(UploadBlockedError, match="differs from the exact approved Fact Card"):
+    with pytest.raises(UploadBlockedError, match="differs from the Fact Card-derived metadata"):
         _validate_run_for_upload(tmp_path, run_dir, config)
 
 
@@ -431,7 +422,7 @@ def test_preexisting_output_without_new_short_title_uses_approved_card_title(
     metadata, qa, approval = _validate_run_for_upload(tmp_path, run_dir, config)
     assert metadata["title"] == "临界半径如何决定成核"
     assert qa["overall_status"] == "PASS"
-    assert approval["approval_type"] == "local_hash_bound"
+    assert approval["approval_type"] == "standing_user_draft_only_authorization"
     assert approval["channels_title"] == "临界半径如何决定成核"
 
 
