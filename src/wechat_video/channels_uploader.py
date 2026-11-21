@@ -1386,7 +1386,7 @@ def _inspect_frame_controls(frame: Any, frame_url: str) -> dict[str, Any]:
             }
             return true;
         };
-        const normalize = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+        const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
         const allButtons = Array.from(document.querySelectorAll("button, [role='button']"));
         const visibleButtons = allButtons.filter(isVisible).map((element) => ({
             text: normalize(element.innerText || element.textContent),
@@ -1432,7 +1432,7 @@ def _inspect_frame_controls(frame: Any, frame_url: str) -> dict[str, Any]:
     for item in raw.get("buttons", []) or []:
         if not isinstance(item, dict):
             continue
-        label = re.sub(r"\\s+", " ", str(item.get("text") or "")).strip()
+        label = re.sub(r"\s+", " ", str(item.get("text") or "")).strip()
         aria_label = str(item.get("aria_label") or "").strip()
         if label or aria_label:
             buttons.append({
