@@ -16,6 +16,7 @@ from wechat_video.channels_uploader import (
     _draft_save_button,
     _video_file_input,
     _wait_for_account_identity,
+    _collect_ui_inventory,
     approve_run,
 )
 from wechat_video.topic_approval import (
@@ -87,14 +88,20 @@ class _FakeLocator:
 
 
 class _FakeFrame:
-    def __init__(self, url, *, selectors=None, roles=None, texts=None):
+    def __init__(self, url, *, selectors=None, roles=None, texts=None, inspection=None):
         self.url = url
         self.selectors = dict(selectors or {})
         self.roles = dict(roles or {})
         self.texts = dict(texts or {})
+        self.inspection = dict(inspection or {})
+        self.last_evaluate_expression = ""
 
     def locator(self, selector):
         return _FakeLocator(self.selectors.get(selector, []))
+
+    def evaluate(self, expression):
+        self.last_evaluate_expression = expression
+        return self.inspection
 
     def get_by_role(self, role, name=None, exact=None):
         return _FakeLocator(self.roles.get((role, name, exact), []))
@@ -519,3 +526,84 @@ def test_live_description_selector_matches_empty_contenteditable_and_spa_wait_is
     assert any("[contenteditable]" in item for item in description_selectors)
     assert not any("[contenteditable='true']" in item for item in description_selectors)
     assert config["ui_ready_timeout_seconds"] == 15
+
+
+
+def test_read_only_inspector_collects_controls_from_direct_frame_dom_inventory() -> None:
+    main = _FakeFrame(
+        "https://channels.weixin.qq.com/platform/post/create",
+        inspection={
+            "ready_state": "complete",
+            "counts": {
+                "buttons_total": 4,
+                "buttons_visible": 4,
+                "textboxes_total": 2,
+                "textboxes_visible": 2,
+                "file_inputs_total": 1,
+                "file_inputs_visible": 1,
+            },
+            "buttons": [
+                {"text": "保存草稿", "aria_label": None},
+                {"text": "手机预览", "aria_label": None},
+            ],
+            "textboxes": [
+                {
+                    "tag": "input",
+                    "placeholder": "填写短标题有机会获得更多流量",
+                    "data_placeholder": None,
+                    "aria_label": None,
+                    "contenteditable": None,
+                    "role": None,
+                },
+                {
+                    "tag": "div",
+                    "placeholder": None,
+                    "data_placeholder": "添加描述",
+                    "aria_label": None,
+                    "contenteditable": "",
+                    "role": None,
+                },
+            ],
+            "file_inputs": [
+                {
+                    "accept": "video/mp4,video/x-m4v,video/*",
+                    "multiple": "multiple",
+                    "visible": True,
+                }
+            ],
+        },
+    )
+    child = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create",
+        inspection={
+            "ready_state": "complete",
+            "counts": {
+                "buttons_total": 0,
+                "buttons_visible": 0,
+                "textboxes_total": 0,
+                "textboxes_visible": 0,
+                "file_inputs_total": 0,
+                "file_inputs_visible": 0,
+            },
+            "buttons": [],
+            "textboxes": [],
+            "file_inputs": [],
+        },
+    )
+    page = _FakePage([main, child])
+
+    frames, buttons, textboxes, files, controls_ready = _collect_ui_inventory(
+        page, timeout_seconds=0
+    )
+
+    assert controls_ready is True
+    assert len(frames) == 2
+    assert frames[0]["control_counts"]["buttons_visible"] == 4
+    assert any(item["text"] == "保存草稿" for item in buttons)
+    assert any(item.get("data_placeholder") == "添加描述" for item in textboxes)
+    editor = next(item for item in textboxes if item.get("data_placeholder") == "添加描述")
+    assert editor["contenteditable"] == ""
+    assert files[0]["accept"] == "video/mp4,video/x-m4v,video/*"
+    assert files[0]["frame_url"] == "https://channels.weixin.qq.com/platform/post/create"
+    assert "querySelectorAll" in main.last_evaluate_expression
+    assert "input.value" not in main.last_evaluate_expression
