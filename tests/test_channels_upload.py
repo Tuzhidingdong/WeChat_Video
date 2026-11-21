@@ -452,6 +452,26 @@ def test_draft_snapshot_blocks_positive_count_without_readable_rows() -> None:
         _draft_snapshot(page, _draft_list_test_selectors())
 
 
+def test_draft_snapshot_waits_for_rows_rendered_after_draft_manager_shell() -> None:
+    page = _make_draft_list_page(draft_count=1, entries=[])
+    body = page.frames[1].selectors[
+        "div.list-wrapper.draft-list-wrapper div.post-list-body"
+    ][0]
+    page.on_wait = lambda _milliseconds: setattr(
+        body, "child_texts", ["临界半径如何决定成核 2026-11-21 20:30"]
+    )
+    selectors = _draft_list_test_selectors()
+    selectors["draft_list_rows_timeout_seconds"] = 2
+
+    snapshot = _draft_snapshot(page, selectors)
+
+    assert snapshot["draft_count"] == 1
+    assert snapshot["entries"] == [
+        "临界半径如何决定成核 2026-11-21 20:30"
+    ]
+    assert page.wait_calls == [500]
+
+
 def test_matching_verified_draft_entries_counts_rows_not_repeated_title_text() -> None:
     snapshot = {
         "view_type": "draft_list",
@@ -858,6 +878,7 @@ def test_live_description_selector_matches_empty_contenteditable_and_spa_wait_is
     assert selectors["draft_list_body_selector"].endswith(
         "div.post-list-body"
     )
+    assert selectors["draft_list_rows_timeout_seconds"] == 15
     assert "draft_row_selectors" not in selectors
 
 
