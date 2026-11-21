@@ -45,6 +45,18 @@ def test_repository_fact_card_gate_blocks_pending_card() -> None:
 
 def test_english_script_has_no_cjk_and_valid_claim_links() -> None:
     script = _english_script()
+    routine_pauses = [
+        int(unit.get("pause_after_ms", 200))
+        for unit in script["speech_units"][:-1]
+        if int(unit.get("pause_after_ms", 200)) < 500
+    ]
+    comprehension_pauses = [
+        int(unit.get("pause_after_ms", 200))
+        for unit in script["speech_units"][:-1]
+        if int(unit.get("pause_after_ms", 200)) >= 500
+    ]
+    assert routine_pauses and max(routine_pauses) <= 220
+    assert len(comprehension_pauses) >= 2
     assert script["language"] == "en-US"
     visible = [script["title"], script["pronunciation_review_text"]]
     for unit in script["speech_units"]:
