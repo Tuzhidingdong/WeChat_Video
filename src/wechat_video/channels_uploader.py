@@ -1362,8 +1362,209 @@ def upload_latest_approved_run(project_root: Path) -> dict[str, Any]:
     )
 
 
+
+def _inspect_frame_controls(frame: Any, frame_url: str) -> dict[str, Any]:
+    """Read visible creator controls directly from a frame's DOM.
+
+    The inspector is deliberately read-only and does not read input values.
+    Direct DOM evaluation avoids losing the entire inventory when a single
+    Playwright locator/role query behaves differently in the embedded SPA.
+    """
+    expression = r"""() => {
+        const isVisible = (element) => {
+            if (!element || element.hidden) return false;
+            const rect = element.getBoundingClientRect();
+            if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+            for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+                const style = window.getComputedStyle(node);
+                if (style.display === "none" ||
+                    style.visibility === "hidden" ||
+                    style.visibility === "collapse" ||
+                    Number.parseFloat(style.opacity || "1") === 0) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const normalize = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+        const allButtons = Array.from(document.querySelectorAll("button, [role='button']"));
+        const visibleButtons = allButtons.filter(isVisible).map((element) => ({
+            text: normalize(element.innerText || element.textContent),
+            aria_label: element.getAttribute("aria-label")
+        }));
+        const fieldSelector =
+            "input[type='text'], input:not([type]), textarea, [contenteditable], [role='textbox']";
+        const allFields = Array.from(document.querySelectorAll(fieldSelector));
+        const visibleFields = allFields.filter(isVisible).map((element) => ({
+            tag: element.tagName.toLowerCase(),
+            placeholder: element.getAttribute("placeholder"),
+            data_placeholder: element.getAttribute("data-placeholder"),
+            aria_label: element.getAttribute("aria-label"),
+            contenteditable: element.getAttribute("contenteditable"),
+            role: element.getAttribute("role")
+        }));
+        const allFiles = Array.from(document.querySelectorAll("input[type='file']"));
+        const fileInputs = allFiles.map((element) => ({
+            accept: element.getAttribute("accept"),
+            multiple: element.getAttribute("multiple"),
+            visible: isVisible(element)
+        }));
+        return {
+            ready_state: document.readyState,
+            counts: {
+                buttons_total: allButtons.length,
+                buttons_visible: visibleButtons.length,
+                textboxes_total: allFields.length,
+                textboxes_visible: visibleFields.length,
+                file_inputs_total: allFiles.length,
+                file_inputs_visible: allFiles.filter(isVisible).length
+            },
+            buttons: visibleButtons,
+            textboxes: visibleFields,
+            file_inputs: fileInputs
+        };
+    }"""
+    raw = frame.evaluate(expression)
+    if not isinstance(raw, dict):
+        raise ValueError("Frame DOM inspection returned an unexpected result.")
+
+    buttons: list[dict[str, str]] = []
+    for item in raw.get("buttons", []) or []:
+        if not isinstance(item, dict):
+            continue
+        label = re.sub(r"\\s+", " ", str(item.get("text") or "")).strip()
+        aria_label = str(item.get("aria_label") or "").strip()
+        if label or aria_label:
+            buttons.append({
+                "text": (label or aria_label)[:120],
+                "frame_url": frame_url,
+            })
+
+    textboxes: list[dict[str, Any]] = []
+    for item in raw.get("textboxes", []) or []:
+        if not isinstance(item, dict):
+            continue
+        details = dict(item)
+        details["frame_url"] = frame_url
+        textboxes.append(details)
+
+    files: list[dict[str, Any]] = []
+    for item in raw.get("file_inputs", []) or []:
+        if not isinstance(item, dict):
+            continue
+        details = dict(item)
+        details["frame_url"] = frame_url
+        files.append(details)
+
+    counts = raw.get("counts") if isinstance(raw.get("counts"), dict) else {}
+    return {
+        "url": frame_url,
+        "ready_state": str(raw.get("ready_state") or ""),
+        "control_counts": {
+            key: int(counts.get(key, 0) or 0)
+            for key in (
+                "buttons_total",
+                "buttons_visible",
+                "textboxes_total",
+                "textboxes_visible",
+                "file_inputs_total",
+                "file_inputs_visible",
+            )
+        },
+        "visible_buttons": buttons,
+        "visible_textboxes": textboxes,
+        "file_inputs": files,
+    }
+
+
+def _collect_ui_inventory(
+    page: Any,
+    *,
+    timeout_seconds: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]], list[dict[str, Any]], list[dict[str, Any]], bool]:
+    """Collect each frame independently and wait briefly for the creator form."""
+    deadline = time.monotonic() + max(0, timeout_seconds)
+    while True:
+        frames = _frame_contexts(page)
+        frame_inventory: list[dict[str, Any]] = []
+        buttons: list[dict[str, str]] = []
+        textboxes: list[dict[str, Any]] = []
+        files: list[dict[str, Any]] = []
+        seen_buttons: set[tuple[str, str]] = set()
+        seen_textboxes: set[tuple[str, str, str]] = set()
+
+        for frame in frames:
+            frame_url = str(getattr(frame, "url", ""))
+            try:
+                inventory = _inspect_frame_controls(frame, frame_url)
+            except Exception as exc:
+                frame_inventory.append({
+                    "url": frame_url,
+                    "ready_state": "",
+                    "control_counts": {
+                        "buttons_total": 0,
+                        "buttons_visible": 0,
+                        "textboxes_total": 0,
+                        "textboxes_visible": 0,
+                        "file_inputs_total": 0,
+                        "file_inputs_visible": 0,
+                    },
+                    "visible_buttons": [],
+                    "visible_textboxes": [],
+                    "file_inputs": [],
+                    "inspection_error": f"{type(exc).__name__}: {str(exc)[:160]}",
+                })
+                continue
+
+            frame_buttons: list[str] = []
+            for item in inventory["visible_buttons"]:
+                label = str(item["text"])
+                key = (frame_url, label)
+                if key not in seen_buttons:
+                    seen_buttons.add(key)
+                    buttons.append(item)
+                    frame_buttons.append(label)
+            frame_textboxes: list[dict[str, Any]] = []
+            for item in inventory["visible_textboxes"]:
+                identity = (
+                    frame_url,
+                    str(item.get("tag") or ""),
+                    str(
+                        item.get("placeholder")
+                        or item.get("data_placeholder")
+                        or item.get("aria_label")
+                        or item.get("role")
+                        or ""
+                    ),
+                )
+                if identity not in seen_textboxes:
+                    seen_textboxes.add(identity)
+                    textboxes.append(item)
+                    frame_textboxes.append(item)
+            frame_files = inventory["file_inputs"]
+            files.extend(frame_files)
+            frame_inventory.append({
+                "url": frame_url,
+                "ready_state": inventory["ready_state"],
+                "control_counts": inventory["control_counts"],
+                "visible_buttons": frame_buttons,
+                "visible_textboxes": frame_textboxes,
+                "file_inputs": frame_files,
+            })
+
+        controls_ready = any(
+            item["control_counts"]["buttons_visible"] > 0
+            and item["control_counts"]["textboxes_visible"] > 0
+            and item["control_counts"]["file_inputs_total"] > 0
+            for item in frame_inventory
+        )
+        if controls_ready or time.monotonic() >= deadline:
+            return frame_inventory, buttons, textboxes, files, controls_ready
+        page.wait_for_timeout(400)
+
+
 def inspect_channels_ui(project_root: Path) -> dict[str, Any]:
-    """Return a sanitized inventory of visible controls across all page frames."""
+    """Return a sanitized, read-only inventory of visible controls across frames."""
     project_root = project_root.resolve()
     config, selectors = _load_config(project_root)
     session, websocket_url = ensure_edge_session(
@@ -1381,101 +1582,20 @@ def inspect_channels_ui(project_root: Path) -> dict[str, Any]:
         if settle_ms:
             page.wait_for_timeout(settle_ms)
 
+        ready_timeout = max(0, int(config.get("ui_ready_timeout_seconds", 15)))
         account_verified = _wait_for_account_identity(
             page,
             str(config["account_name"]),
             selectors,
-            wait_seconds=max(0, int(config.get("ui_ready_timeout_seconds", 15))),
+            wait_seconds=ready_timeout,
         )
-        frames = _frame_contexts(page)
-        buttons: list[dict[str, Any]] = []
-        textboxes: list[dict[str, Any]] = []
-        files: list[dict[str, Any]] = []
-        frame_inventory: list[dict[str, Any]] = []
-        seen_buttons: set[tuple[str, str]] = set()
-        seen_textboxes: set[tuple[str, str, str]] = set()
-        for frame in frames:
-            frame_url = str(getattr(frame, "url", ""))
-            frame_buttons: list[str] = []
-            try:
-                locator = frame.locator("button, [role='button']")
-                for index in range(min(locator.count(), 150)):
-                    item = locator.nth(index)
-                    if not item.is_visible():
-                        continue
-                    label = re.sub(r"\s+", " ", item.inner_text(timeout=1_000)).strip()
-                    if not label:
-                        label = str(item.get_attribute("aria-label") or "").strip()
-                    if label:
-                        key = (frame_url, label)
-                        if key not in seen_buttons:
-                            seen_buttons.add(key)
-                            buttons.append({"text": label[:120], "frame_url": frame_url})
-                            frame_buttons.append(label[:120])
-            except Exception:
-                try:
-                    locator = frame.get_by_role("button")
-                    for index in range(min(locator.count(), 100)):
-                        item = locator.nth(index)
-                        if item.is_visible():
-                            label = re.sub(r"\s+", " ", item.inner_text(timeout=1_000)).strip()
-                            if label and (frame_url, label) not in seen_buttons:
-                                seen_buttons.add((frame_url, label))
-                                buttons.append({"text": label[:120], "frame_url": frame_url})
-                                frame_buttons.append(label[:120])
-                except Exception:
-                    pass
-
-            frame_textboxes: list[dict[str, Any]] = []
-            try:
-                locator = frame.locator(
-                    "input[type='text'], input:not([type]), textarea, [contenteditable]"
-                )
-                for index in range(min(locator.count(), 150)):
-                    item = locator.nth(index)
-                    if not item.is_visible():
-                        continue
-                    details = {
-                        "tag": str(item.evaluate("(el) => el.tagName.toLowerCase()")),
-                        "placeholder": item.get_attribute("placeholder"),
-                        "data_placeholder": item.get_attribute("data-placeholder"),
-                        "aria_label": item.get_attribute("aria-label"),
-                        "contenteditable": item.get_attribute("contenteditable"),
-                        "role": item.get_attribute("role"),
-                        "frame_url": frame_url,
-                    }
-                    identity = (
-                        frame_url,
-                        str(details.get("tag")),
-                        str(details.get("placeholder") or details.get("data_placeholder") or details.get("aria_label") or ""),
-                    )
-                    if identity not in seen_textboxes:
-                        seen_textboxes.add(identity)
-                        textboxes.append(details)
-                        frame_textboxes.append(details)
-            except Exception:
-                pass
-
-            frame_files: list[dict[str, Any]] = []
-            try:
-                locator = frame.locator("input[type='file']")
-                for index in range(min(locator.count(), 30)):
-                    item = locator.nth(index)
-                    details = {
-                        "accept": item.get_attribute("accept"),
-                        "multiple": item.get_attribute("multiple"),
-                        "frame_url": frame_url,
-                    }
-                    files.append(details)
-                    frame_files.append(details)
-            except Exception:
-                pass
-            frame_inventory.append({
-                "url": frame_url,
-                "visible_buttons": frame_buttons,
-                "visible_textboxes": frame_textboxes,
-                "file_inputs": frame_files,
-            })
+        (
+            frame_inventory,
+            buttons,
+            textboxes,
+            files,
+            controls_ready,
+        ) = _collect_ui_inventory(page, timeout_seconds=ready_timeout)
 
         body = _body_text(page)
         login_hint = any(
@@ -1486,18 +1606,20 @@ def inspect_channels_ui(project_root: Path) -> dict[str, Any]:
             "manual_login_required": not account_verified and login_hint,
             "page_url": page.url,
             "page_title": page.title(),
-            "frame_count": len(frames),
+            "frame_count": len(frame_inventory),
             "frames": frame_inventory,
+            "controls_ready": controls_ready,
             "visible_buttons": buttons,
             "visible_textboxes": textboxes,
             "file_inputs": files,
-            "ui_ready_timeout_seconds": int(config.get("ui_ready_timeout_seconds", 15)),
+            "ui_ready_timeout_seconds": ready_timeout,
             "session_pid": session["edge_pid"],
             "session_profile": session["user_data_dir"],
-            "note": "Read-only inspection across all frames. No upload, fill, save, publish or delete action was performed.",
+            "note": (
+                "Read-only DOM inventory across all frames. Input values were not read; "
+                "no upload, fill, save, publish or delete action was performed."
+            ),
         }
     finally:
         # The persistent Edge process/context is intentionally left alive.
         playwright.stop()
-
-
