@@ -6,7 +6,7 @@
 
 - **Milestone:** 1 — Local video-production proof
 - **Slice:** A — One critical-nucleus / free-energy-barrier sample
-- **Implementation state:** Series master v1 implemented: reusable theme/audio JSON configs, configured voice clarity EQ with A/B, continuous ambient bed with ducking, relative-level SFX, dimension-correct geometry, distinct subcritical/supercritical paths, binary hook, and a new real bilingual MP4 rendered on this branch.
+- **Implementation state:** Noise-floor removal v2 implemented: default `clean_voice_no_bed` profile with true-silence gaps (no synthetic ambient), evidence-backed decision not to escalate denoise, persistent hook ghosts, icon-supported concept stages, distinct formula-term pulses, configurable adaptive stage scale, and a breathing ending halo. A new real bilingual MP4 was rendered on this branch and passes full QA.
 - **Slice A exit condition:** NOT MET — the user must listen to the A/B voice samples and play the bilingual MP4 before accepting it.
 - **Next authorized work:** user review of voice identity/cleanliness, US-English pronunciation, bilingual subtitle legibility, motion timing, and scientific claims; do not begin Slice B.
 

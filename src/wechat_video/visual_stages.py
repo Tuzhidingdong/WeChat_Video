@@ -20,6 +20,8 @@ TRIGGER_TO_STAGE: dict[str, tuple[str, str]] = {
     "CURVE_DRAW": ("free_energy_landscape", "Free-energy curve drawing"),
     "CRITICAL_PEAK": ("critical_threshold", "Critical-radius peak"),
     "BARRIER_EQ": ("barrier_relation", "Barrier relation"),
+    "GAMMA_CUBED_PULSE": ("barrier_relation", "Gamma-cubed term pulse"),
+    "DRIVING_FORCE_SQUARED_PULSE": ("barrier_relation", "Driving-force-squared term pulse"),
     "MODEL_ASSUMPTION": ("model_scope", "Model assumptions"),
     "SUBCRITICAL_RETURN": ("subcritical_return", "Subcritical return"),
     "SUPERCRITICAL_DESCENT": ("supercritical_descent", "Supercritical descent"),
@@ -43,6 +45,8 @@ TRIGGER_TO_MOTION: dict[str, str] = {
     "CURVE_DRAW": "curve_draw",
     "CRITICAL_PEAK": "peak_reveal",
     "BARRIER_EQ": "barrier_highlight",
+    "GAMMA_CUBED_PULSE": "gamma_cubed_pulse",
+    "DRIVING_FORCE_SQUARED_PULSE": "driving_force_squared_pulse",
     "MODEL_ASSUMPTION": "scope_fade",
     "SUBCRITICAL_RETURN": "subcritical_return",
     "SUPERCRITICAL_DESCENT": "supercritical_descent",
@@ -200,10 +204,79 @@ def build_motion_manifest(
                     "marker_fade_end": path["marker_fade_end"],
                 }
             )
+        elif motion in {"gamma_cubed_pulse", "driving_force_squared_pulse"}:
+            pulse = theme["formula_pulse"]
+            is_gamma = motion == "gamma_cubed_pulse"
+            event.update(
+                {
+                    "pulse_term": "gamma" if is_gamma else "driving_force",
+                    "pulse_symbol": r"\gamma^3" if is_gamma else r"\Delta g_v^2",
+                    "pulse_scale_peak": pulse["scale_peak"],
+                    "term_dim_opacity": pulse["dim_opacity"],
+                    "restore_opacity": pulse["restore_opacity"],
+                    "dim_only_non_current_terms": True,
+                    "primary_curve_unchanged": True,
+                }
+            )
+        elif motion in {"seed_assemble_and_dissolve", "seed_assemble_and_grow"}:
+            ghost = theme["hook_ghost"]
+            event.update(
+                {
+                    "hook_comparison_ghost": True,
+                    "active_opacity": ghost["active_opacity"],
+                    "inactive_opacity": ghost["inactive_opacity"],
+                    "inactive_side_never_removed": True,
+                    "reference_rings_always_visible": ghost["reference_rings_always_visible"],
+                }
+            )
         events.append(event)
+
+    ghost = theme["hook_ghost"]
+    hook_events = [e for e in events if e.get("hook_comparison_ghost")]
+    if hook_events:
+        events.append(
+            {
+                "event_id": "hook_persistent_comparison",
+                "motion_type": "hook_comparison_ghost",
+                "rhythm_block_id": "HOOK",
+                "dim_opacity": focus["inactive_opacity"],
+                "start_frame": 0,
+                "end_frame": round(float(ghost["persistent_seconds"]) * fps),
+                "active_opacity": ghost["active_opacity"],
+                "inactive_opacity": ghost["inactive_opacity"],
+                "inactive_side_never_removed": True,
+                "reference_rings_always_visible": ghost["reference_rings_always_visible"],
+                "both_zones_present_through_hook": True,
+            }
+        )
+    halo_cfg = theme["ending_halo"]
+    if halo_cfg.get("enabled", False):
+        end_unit_id = units[-1]["unit_id"]
+        spans = [
+            e for e in events
+            if e.get("unit_id") in {halo_cfg["start_unit_id"], end_unit_id}
+        ]
+        if spans:
+            first = min(int(e["start_frame"]) for e in spans)
+            last = max(int(e["end_frame"]) for e in spans)
+            events.append(
+                {
+                    "event_id": "final_breathing_halo",
+                    "motion_type": "final_breathing_halo",
+                    "rhythm_block_id": "TAKEAWAY",
+                    "dim_opacity": focus["inactive_opacity"],
+                    "start_frame": first,
+                    "end_frame": last,
+                    "period_seconds": halo_cfg["period_seconds"],
+                    "approx_cycles": round((last - first) / fps / float(halo_cfg["period_seconds"]), 2),
+                    "color_role": "resistance",
+                    "critical_marker_unchanged": True,
+                }
+            )
     return {
         "schema_version": 1,
         "camera": "static portrait",
         "continuous_motion": True,
+        "stage_scale": theme["stage_scale"],
         "events": events,
     }

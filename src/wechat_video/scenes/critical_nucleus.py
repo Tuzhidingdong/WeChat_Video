@@ -6,17 +6,23 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
+import numpy as np
 from manim import (
+    Arrow,
     Axes,
     Circle,
     Create,
     DashedLine,
     Dot,
+    Ellipse,
     FadeIn,
     FadeOut,
+    LEFT,
+    Line,
     MathTex,
     Polygon,
     Rectangle,
+    RIGHT,
     Scene,
     Text,
     VGroup,
@@ -39,6 +45,8 @@ GRAPH_STAGES = {
     "subcritical_return",
     "supercritical_descent",
 }
+HOOK_STAGES = {"seed_failure", "seed_success"}
+HALO_STAGES = {"crystal_growth", "takeaway"}
 
 
 def _bounds(profile: dict[str, Any]) -> dict[str, float]:
@@ -86,6 +94,38 @@ def _assert_safe_zone(mobject: Any, label: str, box: dict[str, float]) -> None:
         )
 
 
+def _cap(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def _scale_about(mobject: Any, factor: float, centre: np.ndarray) -> Any:
+    if abs(factor - 1.0) > 1e-9:
+        mobject.scale(factor, about_point=centre)
+    return mobject
+
+
+def _max_safe_factor(
+    mobject: Any, box: dict[str, float], centre: np.ndarray, target: float, tol: float = 0.03
+) -> float:
+    """Largest uniform scale about the science centre that keeps all points inside the box."""
+    boundary = mobject.get_points_defining_boundary()
+    if len(boundary) == 0:
+        return target
+    cx, cy = float(centre[0]), float(centre[1])
+    factor = target
+    for point in boundary:
+        dx, dy = float(point[0]) - cx, float(point[1]) - cy
+        if dx > 1e-6:
+            factor = min(factor, (box["right"] - tol - cx) / dx)
+        elif dx < -1e-6:
+            factor = min(factor, (box["left"] + tol - cx) / dx)
+        if dy > 1e-6:
+            factor = min(factor, (box["top"] - tol - cy) / dy)
+        elif dy < -1e-6:
+            factor = min(factor, (box["bottom"] + tol - cy) / dy)
+    return max(1.0, min(target, factor))
+
+
 class CriticalNucleusScene(Scene):
     """Static portrait camera with continuous, physically meaningful motion."""
 
@@ -96,6 +136,7 @@ class CriticalNucleusScene(Scene):
         spec = json.loads(Path(spec_path).read_text(encoding="utf-8"))
         profile = spec["layout"]
         font = spec["font_family"]
+        cjk_font = spec.get("cjk_font_family", font)
         theme = theme_config()
         palette = theme["palette"]
         favorable = palette["driving_force"]
@@ -104,9 +145,31 @@ class CriticalNucleusScene(Scene):
         neutral = palette["neutral"]
         grid = theme["portrait_grid"]
         focus = theme["focus_rules"]
+        scale_cfg = theme["stage_scale"]
+        ghost_cfg = theme["hook_ghost"]
+        halo_cfg = theme["ending_halo"]
         box = _bounds(profile)
         cx, cy = box["center_x"], box["center_y"]
+        centre = np.array([cx, cy, 0.0])
         max_w = box["content_width"] - 0.3
+
+        target_scale = float(scale_cfg["target"])
+        if scale_cfg.get("enabled", True):
+            target_scale = _cap(
+                target_scale, float(scale_cfg["min"]), float(scale_cfg["max"])
+            )
+        else:
+            target_scale = 1.0
+
+        scale_report: dict[str, Any] = {
+            "schema_version": 1,
+            "theme_id": theme["theme_id"],
+            "enabled": scale_cfg.get("enabled", True),
+            "target": target_scale,
+            "bounded_range": [scale_cfg["min"], scale_cfg["max"]],
+            "safe_box": box,
+            "per_stage": [],
+        }
 
         assert abs(float(self.camera.frame_width) - FRAME_WIDTH) < 0.01
         assert abs(float(self.camera.frame_height) - FRAME_HEIGHT) < 0.01
@@ -117,21 +180,28 @@ class CriticalNucleusScene(Scene):
             * (grid["badge_top_percent"] + grid["badge_bottom_percent"])
             / 200
         )
-        badge_font = spec.get("cjk_font_family", font)
         badge = (
-            Text(theme["series_identity"]["badge_text"], font=badge_font, font_size=18,
+            Text(theme["series_identity"]["badge_text"], font=cjk_font, font_size=18,
                  color=neutral)
             .move_to([cx, badge_y, 0])
             .set_opacity(0.75)
         )
         self.add(badge)
 
-        # Active 0–1000 ms binary contrast: a small seed fails, a larger one grows.
-        hook_tracker = ValueTracker(0.0)
-        left_x, right_x = cx - 1.45, cx + 1.45
+        # ------------------------------------------------------------------ hook
+        # Both comparison zones exist for the whole 0-5 s hook. The inactive side
+        # is a dim ghost, never removed, and both reference rings stay visible.
+        hook_left = ValueTracker(0.0)
+        hook_right = ValueTracker(0.0)
+        hook_active = ValueTracker(0.0)  # 0 = left failure active, 1 = right success active
+        hook_scale = [1.0]
 
-        def side_particles(center_x: float, succeeds: bool) -> VGroup:
-            p = hook_tracker.get_value()
+        def _side_is_active(succeeds: bool) -> bool:
+            return (hook_active.get_value() >= 0.5) == succeeds
+
+        def hook_particles(center_x: float, succeeds: bool, tracker: ValueTracker) -> VGroup:
+            p = tracker.get_value()
+            opacity = ghost_cfg["active_opacity"] if _side_is_active(succeeds) else ghost_cfg["inactive_opacity"]
             dots: list[Dot] = []
             for index, (dx, dy) in enumerate(
                 [(-0.35, 0.25), (0.0, 0.4), (0.32, 0.2), (-0.25, -0.2),
@@ -151,34 +221,82 @@ class CriticalNucleusScene(Scene):
                     continue
                 dots.append(
                     Dot([center_x + dx * scale, cy + dy * scale, 0], radius=radius, color=color)
+                    .set_opacity(opacity)
                 )
             return VGroup(*dots)
 
-        left = always_redraw(lambda: side_particles(left_x, False))
-        right = always_redraw(lambda: side_particles(right_x, True))
-        reference = VGroup(
-            Circle(radius=0.72, color=neutral, stroke_width=1, stroke_opacity=0.35).move_to(
-                [left_x, cy, 0]
-            ),
-            Circle(radius=0.72, color=neutral, stroke_width=1, stroke_opacity=0.35).move_to(
-                [right_x, cy, 0]
-            ),
+        def hook_ring(center_x: float, succeeds: bool) -> Circle:
+            stroke_opacity = (
+                0.45 if _side_is_active(succeeds) else float(ghost_cfg["inactive_opacity"])
+            )
+            return Circle(
+                radius=0.72, color=neutral, stroke_width=1,
+                stroke_opacity=stroke_opacity,
+            ).move_to([center_x, cy, 0])
+
+        def hook_label(center_x: float, succeeds: bool) -> Text:
+            opacity = ghost_cfg["active_opacity"] if _side_is_active(succeeds) else ghost_cfg["inactive_opacity"]
+            return Text(
+                "grows" if succeeds else "fades", font=font, font_size=22,
+                color=favorable if succeeds else resistance,
+            ).set_opacity(opacity).move_to([center_x, cy - 1.15, 0])
+
+        left_x, right_x = cx - 1.45, cx + 1.45
+        left_dots = always_redraw(lambda: _scale_about(
+            hook_particles(left_x, False, hook_left), hook_scale[0], centre
+        ))
+        right_dots = always_redraw(lambda: _scale_about(
+            hook_particles(right_x, True, hook_right), hook_scale[0], centre
+        ))
+        left_ring = always_redraw(lambda: _scale_about(hook_ring(left_x, False), hook_scale[0], centre))
+        right_ring = always_redraw(lambda: _scale_about(hook_ring(right_x, True), hook_scale[0], centre))
+        left_label = always_redraw(lambda: _scale_about(hook_label(left_x, False), hook_scale[0], centre))
+        right_label = always_redraw(lambda: _scale_about(hook_label(right_x, True), hook_scale[0], centre))
+        hook_group = VGroup(left_dots, right_dots, left_ring, right_ring, left_label, right_label)
+
+        # Evaluate at full growth to find the largest safe stage factor for the hook.
+        hook_left.set_value(1.0)
+        hook_right.set_value(1.0)
+        for item in hook_group.get_family():
+            if getattr(item, "updaters", None):
+                item.update()
+        hook_factor = _max_safe_factor(hook_group, box, centre, target_scale)
+        hook_scale[0] = hook_factor
+        scale_report["per_stage"].append(
+            {"stage": "binary_hook", "applied": round(hook_factor, 4), "target": target_scale}
         )
-        hook_hint = VGroup(
-            Text("fades", font=font, font_size=22, color=resistance).move_to(
-                [left_x, cy - 1.15, 0]
-            ),
-            Text("grows", font=font, font_size=22, color=favorable).move_to(
-                [right_x, cy - 1.15, 0]
-            ),
-        )
-        hook_group = VGroup(left, right, reference, hook_hint)
         _assert_safe_zone(hook_group, "binary_hook", box)
         self.play(FadeIn(hook_group), run_time=0.25)
-        self.play(hook_tracker.animate.set_value(1.0), run_time=0.65, rate_func=linear)
-        self.play(FadeOut(hook_group), run_time=0.10)
+        hook_left.set_value(0.0)
+        hook_right.set_value(0.0)
+        self.play(
+            hook_left.animate.set_value(1.0),
+            hook_right.animate.set_value(1.0),
+            run_time=0.65,
+            rate_func=linear,
+        )
+        hook_visible = True
 
-        graph: VGroup | None = None
+        # ------------------------------------------------------------ breathing halo
+        halo_scale = [1.0]
+        halo_tracker = ValueTracker(0.0)
+
+        def halo_shape() -> VGroup:
+            cycles = halo_tracker.get_value()
+            phase = 2 * math.pi * cycles
+            radius = halo_cfg["base_radius"] + halo_cfg["radius_amplitude"] * math.sin(phase)
+            stroke = halo_cfg["stroke_width_base"] + halo_cfg["stroke_width_amplitude"] * math.sin(phase)
+            opacity = (
+                (float(halo_cfg["opacity_min"]) + float(halo_cfg["opacity_max"])) / 2
+                + (float(halo_cfg["opacity_max"]) - float(halo_cfg["opacity_min"])) / 2 * math.sin(phase)
+            )
+            ring = Circle(radius=radius, color=resistance, stroke_width=stroke).move_to([cx, cy, 0])
+            ring.set_stroke(opacity=opacity)
+            return _scale_about(VGroup(ring), halo_scale[0], centre)
+
+        halo = always_redraw(halo_shape)
+        halo_visible = False
+
         current: list[Any] = []
         current_stage: str | None = None
         cursor_ms = 1000
@@ -194,57 +312,73 @@ class CriticalNucleusScene(Scene):
             stage_key, _ = stage_for_unit(checkpoint)
             trans_ms = transition_ms(end_ms - start_ms)
             trans = trans_ms / 1000.0
+            hold_ms = end_ms - start_ms - trans_ms
+            hold_s = max(0.0, hold_ms / 1000.0)
             tracker = ValueTracker(0.0)
 
-            # One transition play per cue keeps the scene locked to the global timeline.
-            leaving_graph = (
-                current_stage in GRAPH_STAGES and stage_key not in GRAPH_STAGES
+            if stage_key in HOOK_STAGES:
+                # Consume the same transition budget as other cues so the scene
+                # stays locked to the measured global timeline.
+                self.wait(trans)
+                succeeds = stage_key == "seed_success"
+                hook_active.set_value(1.0 if succeeds else 0.0)
+                side_tracker = hook_right if succeeds else hook_left
+                side_tracker.set_value(0.0)
+                self.play(side_tracker.animate.set_value(1.0), run_time=hold_s, rate_func=linear)
+                cursor_ms = start_ms + trans_ms + max(0, hold_ms)
+                current_stage = stage_key
+                current = []
+                continue
+
+            transition_animations: list[Any] = [FadeOut(item) for item in current]
+            if hook_visible:
+                transition_animations.append(FadeOut(hook_group))
+                hook_visible = False
+
+            pulse_term = None
+            triggers = list(checkpoint.get("visual_trigger_ids") or [])
+            if "GAMMA_CUBED_PULSE" in triggers:
+                pulse_term = "gamma"
+            elif "DRIVING_FORCE_SQUARED_PULSE" in triggers:
+                pulse_term = "driving_force"
+            elif "BARRIER_EQ" in triggers:
+                pulse_term = "barrier"
+
+            overlay, animated, factor = self._build_overlay(
+                stage_key, tracker, box, font, cjk_font, favorable, resistance,
+                critical, neutral, pulse_term, target_scale, centre,
             )
-            outgoing: list[Any] = []
-            if leaving_graph:
-                outgoing = list(current) + ([graph] if graph is not None else [])
-                graph = None
-            elif stage_key in GRAPH_STAGES and graph is None:
-                outgoing = list(current)
-            else:
-                outgoing = [item for item in current if item is not graph]
-
-            create_graph = stage_key in GRAPH_STAGES and graph is None
-            if create_graph:
-                graph = self._build_graph(box, font, favorable, neutral)
-                _assert_safe_zone(graph, "shared_graph", box)
-
-            overlay, animated = self._build_overlay(
-                stage_key, tracker, box, font, favorable, resistance, critical, neutral, graph
+            scale_report["per_stage"].append(
+                {
+                    "stage": checkpoint["unit_id"],
+                    "stage_key": stage_key,
+                    "applied": round(factor, 4),
+                    "target": target_scale,
+                }
             )
             for item in overlay.submobjects:
                 _assert_safe_zone(item, f"{stage_key}:{id(item) % 100}", box)
-            if graph is not None:
-                # Only helper context may dim; the primary curve stays fully opaque.
-                context_opacity = (
-                    focus["active_opacity"]
-                    if stage_key == "free_energy_landscape"
-                    else focus["inactive_opacity"]
-                )
-                for index in (0, 2, 3):  # axes, title, x-label
-                    graph.submobjects[index].set_opacity(context_opacity)
-                graph.submobjects[1].set_opacity(focus["primary_curve_opacity_during_motion"])
 
-            transition_animations = [FadeOut(item) for item in outgoing]
-            if create_graph and graph is not None:
-                transition_animations.append(Create(graph))
             transition_animations.append(FadeIn(overlay))
+            if stage_key in HALO_STAGES and halo_cfg.get("enabled", False):
+                if not halo_visible:
+                    transition_animations.append(FadeIn(halo))
+                    halo_visible = True
             self.play(*transition_animations, run_time=trans)
+
+            hold_animations: list[Any] = []
+            if hold_s > 0 and animated:
+                hold_animations.append(tracker.animate.set_value(1.0))
+            if stage_key in HALO_STAGES and halo_visible and hold_s > 0:
+                cycles = hold_s / float(halo_cfg["period_seconds"])
+                hold_animations.append(
+                    halo_tracker.animate.set_value(halo_tracker.get_value() + cycles)
+                )
+            if hold_animations:
+                self.play(*hold_animations, run_time=hold_s, rate_func=linear)
+
             current = [overlay]
             current_stage = stage_key
-
-            hold_ms = end_ms - start_ms - trans_ms
-            if hold_ms > 0 and animated:
-                self.play(
-                    tracker.animate.set_value(1.0),
-                    run_time=hold_ms / 1000.0,
-                    rate_func=linear,
-                )
             cursor_ms = start_ms + trans_ms + max(0, hold_ms)
 
         total_ms = int(spec["total_duration_ms"])
@@ -253,28 +387,12 @@ class CriticalNucleusScene(Scene):
         if total_ms > cursor_ms:
             self.wait((total_ms - cursor_ms) / 1000.0)
 
-    def _build_graph(
-        self, box: dict[str, float], font: str, favorable: str, neutral: str
-    ) -> VGroup:
-        cx, cy = box["center_x"], box["center_y"]
-        axes = Axes(
-            x_range=[0, 2.05, 0.5],
-            y_range=[-4.0, 1.2, 1.0],
-            x_length=6.0,
-            y_length=3.0,
-            tips=False,
-            axis_config={"color": neutral, "stroke_width": 2},
-        ).move_to([cx, cy - 0.2, 0])
-        # Dimensionless x = r/r*, ΔG/ΔG* = 3x² − 2x³, maximum at x = 1.
-        curve = axes.plot(
-            lambda x: 3 * x**2 - 2 * x**3, x_range=[0, 2.0], color=favorable, stroke_width=5
-        )
-        label = _fit(
-            Text("Total free energy  ΔG(r)", font=font, font_size=24, color=favorable),
-            box["content_width"] - 0.3,
-        ).move_to([cx, cy + 2.0, 0])
-        x_label = MathTex(r"r/r^*", font_size=28, color=neutral).move_to([cx, cy - 2.05, 0])
-        return VGroup(axes, curve, label, x_label)
+        report_path = spec.get("stage_scale_report")
+        if report_path:
+            Path(report_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(report_path).write_text(
+                json.dumps(scale_report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
 
     def _build_overlay(
         self,
@@ -282,23 +400,35 @@ class CriticalNucleusScene(Scene):
         tracker: ValueTracker,
         box: dict[str, float],
         font: str,
+        cjk_font: str,
         favorable: str,
         resistance: str,
         critical: str,
         neutral: str,
-        graph: VGroup | None,
-    ) -> tuple[VGroup, bool]:
+        pulse_term: str | None,
+        target_scale: float,
+        centre: np.ndarray,
+    ) -> tuple[VGroup, bool, float]:
         cx, cy = box["center_x"], box["center_y"]
         max_w = box["content_width"] - 0.3
         theme = theme_config()
         state_motion = theme["state_curve_motion"]
+        focus = theme["focus_rules"]
+        pulse_cfg = theme["formula_pulse"]
+        concept_cfg = theme["concept_visuals"]
         children: list[Any] = []
         animated = False
+        scale_ref = [1.0]
 
-        def short_line(text: str, color: str, size: int = 26, y: float = cy - 2.4) -> Text:
-            return _fit(Text(text, font=font, font_size=size, color=color), max_w).move_to(
-                [cx, y, 0]
-            )
+        def scaled_redraw(func: Callable[[], Any]) -> Any:
+            return always_redraw(lambda: _scale_about(func(), scale_ref[0], centre))
+
+        def short_line(text: str, color: str, size: int = 26, y: float = cy - 2.4,
+                       use_cjk: bool = False) -> Text:
+            chosen_font = cjk_font if use_cjk else font
+            return _fit(
+                Text(text, font=chosen_font, font_size=size, color=color), max_w
+            ).move_to([cx, y, 0])
 
         if stage_key in {"seed_failure", "seed_success"}:
             succeeds = stage_key == "seed_success"
@@ -324,7 +454,7 @@ class CriticalNucleusScene(Scene):
                 return VGroup(*dots)
 
             children = [
-                always_redraw(hook_seed),
+                scaled_redraw(hook_seed),
                 Circle(radius=0.72, color=neutral, stroke_width=1, stroke_opacity=0.35).move_to(
                     [side_x, cy, 0]
                 ),
@@ -346,31 +476,33 @@ class CriticalNucleusScene(Scene):
                     )
                 return VGroup(*dots)
 
-            live = always_redraw(particles)
-            ring = Circle(radius=0.95, color=critical, stroke_width=2).move_to([cx, cy, 0])
-            children = [live, ring, short_line("Critical nucleus", critical)]
+            children = [
+                scaled_redraw(particles),
+                Circle(radius=0.95, color=critical, stroke_width=2).move_to([cx, cy, 0]),
+                short_line("Critical nucleus", critical),
+            ]
             animated = True
 
         elif stage_key in {"energy_competition", "competition", "surface_cost", "bulk_gain"}:
             def surface_bar() -> Rectangle:
                 p = tracker.get_value()
-                length = 0.5 + 4.2 * p
+                length = 0.3 + 2.0 * p
                 return Rectangle(
-                    width=length, height=0.28, color=resistance, fill_opacity=0.55,
+                    width=length, height=0.24, color=resistance, fill_opacity=0.55,
                     stroke_width=1,
                 ).move_to([cx - length / 2, cy + 0.5, 0])
 
             def bulk_bar() -> Rectangle:
                 p = tracker.get_value()
-                length = 0.5 + 4.8 * p**1.5
+                length = 0.3 + 2.3 * p**1.5
                 return Rectangle(
-                    width=length, height=0.28, color=favorable, fill_opacity=0.55,
+                    width=length, height=0.24, color=favorable, fill_opacity=0.55,
                     stroke_width=1,
                 ).move_to([cx - length / 2, cy - 0.5, 0])
 
             children = [
-                always_redraw(surface_bar),
-                always_redraw(bulk_bar),
+                scaled_redraw(surface_bar),
+                scaled_redraw(bulk_bar),
                 short_line("Surface cost (+)", resistance, 24, cy + 1.1),
                 short_line("Bulk gain (-)", favorable, 24, cy - 1.1),
             ]
@@ -410,16 +542,16 @@ class CriticalNucleusScene(Scene):
             def dim_shape() -> VGroup:
                 p = tracker.get_value()
                 if is_volume:
-                    return iso_cube(0.7 + 1.3 * p, cx + 1.0, cy + 0.1)
+                    return iso_cube(0.7 + 1.1 * p, cx + 1.0, cy + 0.1)
                 return VGroup(
                     Circle(
-                        radius=0.45 + 1.0 * p, color=resistance,
+                        radius=0.45 + 0.8 * p, color=resistance,
                         stroke_width=4, stroke_opacity=1.0,
-                    ).move_to([cx - 1.0, cy + 0.1, 0])
+                    ).move_to([cx - 0.9, cy + 0.1, 0])
                 )
 
             children = [
-                always_redraw(dim_shape),
+                scaled_redraw(dim_shape),
                 short_line(
                     "r² area" if not is_volume else "r³ volume",
                     resistance if not is_volume else favorable,
@@ -427,22 +559,45 @@ class CriticalNucleusScene(Scene):
             ]
             animated = True
 
-        elif stage_key in {
-            "free_energy_landscape",
-            "critical_threshold",
-            "subcritical_return",
-            "supercritical_descent",
-        }:
-            if graph is None:
-                raise RuntimeError("Graph stage reached without a shared graph.")
-            axes = graph[0]
+        elif stage_key in GRAPH_STAGES:
+            axes = Axes(
+                x_range=[0, 2.05, 0.5],
+                y_range=[-4.0, 1.2, 1.0],
+                x_length=4.8,
+                y_length=3.6,
+                tips=False,
+                axis_config={"color": neutral, "stroke_width": 2},
+            ).move_to([cx, cy - 0.4, 0])
+            curve = axes.plot(
+                lambda x: 3 * x**2 - 2 * x**3, x_range=[0, 2.0],
+                color=favorable, stroke_width=5,
+            )
+            label = _fit(
+                Text("Total free energy  ΔG(r)", font=font, font_size=24, color=favorable),
+                max_w,
+            ).move_to([cx, cy + 2.4, 0])
+            x_label = MathTex(r"r/r^*", font_size=28, color=neutral).move_to([cx, cy - 2.6, 0])
+            context_opacity = (
+                focus["active_opacity"]
+                if stage_key == "free_energy_landscape"
+                else focus["inactive_opacity"]
+            )
+            axes.set_opacity(context_opacity)
+            label.set_opacity(context_opacity)
+            x_label.set_opacity(context_opacity)
+            # Keep the main curve an open stroke; set_opacity() would also turn on
+            # fill and draw a misleading cyan area under the free-energy landscape.
+            curve.set_fill(opacity=0)
+            curve.set_stroke(opacity=focus["primary_curve_opacity_during_motion"])
+            children.extend([axes, curve, label, x_label])
+
             if stage_key == "critical_threshold":
                 marker = Dot(color=critical, radius=0.09).move_to(axes.c2p(1.0, 1.0))
                 line = DashedLine(
                     axes.c2p(1.0, -4.0), axes.c2p(1.0, 1.0),
                     dash_length=0.09, color=critical, stroke_width=3,
                 )
-                children = [line, marker, short_line("r*", critical, 28, cy - 1.6)]
+                children.extend([line, marker, short_line("r*", critical, 28, cy - 2.9)])
             else:
                 subcritical = stage_key == "subcritical_return"
                 path = state_motion["subcritical" if subcritical else "supercritical"]
@@ -473,7 +628,7 @@ class CriticalNucleusScene(Scene):
                         .set_opacity(opacity)
                     )
 
-                children = [always_redraw(moving_marker)]
+                children.append(scaled_redraw(moving_marker))
             animated = True
 
         elif stage_key == "barrier_relation":
@@ -483,34 +638,142 @@ class CriticalNucleusScene(Scene):
                 font_size=40,
                 substrings_to_isolate=[r"\Delta G^*", r"\gamma^3", r"\Delta g_v^2"],
             )
-            for token, role_key in (
+            token_roles = (
                 (r"\gamma^3", "gamma"),
                 (r"\Delta g_v^2", "delta_g_v"),
                 (r"\Delta G^*", "barrier"),
-            ):
+            )
+            for token, role_key in token_roles:
                 try:
                     equation.get_part_by_tex(token).set_color(theme_color(roles[role_key]))
                 except (ValueError, KeyError):
                     pass
             equation = _fit(equation, max_w).move_to([cx, cy + 0.2, 0])
 
+            pulse_token = {
+                "gamma": r"\gamma^3",
+                "driving_force": r"\Delta g_v^2",
+                "barrier": r"\Delta G^*",
+            }.get(str(pulse_term))
+
             def pulsing_equation() -> Any:
                 p = tracker.get_value()
-                scale = 1.0 + 0.06 * math.sin(p * math.pi)
-                return equation.copy().scale(scale)
+                scale = 1.0 + (float(pulse_cfg["scale_peak"]) - 1.0) * math.sin(math.pi * p)
+                result = equation.copy()
+                for token, _ in token_roles:
+                    try:
+                        part = result.get_part_by_tex(token)
+                    except ValueError:
+                        continue
+                    if token == pulse_token:
+                        part.set_opacity(float(pulse_cfg["restore_opacity"]))
+                        part.scale(scale, about_point=part.get_center())
+                    elif pulse_token is not None:
+                        part.set_opacity(float(pulse_cfg["dim_opacity"]))
+                return result
 
-            children = [always_redraw(pulsing_equation), short_line("Free-energy barrier", critical)]
+            children = [
+                scaled_redraw(pulsing_equation),
+                short_line("Free-energy barrier", critical),
+            ]
+            animated = pulse_token is not None
+
+        elif stage_key == "model_scope":
+            # Spherical nucleus: wireframe, depth cue and labelled radius arrow.
+            def nucleus() -> VGroup:
+                p = tracker.get_value()
+                radius = 0.7 + 0.25 * p
+                outer = Circle(radius=radius, color=favorable, stroke_width=3).move_to(
+                    [cx, cy, 0]
+                )
+                equator = Ellipse(
+                    width=2 * radius, height=0.45 * radius, color=favorable,
+                    stroke_width=1, stroke_opacity=0.55,
+                ).move_to([cx, cy, 0])
+                meridian = Ellipse(
+                    width=0.45 * radius, height=2 * radius, color=favorable,
+                    stroke_width=1, stroke_opacity=0.4,
+                ).move_to([cx, cy, 0])
+                arrow = Arrow(
+                    [cx, cy, 0], [cx + radius, cy, 0],
+                    color=critical, stroke_width=2, buff=0,
+                )
+                r_label = MathTex("r", font_size=26, color=critical).next_to(
+                    arrow.get_end(), RIGHT, buff=0.1
+                )
+                return VGroup(outer, equator, meridian, arrow, r_label)
+
+            children = [
+                scaled_redraw(nucleus),
+                short_line("Spherical nucleus", neutral, 26, cy + 1.7),
+                short_line(concept_cfg["sphere_label_zh"], favorable, 26, cy - 1.7, use_cjk=True),
+            ]
             animated = True
 
-        elif stage_key in {"model_scope", "thermo_caveat", "real_systems"}:
+        elif stage_key == "thermo_caveat":
+            # Free-energy direction stays visible; speed is explicitly crossed out.
+            mini_axes = Axes(
+                x_range=[0, 2.0, 0.5], y_range=[-0.2, 1.2, 0.5],
+                x_length=2.6, y_length=1.5, tips=False,
+                axis_config={"color": neutral, "stroke_width": 1},
+            ).move_to([cx - 0.55, cy + 0.2, 0])
+            mini_curve = mini_axes.plot(
+                lambda x: 3 * x**2 - 2 * x**3, x_range=[0, 1.5],
+                color=favorable, stroke_width=3,
+            )
+
+            def direction_arrow() -> VGroup:
+                p = tracker.get_value()
+                end_x = 1.12 + 0.32 * p
+                arrow = Arrow(
+                    mini_axes.c2p(1.1, 3 * 1.1**2 - 2 * 1.1**3),
+                    mini_axes.c2p(end_x, 3 * end_x**2 - 2 * end_x**3),
+                    color=favorable, stroke_width=3, buff=0,
+                )
+                return VGroup(arrow)
+
+            check = VGroup(
+                Line([0, 0, 0], [0.14, -0.14, 0], color=favorable, stroke_width=3),
+                Line([0.14, -0.14, 0], [0.4, 0.22, 0], color=favorable, stroke_width=3),
+            ).move_to([cx - 1.0, cy - 1.15, 0])
+
+            def crossed_clock() -> VGroup:
+                p = tracker.get_value()
+                centre_clock = np.array([cx + 1.25, cy + 0.2, 0.0])
+                clock = Circle(radius=0.38, color=resistance, stroke_width=2).move_to(centre_clock)
+                hands = VGroup(
+                    Line(centre_clock, centre_clock + np.array([0, 0.24, 0]), color=resistance, stroke_width=2),
+                    Line(centre_clock, centre_clock + np.array([0.18, 0.05, 0]), color=resistance, stroke_width=2),
+                )
+                slash = Line(
+                    centre_clock + np.array([-0.3, -0.3, 0]),
+                    centre_clock + np.array([0.3, 0.3, 0]),
+                    color=resistance, stroke_width=3,
+                ).set_opacity(max(0.0, min(1.0, (p - 0.35) / 0.4)))
+                return VGroup(clock, hands, slash)
+
+            children = [
+                mini_axes,
+                mini_curve,
+                scaled_redraw(direction_arrow),
+                check,
+                scaled_redraw(crossed_clock),
+                short_line("Direction", favorable, 22, cy - 1.55),
+                short_line(concept_cfg["direction_label_zh"], favorable, 20, cy - 1.85, use_cjk=True),
+                short_line("Speed", resistance, 22, cy + 1.35),
+                short_line(concept_cfg["speed_label_zh"], resistance, 20, cy + 1.65, use_cjk=True),
+            ]
+            animated = True
+
+        elif stage_key in {"model_assumption", "real_systems"}:
             lines = {
-                "model_scope": ["Spherical nucleus", "Homogeneous model"],
-                "thermo_caveat": ["Thermodynamic tendency", "not a speed prediction"],
-                "real_systems": ["Interfaces and transport", "still matter"],
+                "model_assumption": ["Homogeneous model", "球形近似"],
+                "real_systems": ["Interfaces still matter", "界面仍重要"],
             }[stage_key]
             children = [
-                short_line(lines[0], neutral, 28, cy + 0.4),
-                short_line(lines[1], favorable, 26, cy - 0.4),
+                short_line(lines[0], neutral, 26, cy + 0.4),
+                short_line(lines[1], favorable, 24, cy - 0.4, use_cjk=True),
+                Circle(radius=0.7, color=favorable, stroke_width=2).move_to([cx, cy, 0]),
             ]
             animated = True
 
@@ -518,4 +781,15 @@ class CriticalNucleusScene(Scene):
             children = [short_line(stage_key.replace("_", " "), neutral)]
             animated = False
 
-        return VGroup(*children), animated
+        base_group = VGroup(*children)
+        tracker.set_value(1.0)
+        for item in base_group.get_family():
+            if getattr(item, "updaters", None):
+                item.update()
+        factor = _max_safe_factor(base_group, box, centre, target_scale)
+        scale_ref[0] = factor
+        tracker.set_value(0.0)
+        for item in children:
+            if not getattr(item, "updaters", None):
+                _scale_about(item, factor, centre)
+        return VGroup(*children), animated, factor

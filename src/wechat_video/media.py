@@ -123,7 +123,11 @@ def mix_final_audio(
         ceiling_gain_db = ceiling - _dbfs(voice_peak)
         voice *= 10 ** (ceiling_gain_db / 20.0)
 
-    ambient_report: dict[str, Any] = {"enabled": False}
+    ambient_report: dict[str, Any] = {
+        "enabled": False,
+        "profile": cfg.get("default_profile", "clean_voice_no_bed"),
+        "reason": "default profile excludes continuous random-noise bed",
+    }
     bed = np.zeros_like(voice)
     amb_cfg = cfg["ambient_bed"]
     if amb_cfg.get("enabled", False):
@@ -216,6 +220,37 @@ def mix_final_audio(
     clipped = int(np.sum(np.abs(mixed) >= 1.0))
     if clipped:
         raise RuntimeError(f"Final mix has {clipped} clipped samples; refusing to clip silently.")
+
+    gap_voice: list[np.ndarray] = []
+    gap_final: list[np.ndarray] = []
+    for segment in (timeline or {}).get("segments", []):
+        if segment.get("kind") not in {"cover", "silence"}:
+            continue
+        lo = max(0, int(segment["start_sample"]))
+        hi = min(len(voice), int(segment["end_sample"]))
+        if hi > lo:
+            gap_voice.append(voice[lo:hi])
+            gap_final.append(mixed[lo:hi])
+    silence_diagnostics: dict[str, Any] = {"gap_segments": len(gap_voice)}
+    if gap_voice:
+        voice_gaps = np.concatenate(gap_voice)
+        final_gaps = np.concatenate(gap_final)
+        voice_gap_rms = float(np.sqrt(np.mean(voice_gaps**2)))
+        final_gap_rms = float(np.sqrt(np.mean(final_gaps**2)))
+        ceiling = float(
+            cfg.get("noise_policy", {}).get("gap_noise_ceiling_dbfs", -45.0)
+        )
+        silence_diagnostics.update(
+            {
+                "gap_sample_count": int(voice_gaps.size),
+                "voice_gap_rms_dbfs": round(_dbfs(voice_gap_rms), 2),
+                "final_gap_rms_dbfs": round(_dbfs(final_gap_rms), 2),
+                "voice_gaps_true_silence": bool(np.all(voice_gaps == 0.0)),
+                "final_gaps_near_digital_silence": bool(_dbfs(final_gap_rms) <= ceiling),
+                "gap_noise_ceiling_dbfs": ceiling,
+            }
+        )
+
     output = np.clip(np.round(mixed * 32767), -32768, 32767).astype("<i2")
     with wave.open(str(output_wav), "wb") as writer:
         writer.setnchannels(1)
@@ -229,6 +264,7 @@ def mix_final_audio(
         "voice_ceiling_dbfs": ceiling,
         "voice_ceiling_gain_db": round(ceiling_gain_db, 3),
         "ambient_bed": ambient_report,
+        "silence_diagnostics": silence_diagnostics,
         "sfx_events": sfx_reports,
         "sfx_relative_db": relative_db,
         "peak_dbfs": round(_dbfs(peak), 2),

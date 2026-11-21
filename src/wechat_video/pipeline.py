@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .audio_diagnostics import encoded_aac_noise_report
 from .fact_card import load_fact_card, read_json, validate_script_claim_links
 from .master_config import audio_config, theme_config
 from .media import assemble_final_video, mix_final_audio, probe_media
@@ -263,6 +264,7 @@ def run_slice_a(
         "font_family": font_family,
         "cjk_font_family": cjk_font,
         "layout": layout,
+        "stage_scale_report": str(run_dir / "stage_scale_report.json"),
         "total_duration_ms": timeline["total_duration_ms"],
         "cue_checkpoints": [
             {
@@ -329,6 +331,9 @@ def run_slice_a(
         config=audio_master,
     )
     _write_json(run_dir / "assembly_report.json", assembly)
+    aac_noise = encoded_aac_noise_report(
+        run_dir / "final.mp4", timeline, run_dir / "aac_noise_report.json"
+    )
     candidate_quality = (
         project_root
         / "private"
@@ -356,6 +361,7 @@ def run_slice_a(
             "audio_master": audio_master,
             "theme_master": theme_master,
             "mix_report": mix_report,
+            "aac_noise": aac_noise,
             "voice_eq_ab": json.loads((run_dir / "voice_eq_ab_report.json").read_text(encoding="utf-8"))
             if (run_dir / "voice_eq_ab_report.json").is_file()
             else None,

@@ -364,16 +364,48 @@ def run_qa(
             voice_peak_dbfs <= ceiling + 0.2,
             f"peak={voice_peak_dbfs} dBFS; ceiling={ceiling} dBFS",
         )
-        ambient = mix_report.get("ambient_bed", {})
         amb_cfg = audio_master.get("ambient_bed", {})
-        amb_ok = (
-            ambient.get("enabled") is True
-            and amb_cfg.get("rms_min_dbfs", -33)
-            <= float(ambient.get("measured_rms_dbfs", -120))
-            <= amb_cfg.get("rms_max_dbfs", -30)
-            and ambient.get("continuous_through_gaps") is True
+        ambient = mix_report.get("ambient_bed", {})
+        amb_cfg_enabled = bool(amb_cfg.get("enabled", False))
+        amb_mixed_enabled = bool(ambient.get("enabled", False))
+        check(
+            "default_ambient_bed_disabled",
+            amb_cfg_enabled is False and amb_mixed_enabled is False,
+            f"config_enabled={amb_cfg_enabled}; mixed_enabled={amb_mixed_enabled}; "
+            f"profile={audio_master.get('default_profile')}",
         )
-        check("ambient_bed_continuous_and_on_target", amb_ok, f"rms={ambient.get('measured_rms_dbfs')}")
+        policy = audio_master.get("noise_policy", {})
+        check(
+            "no_continuous_random_noise_bed_in_default",
+            policy.get("default_no_continuous_noise") is True
+            and policy.get("random_noise_bed_allowed_in_default") is False
+            and "ambient_bed_duck_and_mix" not in audio_master.get("processing_order", []),
+            f"processing_order_tail={audio_master.get('processing_order', [])[-2:]}",
+        )
+        silence = mix_report.get("silence_diagnostics", {})
+        check(
+            "voice_gaps_are_true_silence",
+            silence.get("voice_gaps_true_silence") is True,
+            f"gap_voice_rms={silence.get('voice_gap_rms_dbfs')} dBFS; "
+            f"segments={silence.get('gap_segments')}",
+        )
+        check(
+            "final_mix_gaps_free_of_continuous_noise",
+            silence.get("final_gaps_near_digital_silence") is True,
+            f"gap_final_rms={silence.get('final_gap_rms_dbfs')} dBFS; "
+            f"ceiling={silence.get('gap_noise_ceiling_dbfs')} dBFS",
+        )
+        aac_noise = context.get("aac_noise", {}).get("summary", {})
+        sep_ok = float(
+            aac_noise.get("pause_to_speech_separation_db", 0)
+        ) >= float(policy.get("gap_to_speech_separation_db", 25.0))
+        check(
+            "encoded_aac_pause_is_quiet",
+            bool(aac_noise.get("pause_is_near_digital_silence")) and sep_ok,
+            f"pause_rms={aac_noise.get('pause_rms_dbfs')} dBFS; "
+            f"speech_rms={aac_noise.get('speech_rms_dbfs')} dBFS; "
+            f"separation={aac_noise.get('pause_to_speech_separation_db')} dB",
+        )
         sfx_reports = mix_report.get("sfx_events", [])
         relative_values = [
             float(e["measured_sfx_rms_dbfs"]) - float(e["local_voice_rms_dbfs"])

@@ -1,7 +1,18 @@
 {
   "schema_version": 1,
-  "preset_id": "voice_clarity_v1",
+  "preset_id": "clean_voice_no_bed",
+  "default_profile": "clean_voice_no_bed",
+  "legacy_eq_preset_id": "voice_clarity_v1",
   "required_ffmpeg_filters": ["afftdn", "highpass", "equalizer", "highshelf"],
+  "noise_policy": {
+    "default_no_continuous_noise": true,
+    "random_noise_bed_allowed_in_default": false,
+    "preserve_true_silence_in_voice_track": true,
+    "no_gate_expander_or_agc": true,
+    "final_loudnorm_must_not_fill_gaps": true,
+    "gap_noise_ceiling_dbfs": -45.0,
+    "gap_to_speech_separation_db": 25.0
+  },
   "denoise": {
     "enabled": true,
     "filter": "afftdn",
@@ -34,14 +45,17 @@
     "soft_low_frequency_only": true
   },
   "ambient_bed": {
-    "enabled": true,
+    "enabled": false,
+    "opt_in_required": true,
+    "random_noise_voice_disabled": true,
+    "diagnostic_only": true,
     "rms_target_dbfs": -30.0,
     "rms_min_dbfs": -33.0,
     "rms_max_dbfs": -30.0,
     "duck_db": 3.5,
     "fade_ms": 800,
-    "texture": "soft_low_hiss",
-    "continuous_through_gaps": true
+    "texture": "soft_low_hiss_diagnostic_only",
+    "continuous_through_gaps": false
   },
   "final_programme": {
     "integrated_lufs": -16.0,
@@ -60,7 +74,12 @@
     "voice_peak_ceiling_and_sample_measurement",
     "global_timeline_from_processed_wavs",
     "relative_level_sfx_mix",
-    "ambient_bed_duck_and_mix",
     "single_full_programme_loudnorm_and_aac_encode"
+  ],
+  "excluded_from_default_profile": [
+    "continuous_random_noise_bed",
+    "dynamic_gate",
+    "expander",
+    "automatic_gain_control"
   ]
 }

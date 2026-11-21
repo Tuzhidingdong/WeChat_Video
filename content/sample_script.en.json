@@ -167,7 +167,7 @@
       "spoken_text": "It scales with surface energy cubed.",
       "display_text_zh": "能垒随界面能立方增长。",
       "claim_ids": ["CNT-03"],
-      "visual_trigger_ids": ["BARRIER_EQ"],
+      "visual_trigger_ids": ["GAMMA_CUBED_PULSE"],
       "rhythm_block_id": "MECHANISM",
       "visual_keyword": "gamma cubed",
       "pause_after_ms": 280
@@ -179,7 +179,7 @@
       "spoken_text": "It falls as driving force squared.",
       "display_text_zh": "随驱动力平方增大而下降。",
       "claim_ids": ["CNT-03"],
-      "visual_trigger_ids": ["BARRIER_EQ"],
+      "visual_trigger_ids": ["DRIVING_FORCE_SQUARED_PULSE"],
       "rhythm_block_id": "MECHANISM",
       "visual_keyword": "driving force",
       "pause_after_ms": 280

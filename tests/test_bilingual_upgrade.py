@@ -261,10 +261,14 @@ def test_qa_accepts_context_only_with_true_personal_voice(tmp_path: Path, monkey
         "mix_report": {
             "voice_peak_dbfs": -6.0,
             "clipped_samples": 0,
-            "ambient_bed": {
-                "enabled": True,
-                "measured_rms_dbfs": -30.0,
-                "continuous_through_gaps": True,
+            "ambient_bed": {"enabled": False, "profile": "clean_voice_no_bed"},
+            "silence_diagnostics": {
+                "gap_segments": 2,
+                "voice_gaps_true_silence": True,
+                "voice_gap_rms_dbfs": -120.0,
+                "final_gaps_near_digital_silence": True,
+                "final_gap_rms_dbfs": -120.0,
+                "gap_noise_ceiling_dbfs": -45.0,
             },
             "sfx_events": [
                 {
@@ -272,6 +276,14 @@ def test_qa_accepts_context_only_with_true_personal_voice(tmp_path: Path, monkey
                     "local_voice_rms_dbfs": -14.5,
                 }
             ],
+        },
+        "aac_noise": {
+            "summary": {
+                "speech_rms_dbfs": -18.0,
+                "pause_rms_dbfs": -110.0,
+                "pause_to_speech_separation_db": 92.0,
+                "pause_is_near_digital_silence": True,
+            }
         },
     }
     timeline["speech_units"][0]["sample_count"] = 44100

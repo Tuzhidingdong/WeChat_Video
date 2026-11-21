@@ -37,10 +37,19 @@ def test_master_configs_are_complete_and_domain_neutral() -> None:
     assert theme["focus_rules"]["primary_curve_opacity_during_motion"] == 1.0
     assert theme["hook_pattern"]["static_title_card_allowed"] is False
     assert "critical radius" in " ".join(theme["semantic_roles"]["critical"]).lower()
-    assert audio["preset_id"] == "voice_clarity_v1"
+    assert audio["preset_id"] == "clean_voice_no_bed"
+    assert audio["default_profile"] == "clean_voice_no_bed"
+    assert audio["ambient_bed"]["enabled"] is False
+    assert audio["noise_policy"]["default_no_continuous_noise"] is True
+    assert "ambient_bed_duck_and_mix" not in audio["processing_order"]
     assert "highpass" in audio["required_ffmpeg_filters"]
     assert audio["ambient_bed"]["rms_target_dbfs"] == -30.0
     assert audio["sfx"]["relative_level_db"] == -13.5
+    assert theme["stage_scale"]["target"] == 1.30
+    assert 1.25 <= theme["stage_scale"]["min"] <= theme["stage_scale"]["target"] <= theme["stage_scale"]["max"] <= 1.35
+    assert 0.20 <= theme["hook_ghost"]["inactive_opacity"] <= 0.25
+    assert theme["formula_pulse"]["scale_peak"] == 1.18
+    assert theme["ending_halo"]["period_seconds"] == 2.0
 
 
 def test_eq_filter_chain_is_built_from_config_values() -> None:
@@ -63,7 +72,7 @@ def test_ambient_bed_is_continuous_and_on_target(tmp_path: Path) -> None:
         assert reader.getnframes() == 44100 * 3
 
 
-def test_mix_has_ambient_in_gaps_and_relative_sfx_without_clipping(tmp_path: Path) -> None:
+def test_default_mix_keeps_gaps_digitally_silent_with_relative_sfx(tmp_path: Path) -> None:
     rate = 44100
     narration = tmp_path / "narration.wav"
     samples = np.zeros(rate * 3, dtype=np.float32)
@@ -87,12 +96,22 @@ def test_mix_has_ambient_in_gaps_and_relative_sfx_without_clipping(tmp_path: Pat
         }
     ]
     mix_path = tmp_path / "final_mix.wav"
-    report = mix_final_audio(narration, events, tmp_path, mix_path, config=audio_config(str(ROOT)))
+    timeline = {
+        "speech_units": [{"unit_id": "u1", "start_sample": rate, "end_sample": 2 * rate}],
+        "segments": [
+            {"kind": "cover", "start_sample": 0, "end_sample": rate},
+            {"kind": "silence", "start_sample": 2 * rate, "end_sample": 3 * rate},
+        ],
+    }
+    report = mix_final_audio(
+        narration, events, tmp_path, mix_path,
+        config=audio_config(str(ROOT)), timeline=timeline,
+    )
     assert report["sample_count"] == rate * 3
     assert report["clipped_samples"] == 0
-    assert report["ambient_bed"]["enabled"] is True
-    assert report["ambient_bed"]["continuous_through_gaps"] is True
-    assert -33 <= report["ambient_bed"]["measured_rms_dbfs"] <= -30
+    assert report["ambient_bed"]["enabled"] is False
+    assert report["silence_diagnostics"]["voice_gaps_true_silence"] is True
+    assert report["silence_diagnostics"]["final_gaps_near_digital_silence"] is True
     assert report["voice_peak_dbfs"] <= -3.0 + 0.2
     assert report["sfx_events"]
     for event in report["sfx_events"]:
@@ -100,8 +119,8 @@ def test_mix_has_ambient_in_gaps_and_relative_sfx_without_clipping(tmp_path: Pat
         assert -15.0 <= relative <= -12.0
     with wave.open(str(mix_path), "rb") as reader:
         mixed = np.frombuffer(reader.readframes(reader.getnframes()), dtype="<i2")
-    gap = mixed[:rate]
-    assert np.any(gap != 0), "Ambient bed must fill the hard-silence gap"
+    assert np.all(mixed[:rate] == 0), "Default profile must not add a noise bed in the opening gap"
+    assert np.all(mixed[2 * rate :] == 0), "Default profile must keep the closing gap silent"
 
 
 def test_motion_manifest_encodes_opposite_paths_and_focus() -> None:
@@ -128,3 +147,40 @@ def test_motion_manifest_encodes_opposite_paths_and_focus() -> None:
     assert sup["easing"] == "p_squared"
     assert sub["graph_opacity_during_motion"] == 1.0
     assert sup["marker_opacity_during_motion"] == 1.0
+    assert manifest["stage_scale"]["target"] == 1.30
+
+
+def test_manifest_has_distinct_term_pulses_hook_ghost_and_halo() -> None:
+    script = json.loads((ROOT / "content" / "sample_script.en.json").read_text(encoding="utf-8"))
+    units = script["speech_units"]
+    cues = [
+        {
+            "unit_id": u["unit_id"],
+            "start_ms": 1000 + index * 3000,
+            "end_ms": 1000 + index * 3000 + 2500,
+        }
+        for index, u in enumerate(units)
+    ]
+    manifest = build_motion_manifest(cues, units)
+    by_type = {event["motion_type"]: event for event in manifest["events"]}
+    gamma = by_type["gamma_cubed_pulse"]
+    driving = by_type["driving_force_squared_pulse"]
+    assert gamma["event_id"] != driving["event_id"]
+    assert gamma["pulse_term"] == "gamma"
+    assert driving["pulse_term"] == "driving_force"
+    assert gamma["pulse_symbol"] == r"\gamma^3"
+    assert driving["pulse_symbol"] == r"\Delta g_v^2"
+    assert gamma["pulse_scale_peak"] == 1.18
+    assert gamma["dim_only_non_current_terms"] is True
+    assert gamma["unit_id"] != driving["unit_id"]
+    gamma_unit = next(u for u in units if u["unit_id"] == gamma["unit_id"])
+    driving_unit = next(u for u in units if u["unit_id"] == driving["unit_id"])
+    assert "surface energy cubed" in gamma_unit["spoken_text"]
+    assert "driving force squared" in driving_unit["spoken_text"]
+    ghost = by_type["hook_comparison_ghost"]
+    assert ghost["inactive_side_never_removed"] is True
+    assert 0.20 <= ghost["inactive_opacity"] <= 0.25
+    halo = by_type["final_breathing_halo"]
+    assert halo["period_seconds"] == 2.0
+    assert halo["approx_cycles"] >= 2.0
+    assert halo["critical_marker_unchanged"] is True

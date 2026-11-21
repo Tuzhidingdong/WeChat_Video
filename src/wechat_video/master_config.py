@@ -33,7 +33,9 @@ def theme_config(root: str | None = None) -> dict[str, Any]:
             "schema_version", "theme_id", "series_identity", "palette",
             "semantic_roles", "portrait_grid", "subtitle_rules",
             "dimension_visual_mapping", "hook_pattern", "state_curve_motion",
-            "focus_rules", "motion_accent_rules", "formula_symbol_roles",
+            "focus_rules", "stage_scale", "hook_ghost", "formula_pulse",
+            "concept_visuals", "ending_halo", "motion_accent_rules",
+            "formula_symbol_roles",
         ),
     )
 
@@ -45,9 +47,9 @@ def audio_config(root: str | None = None) -> dict[str, Any]:
         root_path,
         "configs/audio_postprocess.json",
         (
-            "schema_version", "preset_id", "required_ffmpeg_filters", "denoise",
-            "voice_eq", "voice_headroom", "sfx", "ambient_bed", "final_programme",
-            "processing_order",
+            "schema_version", "preset_id", "default_profile", "noise_policy",
+            "required_ffmpeg_filters", "denoise", "voice_eq", "voice_headroom",
+            "sfx", "ambient_bed", "final_programme", "processing_order",
         ),
     )
 

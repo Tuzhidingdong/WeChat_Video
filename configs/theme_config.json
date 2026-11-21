@@ -97,6 +97,43 @@
     "marker_opacity_during_motion": 1.0,
     "dim_only_inactive_helpers": true
   },
+  "stage_scale": {
+    "enabled": true,
+    "target": 1.30,
+    "min": 1.25,
+    "max": 1.35,
+    "min_frame_height_percent": 45,
+    "safe_zone_is_authoritative": true
+  },
+  "hook_ghost": {
+    "active_opacity": 1.0,
+    "inactive_opacity": 0.22,
+    "persistent_seconds": 5.0,
+    "reference_rings_always_visible": true,
+    "fade_out_entire_group_on_side_switch": false
+  },
+  "formula_pulse": {
+    "scale_peak": 1.18,
+    "dim_opacity": 0.65,
+    "restore_opacity": 1.0
+  },
+  "concept_visuals": {
+    "text_only_hold_limit_seconds": 1.5,
+    "sphere_label_zh": "球形晶核",
+    "direction_label_zh": "方向",
+    "speed_label_zh": "快慢"
+  },
+  "ending_halo": {
+    "enabled": true,
+    "start_unit_id": "U19",
+    "period_seconds": 2.0,
+    "base_radius": 1.05,
+    "radius_amplitude": 0.08,
+    "stroke_width_base": 2.0,
+    "stroke_width_amplitude": 1.5,
+    "opacity_min": 0.35,
+    "opacity_max": 0.75
+  },
   "motion_accent_rules": {
     "pulse_scale": 0.06,
     "pulse_duration_ms": 300,
