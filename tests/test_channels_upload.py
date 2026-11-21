@@ -20,6 +20,7 @@ from wechat_video.channels_uploader import (
     _draft_save_button,
     _video_file_input,
     _wait_for_account_identity,
+    _ensure_draft_list_account_identity,
     _account_identity_evidence,
     _login_required_hint,
     _collect_ui_inventory,
@@ -129,13 +130,17 @@ class _FakeFrame:
 
 
 class _FakePage:
-    def __init__(self, frames):
+    def __init__(self, frames, *, on_wait=None):
         self.frames = list(frames)
         self.main_frame = self.frames[0]
         self.url = "https://channels.weixin.qq.com/platform/post/create"
+        self.on_wait = on_wait
+        self.wait_calls = []
 
     def wait_for_timeout(self, milliseconds):
-        return None
+        self.wait_calls.append(milliseconds)
+        if self.on_wait is not None:
+            self.on_wait(milliseconds)
 
 
 def _write(path: Path, value: dict) -> None:
@@ -551,6 +556,25 @@ def test_account_identity_waits_and_checks_child_frames() -> None:
         {"account_identity": {"exact_text": "成核生长"}},
         wait_seconds=0,
     ) is True
+
+
+def test_draft_list_identity_waits_for_delayed_spa_account_node() -> None:
+    identity = _FakeElement(text="成核生长")
+    frame = _FakeFrame("https://channels.weixin.qq.com/platform/post/list")
+    page = _FakePage(
+        [frame],
+        on_wait=lambda _milliseconds: frame.texts.update(
+            {("成核生长", True): [identity]}
+        ),
+    )
+
+    _ensure_draft_list_account_identity(
+        page,
+        {"account_name": "成核生长", "ui_ready_timeout_seconds": 15},
+        {"account_identity": {"exact_text": "成核生长"}},
+    )
+
+    assert page.wait_calls == [500]
 
 
 def test_account_identity_uses_visible_lower_left_dom_text_and_accessible_attributes() -> None:
