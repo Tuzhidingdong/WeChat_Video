@@ -500,17 +500,20 @@ def open_channels_session(project_root: Path, *, wait_login_seconds: int = 5) ->
 
 
 def _body_text(page: Any) -> str:
-    """Read visible text across the top document and all embedded frames."""
+    """Read body text directly in each frame's own execution context."""
     chunks: list[str] = []
+    expression = """() => {
+        const body = document.body;
+        return body ? String(body.innerText || body.textContent || '').trim() : '';
+    }"""
     for frame in _frame_contexts(page):
         try:
-            value = str(frame.locator("body").inner_text(timeout=3_000)).strip()
+            value = str(frame.evaluate(expression)).strip()
         except Exception:
             continue
         if value and value not in chunks:
             chunks.append(value)
     return "\n".join(chunks)
-
 
 def _login_required_hint(page: Any) -> bool:
     """Return true only for an explicit, high-confidence login prompt."""
@@ -654,17 +657,16 @@ def _wait_for_account_identity(
                 if _account_identity_evidence(frame, expected_name):
                     return True
                 if selector:
-                    loc = frame.locator(str(selector))
-                    for index in range(min(loc.count(), 8)):
-                        candidate = loc.nth(index)
-                        if candidate.is_visible():
-                            actual = candidate.inner_text().strip()
-                            if actual == expected_name or expected_name in actual:
-                                return True
-                loc = frame.get_by_text(exact_text, exact=True)
-                for index in range(min(loc.count(), 8)):
-                    if loc.nth(index).is_visible():
-                        return True
+                    candidates = _visible_locators(frame, str(selector), limit=8)
+                    for candidate in candidates:
+                        actual = candidate.inner_text().strip()
+                        if actual == expected_name or expected_name in actual:
+                            return True
+                exact_matches = _visible_locators(
+                    frame, "body *", limit=8, exact_text=exact_text
+                )
+                if exact_matches:
+                    return True
             except Exception:
                 continue
         if time.monotonic() >= deadline:
@@ -723,42 +725,165 @@ def _frame_contexts(page: Any) -> list[Any]:
     return ordered or [page]
 
 
-def _visible_locators(page: Any, selector: str, *, limit: int = 8) -> list[Any]:
-    visible: list[Any] = []
+_DOM_VISIBLE_ELEMENT_SCAN = r"""(payload) => {
+    /* __CHANNELS_VISIBLE_ELEMENT_SCAN__ */
+    const normalize = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+    const isVisible = (element) => {
+        if (!element || element.hidden) return false;
+        const rect = element.getBoundingClientRect();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+        for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+            const style = window.getComputedStyle(node);
+            if (style.display === "none" || style.visibility === "hidden" ||
+                style.visibility === "collapse" || Number.parseFloat(style.opacity || "1") === 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+    const selector = String(payload.selector || "");
+    const exactText = payload.exact_text == null ? null : normalize(payload.exact_text);
+    const containsText = payload.contains_text == null ? null : normalize(payload.contains_text);
+    const matches = Array.from(document.querySelectorAll(selector)).filter((element) => {
+        if (!isVisible(element)) return false;
+        if (exactText === null && containsText === null) return true;
+        const actual = normalize(element.innerText || element.textContent || "");
+        if (exactText !== null && actual !== exactText) return false;
+        if (containsText !== null && !actual.includes(containsText)) return false;
+        return true;
+    });
+    const limit = Math.max(1, Math.min(64, Number(payload.limit || 8)));
+    return {
+        match_count: matches.length,
+        items: matches.slice(0, limit).map((element, visible_index) => ({
+            visible_index,
+            tag: element.tagName.toLowerCase(),
+            text: normalize(element.innerText || element.textContent || "").slice(0, 160),
+            disabled: Boolean(element.disabled) ||
+                element.getAttribute("aria-disabled") === "true"
+        }))
+    };
+}""";
+
+_DOM_VISIBLE_ELEMENT_HANDLE = r"""(payload) => {
+    /* __CHANNELS_VISIBLE_ELEMENT_HANDLE__ */
+    const normalize = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+    const isVisible = (element) => {
+        if (!element || element.hidden) return false;
+        const rect = element.getBoundingClientRect();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+        for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+            const style = window.getComputedStyle(node);
+            if (style.display === "none" || style.visibility === "hidden" ||
+                style.visibility === "collapse" || Number.parseFloat(style.opacity || "1") === 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+    const selector = String(payload.selector || "");
+    const exactText = payload.exact_text == null ? null : normalize(payload.exact_text);
+    const containsText = payload.contains_text == null ? null : normalize(payload.contains_text);
+    const matches = Array.from(document.querySelectorAll(selector)).filter((element) => {
+        if (!isVisible(element)) return false;
+        if (exactText === null && containsText === null) return true;
+        const actual = normalize(element.innerText || element.textContent || "");
+        if (exactText !== null && actual !== exactText) return false;
+        if (containsText !== null && !actual.includes(containsText)) return false;
+        return true;
+    });
+    return matches[Number(payload.visible_index)] || null;
+}""";
+
+
+def _visible_locators(
+    page: Any,
+    selector: str,
+    *,
+    limit: int = 8,
+    exact_text: str | None = None,
+    contains_text: str | None = None,
+) -> list[Any]:
+    """Return ElementHandles found by DOM evaluation, never frame Locator queries.
+
+    Channels embeds creator and management applications in cross-origin frames.
+    CDP Locator queries have returned zero nodes in those frames even when a
+    same-frame querySelectorAll sees the live controls. Resolve each candidate
+    in its own execution context, then perform trusted Playwright ElementHandle
+    actions on that exact node.
+    """
+    found: list[Any] = []
+    payload = {
+        "selector": str(selector),
+        "exact_text": exact_text,
+        "contains_text": contains_text,
+        "limit": int(limit),
+    }
     for frame in _frame_contexts(page):
         try:
-            locator = frame.locator(str(selector))
-            for index in range(min(locator.count(), limit)):
-                candidate = locator.nth(index)
-                if candidate.is_visible():
-                    visible.append(candidate)
-        except Exception:
-            continue
-    return visible
+            inventory = frame.evaluate(_DOM_VISIBLE_ELEMENT_SCAN, payload)
+        except Exception as exc:
+            raise UploadBlockedError(
+                f"Could not inspect selector {selector!r} inside frame "
+                f"{str(getattr(frame, 'url', ''))[:180]}: "
+                f"{type(exc).__name__}: {str(exc)[:160]}"
+            ) from exc
+        if not isinstance(inventory, dict) or not isinstance(inventory.get("items"), list):
+            raise UploadBlockedError(
+                f"DOM scan returned an invalid result for selector {selector!r}."
+            )
+        match_count = int(inventory.get("match_count") or 0)
+        if match_count > limit:
+            raise UploadBlockedError(
+                f"Too many visible DOM matches ({match_count}) for selector {selector!r}; refusing an ambiguous action."
+            )
+        for item in inventory["items"]:
+            if not isinstance(item, dict):
+                continue
+            handle_payload = dict(payload)
+            handle_payload["visible_index"] = int(item.get("visible_index", -1))
+            try:
+                handle = frame.evaluate_handle(
+                    _DOM_VISIBLE_ELEMENT_HANDLE, handle_payload
+                )
+                candidate = handle.as_element()
+                if candidate is None or not candidate.is_visible():
+                    raise ValueError("the candidate changed or became invisible")
+                found.append(candidate)
+            except Exception as exc:
+                raise UploadBlockedError(
+                    f"Could not bind the inspected DOM candidate in frame "
+                    f"{str(getattr(frame, 'url', ''))[:180]}: "
+                    f"{type(exc).__name__}: {str(exc)[:160]}"
+                ) from exc
+    return found
 
 
 def _visible_locator(page: Any, selector_list: Any):
+    """Return one visible ElementHandle from configured selectors, if unique."""
     if not isinstance(selector_list, list):
         selector_list = [selector_list] if selector_list else []
     for selector in selector_list:
-        candidates = _visible_locators(page, str(selector))
+        candidates = _visible_locators(page, str(selector), limit=16)
+        if len(candidates) > 1:
+            raise UploadBlockedError(
+                f"More than one visible element matched the configured field selector {selector!r}."
+            )
         if candidates:
             return candidates[0]
     return None
-
 
 def _open_create_view(
     page: Any,
     config: dict[str, Any],
     selectors: dict[str, Any],
 ) -> None:
-    """Mount the creator SPA through its visible post-card entry point.
+    """Mount the creator SPA through its exact visible post-card entry point.
 
-    Direct navigation to /platform/post/create can leave the browser on the
-    /platform shell with an empty create iframe. The current shell exposes the
-    exact "发表视频" entry inside post-card.html; activating that entry mounts
-    the actual creator form. This is navigation only: media selection and the
-    draft-save action remain separate, guarded steps.
+    The entry is inspected and resolved with frame.evaluate/evaluate_handle in
+    the target frame itself. This deliberately avoids Playwright Locator APIs,
+    which have returned zero nodes for this live cross-origin iframe over CDP.
+    The resulting ElementHandle click is a navigation action only.
     """
     platform_url = str(
         config.get("platform_url") or "https://channels.weixin.qq.com/platform"
@@ -795,6 +920,7 @@ def _open_create_view(
         0.0, float(selectors.get("create_nav_timeout_seconds", 15))
     )
     deadline = time.monotonic() + timeout_seconds
+    last_scan_errors: list[str] = []
     while True:
         matching_frames = []
         visible_buttons = []
@@ -807,25 +933,20 @@ def _open_create_view(
                 continue
             matching_frames.append(frame)
             try:
-                # Match the same DOM contract as _inspect_frame_controls:
-                # the live Channels shell exposes this entry as a visible
-                # button/[role=button], but its accessible name is not
-                # consistently surfaced by Playwright get_by_role().
-                locator = frame.locator("button, [role='button']")
-                for index in range(min(locator.count(), 32)):
-                    candidate = locator.nth(index)
-                    if not candidate.is_visible():
-                        continue
-                    try:
-                        actual_text = re.sub(
-                            r"\s+", " ", str(candidate.inner_text(timeout=2_000))
-                        ).strip()
-                    except Exception:
-                        actual_text = ""
-                    if actual_text == button_text:
-                        visible_buttons.append(candidate)
-            except Exception:
-                continue
+                # Use the exact same direct-DOM visibility/text semantics as
+                # channels-inspect: button/[role=button], innerText || textContent,
+                # normalized whitespace, and the target iframe's own context.
+                matches = _visible_locators(
+                    frame,
+                    "button, [role='button']",
+                    limit=32,
+                    exact_text=button_text,
+                )
+                visible_buttons.extend(matches)
+            except Exception as exc:
+                last_scan_errors.append(
+                    f"{type(exc).__name__}: {str(exc)[:180]}"
+                )
 
         if len(visible_buttons) > 1:
             raise UploadBlockedError(
@@ -836,8 +957,8 @@ def _open_create_view(
             button = visible_buttons[0]
             if button.is_enabled():
                 try:
-                    # This is the landing-page navigation entry, not the
-                    # final "发表"/publication control on the completed form.
+                    # ElementHandle.click sends a real browser input action while
+                    # retaining the node resolved in the frame's own context.
                     button.click(timeout=10_000)
                 except Exception as exc:
                     raise UploadBlockedError(
@@ -853,11 +974,11 @@ def _open_create_view(
                 f"Could not find exactly one enabled visible '{button_text}' "
                 f"creator-entry button in frame {frame_path}. "
                 f"Matching frame count: {len(matching_frames)}; "
-                f"current frame URLs: {frame_urls}. "
+                f"current frame URLs: {frame_urls}; "
+                f"DOM scan errors: {last_scan_errors[-3:]}. "
                 "No video was selected or uploaded; no save or publication action was taken."
             )
         page.wait_for_timeout(400)
-
 
 def _video_file_input(page: Any, selectors: dict[str, Any]):
     """Find the unique video-upload input across all live page frames.
@@ -1090,75 +1211,81 @@ def _video_file_input(page: Any, selectors: dict[str, Any]):
 
 
 def _fill_field(page: Any, selectors: dict[str, Any], key: str, value: str) -> None:
-    locator = _visible_locator(page, selectors.get(key, []))
-    if locator is None:
+    handle = _visible_locator(page, selectors.get(key, []))
+    if handle is None:
         raise UploadBlockedError(
             f"Could not locate the {key} field in any page frame using config/selectors.yaml; "
             "no save action was taken."
         )
-    locator.fill(value, timeout=10_000)
     try:
-        actual = locator.input_value(timeout=3_000)
-    except Exception:
-        actual = locator.inner_text(timeout=3_000)
+        handle.fill(value, timeout=10_000)
+        try:
+            actual = handle.input_value(timeout=3_000)
+        except Exception:
+            actual = handle.inner_text(timeout=3_000)
+    except Exception as exc:
+        raise UploadBlockedError(
+            f"The {key} field was found in its frame DOM but could not be filled: "
+            f"{type(exc).__name__}."
+        ) from exc
     if str(actual).strip() != value.strip():
         raise UploadBlockedError(f"The {key} field did not retain the exact supplied text.")
 
-
 def _draft_save_button(page: Any, selectors: dict[str, Any]):
+    """Find one semantic draft-save button using same-frame DOM inspection."""
     for name in selectors.get("draft_save_button_text", ["存草稿", "保存草稿"]):
-        matches = []
-        for frame in _frame_contexts(page):
-            try:
-                locator = frame.get_by_role("button", name=str(name), exact=True)
-                for index in range(min(locator.count(), 8)):
-                    candidate = locator.nth(index)
-                    if candidate.is_visible():
-                        matches.append(candidate)
-            except Exception:
-                continue
+        matches = _visible_locators(
+            page,
+            "button, [role='button']",
+            limit=32,
+            exact_text=str(name),
+        )
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
             raise UploadBlockedError(
-                f"More than one visible '{name}' button exists across the page frames."
-            )
-
-        text_matches = []
-        for frame in _frame_contexts(page):
-            try:
-                locator = frame.get_by_text(str(name), exact=True)
-                for index in range(min(locator.count(), 8)):
-                    candidate = locator.nth(index)
-                    if candidate.is_visible():
-                        text_matches.append(candidate)
-            except Exception:
-                continue
-        if len(text_matches) == 1:
-            return text_matches[0]
-        if len(text_matches) > 1:
-            raise UploadBlockedError(
-                f"More than one visible exact '{name}' text control exists across the page frames."
+                f"More than one visible exact '{name}' draft-save button exists across the page frames."
             )
     return None
 
-
 def _preview_ready(page: Any, selectors: dict[str, Any]) -> bool:
-    locator = _visible_locator(page, selectors.get("preview_selectors", ["video"]))
-    if locator is None:
-        return False
-    try:
-        tag = str(locator.evaluate("(el) => el.tagName.toLowerCase()"))
-        if tag == "video":
-            return bool(
-                locator.evaluate(
-                    "(el) => Boolean(el.currentSrc || el.src) && el.readyState >= 1"
-                )
-            )
-        return True
-    except Exception:
-        return False
-
+    """Check preview readiness inside each frame without Locator queries."""
+    selector_list = selectors.get("preview_selectors", ["video"])
+    if not isinstance(selector_list, list):
+        selector_list = [selector_list] if selector_list else []
+    expression = r"""(selector) => {
+        const isVisible = (element) => {
+            if (!element || element.hidden) return false;
+            const rect = element.getBoundingClientRect();
+            if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+            for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+                const style = window.getComputedStyle(node);
+                if (style.display === "none" || style.visibility === "hidden" ||
+                    style.visibility === "collapse" || Number.parseFloat(style.opacity || "1") === 0) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        let elements = [];
+        try { elements = Array.from(document.querySelectorAll(String(selector || ""))); }
+        catch (_) { return false; }
+        return elements.some((element) => {
+            if (!isVisible(element)) return false;
+            if (element.tagName.toLowerCase() === "video") {
+                return Boolean(element.currentSrc || element.src) && element.readyState >= 1;
+            }
+            return true;
+        });
+    }"""
+    for frame in _frame_contexts(page):
+        for selector in selector_list:
+            try:
+                if frame.evaluate(expression, str(selector)):
+                    return True
+            except Exception:
+                continue
+    return False
 
 def _wait_upload_ready(
     page: Any,
