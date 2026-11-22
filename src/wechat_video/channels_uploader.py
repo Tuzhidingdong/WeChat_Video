@@ -1657,7 +1657,13 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
         if len(verified) != 1:
             job["state"] = "UPLOAD_UNKNOWN"
             job["post_upload_snapshot"] = after
-            job["verification_matches"] = len(verified)
+            observed_counts = [
+                int(item["match_count"])
+                for item in verification_history
+                if isinstance(item, dict) and "match_count" in item
+            ]
+            job["verification_matches"] = observed_counts[-1] if observed_counts else 0
+            job["verification_max_matches"] = max(observed_counts, default=0)
             _save_job(job_path, job)
             raise UploadUnknownError(
                 "The draft save was clicked once, but the new unpublished draft could not be uniquely "
@@ -1857,7 +1863,13 @@ def reconcile_upload(project_root: Path, job_id: str) -> dict[str, Any]:
             }
         job["state"] = "UPLOAD_UNKNOWN"
         job["post_upload_snapshot"] = after
-        job["verification_matches"] = len(matches)
+        observed_counts = [
+            int(item["match_count"])
+            for item in history
+            if isinstance(item, dict) and "match_count" in item
+        ]
+        job["verification_matches"] = observed_counts[-1] if observed_counts else 0
+        job["verification_max_matches"] = max(observed_counts, default=0)
         _save_job(job_path, job)
         raise UploadUnknownError(
             "Read-only reconciliation found no unique new draft within the verification window. "
