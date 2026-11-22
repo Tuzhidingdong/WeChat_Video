@@ -1586,9 +1586,14 @@ def test_login_required_hint_requires_explicit_login_prompt() -> None:
         def __init__(self, text):
             self.text = text
 
+        def evaluate(self, expression, *args):
+            assert "document.body" in expression
+            return self.text
+
         def locator(self, selector):
-            assert selector == "body"
-            return _FakeElement(text=self.text)
+            raise AssertionError(
+                "Body text must be read through same-frame DOM evaluation, not a Locator."
+            )
 
     class BodyPage:
         def __init__(self, body_text):
