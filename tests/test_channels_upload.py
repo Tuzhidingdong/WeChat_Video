@@ -155,8 +155,9 @@ def test_post_save_verification_never_reclassifies_preexisting_same_title_as_new
 
     assert after is snapshots[0]
     assert matches == []
-    assert calls["snapshot"] == 2
-    assert len(history) == 2
+    assert calls["snapshot"] == 3
+    assert len(history) == 3
+    assert page.wait_calls == [500, 500]
     assert all(item["preexisting_title_match_count"] == 1 for item in history)
     assert history[-1]["new_match_count"] == 1
     assert elapsed == 1.0
