@@ -1054,6 +1054,8 @@ def _visible_element_handles(
     limit: int = 8,
     exact_text: str | None = None,
     contains_text: str | None = None,
+    bind_retries: int = 5,
+    retry_delay_ms: int = 250,
 ) -> list[Any]:
     """Return ElementHandles found by DOM evaluation, never frame Locator queries.
 
@@ -1062,6 +1064,12 @@ def _visible_element_handles(
     same-frame querySelectorAll sees the live controls. Resolve each candidate
     in its own execution context, then perform trusted Playwright ElementHandle
     actions on that exact node.
+
+    The management SPA re-renders its navigation while it animates, so a node
+    seen by the read-only scan can change or become invisible before it is
+    bound. A transient bind failure re-scans a bounded number of times; nothing
+    is clicked until a fresh, stable, visible handle is bound. Persistent
+    failures still fail closed with the original diagnostic message.
     """
     found: list[Any] = []
     payload = {
@@ -1070,43 +1078,58 @@ def _visible_element_handles(
         "contains_text": contains_text,
         "limit": int(limit),
     }
+    attempts = max(1, int(bind_retries))
     for frame in _frame_contexts(page):
-        try:
-            inventory = frame.evaluate(_DOM_VISIBLE_ELEMENT_SCAN, payload)
-        except Exception as exc:
-            raise UploadBlockedError(
-                f"Could not inspect selector {selector!r} inside frame "
-                f"{str(getattr(frame, 'url', ''))[:180]}: "
-                f"{type(exc).__name__}: {str(exc)[:160]}"
-            ) from exc
-        if not isinstance(inventory, dict) or not isinstance(inventory.get("items"), list):
-            raise UploadBlockedError(
-                f"DOM scan returned an invalid result for selector {selector!r}."
-            )
-        match_count = int(inventory.get("match_count") or 0)
-        if match_count > limit:
-            raise UploadBlockedError(
-                f"Too many visible DOM matches ({match_count}) for selector {selector!r}; refusing an ambiguous action."
-            )
-        for item in inventory["items"]:
-            if not isinstance(item, dict):
-                continue
-            handle_payload = dict(payload)
-            handle_payload["visible_index"] = int(item.get("visible_index", -1))
+        frame_url = str(getattr(frame, "url", ""))[:180]
+        last_bind_error: str | None = None
+        for attempt in range(attempts):
+            transient = False
             try:
-                handle = frame.evaluate_handle(
-                    _DOM_VISIBLE_ELEMENT_HANDLE, handle_payload
-                )
-                candidate = handle.as_element()
-                if candidate is None or not candidate.is_visible():
-                    raise ValueError("the candidate changed or became invisible")
-                found.append(candidate)
+                inventory = frame.evaluate(_DOM_VISIBLE_ELEMENT_SCAN, payload)
             except Exception as exc:
                 raise UploadBlockedError(
-                    f"Could not bind the inspected DOM candidate in frame "
-                    f"{str(getattr(frame, 'url', ''))[:180]}: "
+                    f"Could not inspect selector {selector!r} inside frame "
+                    f"{frame_url}: "
                     f"{type(exc).__name__}: {str(exc)[:160]}"
                 ) from exc
+            if not isinstance(inventory, dict) or not isinstance(inventory.get("items"), list):
+                raise UploadBlockedError(
+                    f"DOM scan returned an invalid result for selector {selector!r}."
+                )
+            match_count = int(inventory.get("match_count") or 0)
+            if match_count > limit:
+                raise UploadBlockedError(
+                    f"Too many visible DOM matches ({match_count}) for selector {selector!r}; refusing an ambiguous action."
+                )
+            batch: list[Any] = []
+            for item in inventory["items"]:
+                if not isinstance(item, dict):
+                    continue
+                handle_payload = dict(payload)
+                handle_payload["visible_index"] = int(item.get("visible_index", -1))
+                try:
+                    handle = frame.evaluate_handle(
+                        _DOM_VISIBLE_ELEMENT_HANDLE, handle_payload
+                    )
+                    candidate = handle.as_element()
+                    if candidate is None or not candidate.is_visible():
+                        raise ValueError("the candidate changed or became invisible")
+                except Exception as exc:
+                    last_bind_error = f"{type(exc).__name__}: {str(exc)[:160]}"
+                    transient = True
+                    break
+                batch.append(candidate)
+            if not transient:
+                found.extend(batch)
+                last_bind_error = None
+                break
+            if attempt + 1 < attempts:
+                page.wait_for_timeout(max(0, int(retry_delay_ms)))
+        if last_bind_error is not None:
+            raise UploadBlockedError(
+                f"Could not bind the inspected DOM candidate in frame "
+                f"{frame_url}: {last_bind_error}"
+            )
     return found
 
 

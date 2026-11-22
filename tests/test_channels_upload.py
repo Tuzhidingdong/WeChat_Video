@@ -19,6 +19,7 @@ from wechat_video.channels_uploader import (
     _matching_draft_entries,
     _validate_run_for_upload,
     _visible_element_handle,
+    _visible_element_handles,
     _fill_field,
     _draft_save_button,
     _draft_snapshot,
@@ -542,6 +543,7 @@ class _FakeFrame:
         locator_unsupported=False,
         video_scan_error=False,
         dom_scan_error=False,
+        bind_failures=0,
     ):
         self.url = url
         self.selectors = dict(selectors or {})
@@ -552,6 +554,7 @@ class _FakeFrame:
         self.locator_unsupported = locator_unsupported
         self.video_scan_error = video_scan_error
         self.dom_scan_error = dom_scan_error
+        self.bind_failures = int(bind_failures)
         self.last_evaluate_expression = ""
         self.last_evaluate_args = ()
         self.locator_calls = []
@@ -603,6 +606,9 @@ class _FakeFrame:
         return unique
 
     def evaluate_handle(self, expression, *args):
+        if self.bind_failures > 0:
+            self.bind_failures -= 1
+            return _FakeJSHandle(None)
         if "__CHANNELS_VISIBLE_ELEMENT_HANDLE__" in expression:
             payload = args[0]
             candidates = self._dom_candidates(payload)
@@ -1681,6 +1687,21 @@ def _post_card_frame(*elements) -> _FakeFrame:
         selectors={"button, [role='button']": list(elements)},
         locator_unsupported=True,
     )
+
+
+def test_visible_element_handles_retries_transient_bind_failure() -> None:
+    """An SPA re-render between scan and bind must not block a read-only lookup."""
+    entry = _FakeElement(text="草稿箱", tag="a")
+    frame = _FakeFrame(
+        "https://channels.weixin.qq.com/platform",
+        selectors={"a": [entry]},
+        bind_failures=1,
+    )
+    page = _FakePage([frame])
+
+    handles = _visible_element_handles(page, "a", limit=8, contains_text="草稿箱")
+
+    assert handles == [entry]
 
 
 def test_open_create_view_distinguishes_same_named_buttons_by_structure(monkeypatch) -> None:
