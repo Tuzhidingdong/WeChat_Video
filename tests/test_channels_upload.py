@@ -485,6 +485,9 @@ class _FakeElement:
             raise RuntimeError(error)
         self._activate()
 
+    def set_input_files(self, paths, timeout=None):
+        self.files_set = list(paths) if isinstance(paths, (list, tuple)) else [paths]
+
     def hover(self, timeout=None):
         self.hovered = True
         if self.on_hover is not None:
@@ -1714,6 +1717,26 @@ class _FakeUploadInput:
         self.calls += 1
         if self.error is not None:
             raise RuntimeError(self.error)
+
+
+def test_set_video_file_prefers_stable_locator(monkeypatch) -> None:
+    """The historically proven, auto-rebinding Locator path is used first."""
+    import wechat_video.channels_uploader as uploader
+
+    upload = _FakeElement(attrs={"accept": "video/*"}, tag="input")
+    frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create",
+        selectors={"input[type='file'][accept*='video']": [upload]},
+    )
+    monkeypatch.setattr(
+        uploader,
+        "_video_file_input",
+        lambda *_a, **_k: pytest.fail("DOM-handle fallback must not be used"),
+    )
+
+    uploader._set_video_file(_FakePage([frame]), {}, "video.mp4")
+
+    assert upload.files_set == ["video.mp4"]
 
 
 def test_set_video_file_refreshes_detached_input(monkeypatch) -> None:

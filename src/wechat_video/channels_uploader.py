@@ -2055,6 +2055,58 @@ def _preview_ready(page: Any, selectors: dict[str, Any]) -> bool:
     return False
 
 
+class _LocatorInputNotFound(Exception):
+    """The legacy frame Locator lookup saw no video input; try the DOM path."""
+
+
+def _video_file_input_locator(page: Any, selectors: dict[str, Any]):
+    """Return the single video file input as an auto-rebinding Playwright Locator.
+
+    This is the lookup that worked in the historically successful upload runs.
+    Locators re-resolve their node on every action, unlike an ElementHandle that
+    is bound once and can become detached when the SPA re-renders. Uniqueness is
+    still enforced across every frame; an ambiguous result fails closed.
+    """
+    configured = selectors.get(
+        "video_file_input",
+        ["input[type='file'][accept*='video']", "input[type='file']"],
+    )
+    if not isinstance(configured, list):
+        configured = [str(configured)] if configured else []
+    configured = [str(item).strip() for item in configured if str(item).strip()]
+    video_terms = ("video", "mp4")
+    for selector in configured:
+        candidates: list[Any] = []
+        for frame in _frame_contexts(page):
+            try:
+                locator = frame.locator(selector)
+                candidates.extend(
+                    locator.nth(index)
+                    for index in range(min(locator.count(), 8))
+                )
+            except Exception:
+                continue
+        video_inputs = [
+            item for item in candidates
+            if any(
+                token in str(item.get_attribute("accept") or "").casefold()
+                for token in video_terms
+            )
+        ]
+        if len(video_inputs) > 1:
+            raise UploadBlockedError(
+                "More than one video file input is present across the page frames; "
+                "refusing ambiguous selection."
+            )
+        if len(video_inputs) == 1:
+            return video_inputs[0]
+        if len(candidates) == 1:
+            return candidates[0]
+    raise _LocatorInputNotFound(
+        "Could not identify exactly one video upload input with a stable Locator."
+    )
+
+
 def _set_video_file(
     page: Any,
     selectors: dict[str, Any],
@@ -2063,14 +2115,23 @@ def _set_video_file(
     retries: int = 5,
     retry_delay_ms: int = 300,
 ) -> None:
-    """Select the generated MP4 using a freshly bound file-input handle.
+    """Select the generated MP4 with the proven auto-rebinding Locator path.
 
-    The creator SPA can re-render between `_video_file_input()` and the actual
-    file selection, which makes the previously bound handle detached. Playwright
-    rejects `set_input_files` before any file is selected in that case, so a
-    fresh lookup is safe. Non-detachment errors are never retried and surface
-    unchanged.
+    ElementHandles obtained by the DOM scan have repeatedly detached before
+    ``set_input_files`` in this SPA, while Locators (the historically successful
+    method) re-resolve the node at action time. The DOM-handle path is kept only
+    as a fallback for environments where frame Locators return zero nodes.
     """
+    try:
+        locator = _video_file_input_locator(page, selectors)
+        locator.set_input_files(video_path, timeout=30_000)
+        return
+    except UploadBlockedError:
+        raise
+    except Exception:
+        # Fall through to the same-frame DOM handle path below.
+        pass
+
     attempts = max(1, int(retries))
     last_detach_error: Exception | None = None
     for attempt in range(attempts):
