@@ -108,7 +108,10 @@ The headless platform shell can render the same authenticated nickname in the
 top header as the exact `h2.finder-nickname` element. The verifier therefore
 accepts that specific element only when its normalized visible text exactly
 equals the configured account name. A generic page mention or the separate
-`已绑定公众号` notice is not accepted as account identity on its own.
+`已绑定公众号` notice is not accepted as account identity on its own. The verifier
+also does not fall back to searching arbitrary `body *` nodes for an exact name;
+that could confuse page content with the active account and become ambiguous when
+multiple identical labels are rendered.
 
 When identity verification fails, the ignored upload job records sanitized
 per-frame evidence: frame URL and ready state, whether the expected name is
