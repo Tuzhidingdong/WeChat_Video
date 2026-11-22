@@ -381,6 +381,7 @@ class _FakeFrame:
         identity_matches=None,
         locator_unsupported=False,
         video_scan_error=False,
+        dom_scan_error=False,
     ):
         self.url = url
         self.selectors = dict(selectors or {})
@@ -390,10 +391,13 @@ class _FakeFrame:
         self.identity_matches = list(identity_matches or [])
         self.locator_unsupported = locator_unsupported
         self.video_scan_error = video_scan_error
+        self.dom_scan_error = dom_scan_error
         self.last_evaluate_expression = ""
         self.last_evaluate_args = ()
+        self.locator_calls = []
 
     def locator(self, selector):
+        self.locator_calls.append(selector)
         if self.locator_unsupported:
             return _FakeLocator([])
         if selector == "input[type='file']":
@@ -411,7 +415,39 @@ class _FakeFrame:
             return _FakeLocator(self.selectors.get(selector, []))
         return _FakeLocator(self.selectors.get(selector, []))
 
+    def _dom_candidates(self, payload):
+        selector = str(payload.get("selector") or "")
+        items = list(self.selectors.get(selector, []))
+        if selector == "button, [role='button']":
+            for key, values in self.roles.items():
+                if key[0] == "button":
+                    items.extend(values)
+        unique = []
+        seen = set()
+        for item in items:
+            if id(item) in seen:
+                continue
+            seen.add(id(item))
+            if not item.is_visible():
+                continue
+            actual = " ".join(str(item.inner_text() or "").split())
+            exact = payload.get("exact_text")
+            contains = payload.get("contains_text")
+            if exact is not None and actual != " ".join(str(exact).split()):
+                continue
+            if contains is not None and " ".join(str(contains).split()) not in actual:
+                continue
+            unique.append(item)
+        return unique
+
     def evaluate_handle(self, expression, *args):
+        if "__CHANNELS_VISIBLE_ELEMENT_HANDLE__" in expression:
+            payload = args[0]
+            candidates = self._dom_candidates(payload)
+            index = int(payload["visible_index"])
+            return _FakeJSHandle(
+                candidates[index] if 0 <= index < len(candidates) else None
+            )
         if "document.querySelectorAll" not in expression:
             raise NotImplementedError(expression)
         inputs = []
@@ -429,6 +465,24 @@ class _FakeFrame:
     def evaluate(self, expression, *args):
         self.last_evaluate_expression = expression
         self.last_evaluate_args = args
+        if "__CHANNELS_VISIBLE_ELEMENT_SCAN__" in expression:
+            if self.dom_scan_error:
+                raise RuntimeError("simulated same-frame DOM scan failure")
+            payload = args[0]
+            candidates = self._dom_candidates(payload)
+            limit = int(payload.get("limit", 8))
+            return {
+                "match_count": len(candidates),
+                "items": [
+                    {
+                        "visible_index": index,
+                        "tag": item.tag,
+                        "text": " ".join(str(item.inner_text() or "").split())[:160],
+                        "disabled": not item.is_enabled(),
+                    }
+                    for index, item in enumerate(candidates[:limit])
+                ],
+            }
         if "__CHANNELS_ACCOUNT_IDENTITY_SCAN__" in expression:
             return self.identity_matches
         if "__CHANNELS_VIDEO_FILE_INPUT_SCAN__" in expression:
@@ -736,9 +790,9 @@ def test_open_draft_list_view_uses_platform_navigation_to_mount_spa_frame() -> N
             ".finder-ui-desktop-menu__sub__wrp"
         ],
         "draft_list_nav_entry_selectors": [
-            ".finder-ui-desktop-sub-menu__item:text-is('草稿箱')",
-            ".finder-ui-desktop-sub-menu__item:has-text('草稿箱')",
+            ".finder-ui-desktop-sub-menu__item"
         ],
+        "draft_list_nav_entry_text": "草稿箱",
         "draft_list_nav_timeout_seconds": 0,
     })
     config = {
@@ -752,6 +806,7 @@ def test_open_draft_list_view_uses_platform_navigation_to_mount_spa_frame() -> N
     assert page.url == "https://channels.weixin.qq.com/platform"
     assert nav_parent.hovered is True
     assert nav_entry.clicked is True
+    assert main.locator_calls == []
     assert child.url.endswith("/micro/content/post/draftListManager")
 
 
@@ -1130,6 +1185,7 @@ def test_description_locator_matches_empty_contenteditable_in_child_iframe() -> 
     child = _FakeFrame(
         "https://channels.weixin.qq.com/micro/content/post/create",
         selectors={"[contenteditable][data-placeholder='添加描述']": [editor]},
+        locator_unsupported=True,
     )
     page = _FakePage([main, child])
 
@@ -1152,6 +1208,7 @@ def test_fill_description_in_child_iframe_contenteditable() -> None:
     child = _FakeFrame(
         "https://channels.weixin.qq.com/micro/content/post/create",
         selectors={"[contenteditable][data-placeholder*='描述']": [editor]},
+        locator_unsupported=True,
     )
     page = _FakePage([main, child])
 
@@ -1170,6 +1227,7 @@ def test_draft_save_button_is_found_inside_child_iframe() -> None:
     child = _FakeFrame(
         "https://channels.weixin.qq.com/micro/content/post/create",
         roles={("button", "保存草稿", True): [save]},
+        locator_unsupported=True,
     )
     page = _FakePage([main, child])
 
@@ -1204,6 +1262,7 @@ def test_open_create_view_activates_unique_post_card_spa_entry(monkeypatch) -> N
     card = _FakeFrame(
         "https://channels.weixin.qq.com/micro/content/iframe/post-card.html",
         selectors={"button, [role='button']": [entry]},
+        locator_unsupported=True,
     )
     page = _FakePage([main, create_frame, card])
     identity_checks = []
@@ -1231,6 +1290,8 @@ def test_open_create_view_activates_unique_post_card_spa_entry(monkeypatch) -> N
     assert entry.clicked is True
     assert entry_clicks["count"] == 1
     assert create_frame.selectors["input[type='file']"] == [upload]
+    assert card.locator_calls == []
+    assert "__CHANNELS_VISIBLE_ELEMENT_SCAN__" in card.last_evaluate_expression
 
 
 def test_open_create_view_rejects_ambiguous_creator_entry_without_clicking(
@@ -1244,6 +1305,7 @@ def test_open_create_view_rejects_ambiguous_creator_entry_without_clicking(
     card = _FakeFrame(
         "https://channels.weixin.qq.com/micro/content/iframe/post-card.html",
         selectors={"button, [role='button']": [first, second]},
+        locator_unsupported=True,
     )
     page = _FakePage([main, card])
     monkeypatch.setattr(
@@ -1561,9 +1623,9 @@ def test_live_description_selector_matches_empty_contenteditable_and_spa_wait_is
         ".finder-ui-desktop-menu__sub__wrp"
     ]
     assert selectors["draft_list_nav_entry_selectors"] == [
-        ".finder-ui-desktop-sub-menu__item:text-is('草稿箱')",
-        ".finder-ui-desktop-sub-menu__item:has-text('草稿箱')",
+        ".finder-ui-desktop-sub-menu__item"
     ]
+    assert selectors["draft_list_nav_entry_text"] == "草稿箱"
     assert selectors["draft_list_root_selector"] == (
         "div.finder-page.DraftListManager"
     )
