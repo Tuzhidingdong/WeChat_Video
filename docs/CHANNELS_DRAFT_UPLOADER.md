@@ -51,6 +51,25 @@ For an uncertain outcome, run the read-only command:
 
 Reconciliation never uploads, never clicks save and never retries. The same job ID cannot be uploaded twice.
 
+For a job that remains `UPLOAD_UNKNOWN`, inspect the target account's **草稿箱**
+manually. The manual-review command only appends the user's attestation to the
+local job record; it does not open a browser, change the prior Save click count,
+or perform an upload:
+
+```powershell
+.venv\Scripts\python.exe -X utf8 -m wechat_video.cli channels-record-manual-review --job-id <job-id> --result draft-found --reviewed-by "<reviewer>" --row-text "<exact row copied from 草稿箱>" --confirmation "CONFIRM CHANNELS DRAFT FOUND <job-id>"
+```
+
+For a manual check that did not find the title, use `--result not-found`, supply
+a non-empty `--note`, and confirm with
+`CONFIRM CHANNELS DRAFT NOT FOUND <job-id>`. This records
+`MANUAL_REVIEW_NOT_FOUND` as a time-scoped observation, **not** proof that the
+earlier save request was never processed. The same job remains blocked from
+another upload. A later manual check may append a new result; only a row that
+contains the exact title can be recorded as `MANUALLY_CONFIRMED_DRAFT`.
+Manual confirmation is explicitly distinguished from automated
+DraftListManager read-back, and neither status verifies mobile-app visibility.
+
 ## 6. Browser security and privacy
 
 - Dedicated Edge profile, never the user's ordinary Edge profile.
@@ -79,12 +98,23 @@ terminate an existing browser process or start a second process against an
 active profile.
 
 After metadata entry, the uploader clicks the unique enabled `保存草稿`
-control once. It never retries that click. Persistence is confirmed only when
-exactly one new matching title is read back from the official
-DraftListManager page. This desktop readback confirms that the web draft record
-exists; it does not independently prove that the WeChat mobile client displays
-it. Check the target phone after the run rather than treating desktop readback
-as proof of mobile visibility.
+control once. It never retries that click. After a short settle interval, it
+opens DraftListManager once to refresh the server-backed list, then polls the
+already-mounted list DOM every 3 seconds for up to 90 seconds. It does not
+re-navigate or remount the SPA on every poll. Each sample records the captured
+time, draft count, matching-row count, route evidence, and any read error in
+the ignored job record. Persistence is confirmed only when exactly one new
+matching title is read back from the official DraftListManager page. A timeout
+or ambiguous match remains `UPLOAD_UNKNOWN`; it never triggers another upload
+or Save click. The polling window is configurable through
+`draft_verify_timeout_seconds`, `draft_verify_poll_interval_seconds`, and
+`draft_verify_initial_settle_seconds` in
+`config/channels_upload.json`.
+
+This desktop readback confirms that the web draft record exists; it does not
+independently prove that the WeChat mobile client displays it. Check the target
+phone after the run rather than treating desktop readback as proof of mobile
+visibility.
 
 
 ### SPA parent-shell route compatibility
