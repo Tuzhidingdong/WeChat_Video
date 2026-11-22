@@ -1530,8 +1530,12 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
     if job_path.exists():
         existing = _read_json(job_path)
         state = str(existing.get("state", ""))
-        if state == "DRAFT_SAVED":
-            raise UploadBlockedError("This job already has a verified draft; duplicate upload is blocked.")
+        if state in {"DRAFT_SAVED", "MANUALLY_CONFIRMED_DRAFT"}:
+            raise UploadBlockedError("This job already has a confirmed draft; duplicate upload is blocked.")
+        if state == "MANUAL_REVIEW_NOT_FOUND":
+            raise UploadBlockedError(
+                "This job has a time-scoped manual not-found review. It remains blocked; inspect the account again and record a new manual review, never retry this job."
+            )
         if state in {"SAVE_REQUESTED", "UPLOAD_UNKNOWN", "UPLOADING", "PREPARED"}:
             raise UploadUnknownError(
                 f"This job is already in state {state}. Reconcile it with channels-reconcile; do not upload again."
@@ -1783,7 +1787,9 @@ def _verify_new_draft_after_save(
         page.wait_for_timeout(max(1, int(wait_seconds * 1000)))
 
     elapsed = max(0.0, time.monotonic() - started)
-    return after, matches, history, round(elapsed, 3)
+    # Never return a prior or ambiguous match as a successful verification.
+    # The full sample history retains the observed counts for diagnosis.
+    return after, [], history, round(elapsed, 3)
 
 
 def reconcile_upload(project_root: Path, job_id: str) -> dict[str, Any]:
