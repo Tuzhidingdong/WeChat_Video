@@ -379,6 +379,7 @@ class _FakeFrame:
         inspection=None,
         identity_matches=None,
         locator_unsupported=False,
+        video_scan_error=False,
     ):
         self.url = url
         self.selectors = dict(selectors or {})
@@ -387,6 +388,7 @@ class _FakeFrame:
         self.inspection = dict(inspection or {})
         self.identity_matches = list(identity_matches or [])
         self.locator_unsupported = locator_unsupported
+        self.video_scan_error = video_scan_error
         self.last_evaluate_expression = ""
         self.last_evaluate_args = ()
 
@@ -427,6 +429,8 @@ class _FakeFrame:
         if "__CHANNELS_ACCOUNT_IDENTITY_SCAN__" in expression:
             return self.identity_matches
         if "__CHANNELS_VIDEO_FILE_INPUT_SCAN__" in expression:
+            if self.video_scan_error:
+                raise RuntimeError("simulated frame DOM inspection failure")
             inputs = []
             seen = set()
             for selector, values in self.selectors.items():
@@ -1301,7 +1305,7 @@ def test_video_file_input_fails_closed_when_any_frame_cannot_be_scanned() -> Non
     )
     unscannable = _FakeFrame(
         "https://channels.weixin.qq.com/micro/content/post/create",
-        inspection={"not_a_video_scan_result": True},
+        video_scan_error=True,
     )
     page = _FakePage([main, unscannable])
 
