@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import json
 from pathlib import Path
 
@@ -382,12 +383,18 @@ def test_manual_review_requires_exact_confirmation_and_matching_title(
         )
 
 
+_RECT_SEQUENCE = itertools.count(1)
+
+
 class _FakeElement:
     def __init__(
         self, *, text="", attrs=None, tag="div", visible=True, enabled=True,
         child_texts=None,
         on_hover=None,
         on_click=None,
+        rect=None,
+        ancestors=None,
+        outer_html=None,
     ):
         self.text = text
         self.attrs = dict(attrs or {})
@@ -399,6 +406,45 @@ class _FakeElement:
         self.hovered = False
         self.on_hover = on_hover
         self.on_click = on_click
+        # Distinct elements get distinct geometry by default. This models two
+        # genuinely different DOM nodes; an explicit identical rect lets tests
+        # model the SAME node re-observed through another CDP page/frame.
+        self.rect = dict(rect) if rect else {
+            "x": next(_RECT_SEQUENCE) * 200, "y": 0, "w": 120, "h": 40,
+        }
+        self.ancestors = list(ancestors or [])
+        self.outer_html = outer_html
+
+    def structure(self):
+        """Structural evidence returned by the enhanced same-frame DOM scan."""
+        attrs = dict(self.attrs)
+        href = str(attrs.get("href") or "")
+        ancestors = []
+        for raw in self.ancestors:
+            ancestor = dict(raw)
+            tag = str(ancestor.pop("tag", "div"))
+            ancestor_href = str(ancestor.get("href") or "")
+            if not href and ancestor_href:
+                href = ancestor_href
+            ancestors.append({
+                "tag": tag,
+                "id": str(ancestor.get("id") or ""),
+                "class_name": str(ancestor.get("class") or ""),
+                "role": str(ancestor.get("role") or ""),
+                "href": ancestor_href,
+                "attributes": {k: str(v) for k, v in ancestor.items()},
+            })
+        outer = self.outer_html
+        if outer is None:
+            rendered = " ".join(f'{k}="{v}"' for k, v in attrs.items())
+            outer = f"<{self.tag} {rendered}>{self.text}</{self.tag}>"
+        return {
+            "attributes": {k: str(v) for k, v in attrs.items()},
+            "outer_html": outer,
+            "href": href,
+            "ancestors": ancestors,
+            "rect": dict(self.rect),
+        }
 
     def is_visible(self):
         return self.visible
@@ -581,7 +627,7 @@ class _FakeFrame:
                 aria_label = " ".join(
                     str(item.get_attribute("aria-label") or "").split()
                 )
-                return {
+                described = {
                     "visible_index": index,
                     "tag": item.tag,
                     "text": visible_text[:160],
@@ -594,6 +640,8 @@ class _FakeFrame:
                     ),
                     "disabled": not item.is_enabled(),
                 }
+                described.update(item.structure())
+                return described
 
             return {
                 "match_count": len(candidates),
@@ -1384,6 +1432,8 @@ def test_open_create_view_activates_unique_post_card_spa_entry(monkeypatch) -> N
     entry = _FakeElement(
         text="发表视频",
         tag="button",
+        attrs={"href": "/platform/post/create"},
+        ancestors=[{"tag": "a", "class": "creator-entry-link"}],
         on_click=mount_creator_form,
     )
     main = _FakeFrame("https://channels.weixin.qq.com/platform")
@@ -1427,10 +1477,17 @@ def test_open_create_view_matches_aria_label_when_button_has_no_rendered_text(
 ) -> None:
     import wechat_video.channels_uploader as uploader
 
+    create_frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create"
+    )
     entry = _FakeElement(
         text="",
         attrs={"aria-label": "发表视频"},
         tag="button",
+        ancestors=[{"tag": "a", "href": "/micro/content/post/create"}],
+        on_click=lambda: create_frame.selectors.update(
+            {"input[type='file']": [_FakeElement(attrs={"accept": "video/*"}, tag="input")]}
+        ),
     )
     main = _FakeFrame("https://channels.weixin.qq.com/platform")
     card = _FakeFrame(
@@ -1438,7 +1495,7 @@ def test_open_create_view_matches_aria_label_when_button_has_no_rendered_text(
         selectors={"button, [role='button']": [entry]},
         locator_unsupported=True,
     )
-    page = _FakePage([main, card])
+    page = _FakePage([main, card, create_frame])
     monkeypatch.setattr(
         uploader, "_ensure_account_identity", lambda *_args, **_kwargs: None
     )
@@ -1524,7 +1581,7 @@ def test_open_create_view_rejects_ambiguous_creator_entry_without_clicking(
         uploader, "_ensure_account_identity", lambda *_args, **_kwargs: None
     )
 
-    with pytest.raises(UploadBlockedError, match="More than one visible exact"):
+    with pytest.raises(UploadBlockedError, match="structurally-proven"):
         _open_create_view(
             page,
             {
@@ -1558,7 +1615,7 @@ def test_open_create_view_does_not_click_same_text_in_unconfigured_frame(
         uploader, "_ensure_account_identity", lambda *_args, **_kwargs: None
     )
 
-    with pytest.raises(UploadBlockedError, match="creator-entry button"):
+    with pytest.raises(UploadBlockedError, match="structurally-proven"):
         _open_create_view(
             page,
             {
@@ -1573,6 +1630,239 @@ def test_open_create_view_does_not_click_same_text_in_unconfigured_frame(
         )
 
     assert entry.clicked is False
+
+
+def _create_view_config() -> dict:
+    return {
+        "platform_url": "https://channels.weixin.qq.com/platform",
+        "account_name": "成核生长",
+    }
+
+
+def _create_view_selectors(**overrides) -> dict:
+    selectors = {
+        "create_nav_frame_path": "/micro/content/iframe/post-card.html",
+        "create_nav_button_text": "发表视频",
+        "create_nav_timeout_seconds": 0,
+    }
+    selectors.update(overrides)
+    return selectors
+
+
+def _post_card_frame(*elements) -> _FakeFrame:
+    return _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/iframe/post-card.html",
+        selectors={"button, [role='button']": list(elements)},
+        locator_unsupported=True,
+    )
+
+
+def test_open_create_view_distinguishes_same_named_buttons_by_structure(monkeypatch) -> None:
+    """Shape (a): identical labels, one proven create-navigation target."""
+    import wechat_video.channels_uploader as uploader
+
+    create_frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create"
+    )
+    decoy = _FakeElement(
+        text="发表视频",
+        tag="button",
+        attrs={"class": "post-card-teaser-button", "data-slot": "teaser"},
+        ancestors=[{"tag": "div", "class": "post-card-promo"}],
+    )
+    correct = _FakeElement(
+        text="发表视频",
+        tag="button",
+        attrs={"class": "publish-action", "data-nav-url": "/platform/post/create"},
+        ancestors=[{"tag": "div", "class": "post-card-actions"}],
+        on_click=lambda: create_frame.selectors.update(
+            {"input[type='file']": [_FakeElement(attrs={"accept": "video/*"}, tag="input")]}
+        ),
+    )
+    page = _FakePage(
+        [_FakeFrame("https://channels.weixin.qq.com/platform"),
+         _post_card_frame(decoy, correct), create_frame]
+    )
+    monkeypatch.setattr(uploader, "_ensure_account_identity", lambda *_a, **_k: None)
+
+    _open_create_view(page, _create_view_config(), _create_view_selectors())
+
+    assert correct.clicked is True
+    assert decoy.clicked is False
+    assert create_frame.selectors["input[type='file']"]
+
+
+def test_open_create_view_deduplicates_repeated_scans_of_same_button(monkeypatch) -> None:
+    """Shape (b): the same node observed through several CDP frames/pages."""
+    import wechat_video.channels_uploader as uploader
+
+    create_frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create"
+    )
+    shared = _FakeElement(
+        text="发表视频",
+        tag="button",
+        attrs={"href": "/platform/post/create"},
+        rect={"x": 985, "y": 485, "w": 120, "h": 40},
+    )
+    page = _FakePage([
+        _FakeFrame("https://channels.weixin.qq.com/platform"),
+        _post_card_frame(shared),
+        _post_card_frame(shared),
+        create_frame,
+    ])
+    monkeypatch.setattr(uploader, "_ensure_account_identity", lambda *_a, **_k: None)
+
+    _open_create_view(page, _create_view_config(), _create_view_selectors())
+
+    # Two qualifying records would have failed closed as ambiguous; one click
+    # proves the duplicate scan records collapsed into a single candidate.
+    assert shared.clicked is True
+
+
+def test_open_create_view_fails_closed_on_indistinguishable_ambiguity(monkeypatch) -> None:
+    """Shape (c): two genuinely distinct but structurally identical buttons."""
+    import wechat_video.channels_uploader as uploader
+
+    first = _FakeElement(
+        text="发表视频", tag="button",
+        attrs={"class": "post-card__cta"},
+        ancestors=[{"tag": "div", "class": "post-card"}],
+    )
+    second = _FakeElement(
+        text="发表视频", tag="button",
+        attrs={"class": "post-card__cta"},
+        ancestors=[{"tag": "div", "class": "post-card"}],
+    )
+    page = _FakePage([
+        _FakeFrame("https://channels.weixin.qq.com/platform"),
+        _post_card_frame(first, second),
+    ])
+    monkeypatch.setattr(uploader, "_ensure_account_identity", lambda *_a, **_k: None)
+
+    with pytest.raises(UploadBlockedError) as caught:
+        _open_create_view(page, _create_view_config(), _create_view_selectors())
+
+    diagnostics = caught.value.diagnostics
+    assert diagnostics["unique_candidate_count"] == 2
+    assert diagnostics["qualifying_candidate_count"] == 0
+    assert len(diagnostics["creator_entry_candidates"]) == 2
+    assert diagnostics["creator_entry_candidates"][0]["ancestors"]
+    assert first.clicked is False
+    assert second.clicked is False
+
+
+def test_open_create_view_ignores_proven_entry_in_wrong_frame(monkeypatch) -> None:
+    """Shape (d): a valid-looking entry in a different frame must never be clicked."""
+    import wechat_video.channels_uploader as uploader
+
+    wrong = _FakeElement(
+        text="发表视频", tag="button", attrs={"href": "/platform/post/create"}
+    )
+    wrong_frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create",
+        selectors={"button, [role='button']": [wrong]},
+    )
+    page = _FakePage([
+        _FakeFrame("https://channels.weixin.qq.com/platform"),
+        _post_card_frame(),
+        wrong_frame,
+    ])
+    monkeypatch.setattr(uploader, "_ensure_account_identity", lambda *_a, **_k: None)
+
+    with pytest.raises(UploadBlockedError, match="structurally-proven"):
+        _open_create_view(page, _create_view_config(), _create_view_selectors())
+
+    assert wrong.clicked is False
+
+
+def test_open_create_view_clicks_unique_structural_entry_once(monkeypatch) -> None:
+    """Shape (e): one unique, visible, enabled, structurally-proven entry."""
+    import wechat_video.channels_uploader as uploader
+
+    clicks = {"count": 0}
+    create_frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create"
+    )
+
+    def on_click():
+        clicks["count"] += 1
+        create_frame.selectors["input[type='file']"] = [
+            _FakeElement(attrs={"accept": "video/*"}, tag="input")
+        ]
+
+    entry = _FakeElement(
+        text="发表视频",
+        tag="button",
+        ancestors=[{"tag": "a", "href": "/micro/content/post/create", "class": "create-entry"}],
+        on_click=on_click,
+    )
+    page = _FakePage([
+        _FakeFrame("https://channels.weixin.qq.com/platform"),
+        _post_card_frame(entry),
+        create_frame,
+    ])
+    monkeypatch.setattr(uploader, "_ensure_account_identity", lambda *_a, **_k: None)
+
+    _open_create_view(page, _create_view_config(), _create_view_selectors())
+
+    assert entry.clicked is True
+    assert clicks["count"] == 1
+
+
+def test_open_create_view_waits_for_creator_form_frame_after_click(monkeypatch) -> None:
+    """The create form frame is awaited only after the CTA has been clicked."""
+    import wechat_video.channels_uploader as uploader
+
+    create_frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create"
+    )
+    entry = _FakeElement(
+        text="发表视频", tag="button", attrs={"href": "/platform/post/create"}
+    )
+    page = _FakePage([
+        _FakeFrame("https://channels.weixin.qq.com/platform"),
+        _post_card_frame(entry),
+    ])
+    assert create_frame not in page.frames
+
+    def mount_form(_milliseconds):
+        if create_frame not in page.frames:
+            page.frames.append(create_frame)
+
+    page.on_wait = mount_form
+    monkeypatch.setattr(uploader, "_ensure_account_identity", lambda *_a, **_k: None)
+
+    _open_create_view(page, _create_view_config(), _create_view_selectors())
+
+    assert entry.clicked is True
+    assert create_frame in page.frames
+    assert 400 in page.wait_calls
+
+
+def test_open_create_view_fails_closed_when_form_frame_never_mounts(monkeypatch) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    entry = _FakeElement(
+        text="发表视频", tag="button", attrs={"href": "/platform/post/create"}
+    )
+    page = _FakePage([
+        _FakeFrame("https://channels.weixin.qq.com/platform"),
+        _post_card_frame(entry),
+    ])
+    monkeypatch.setattr(uploader, "_ensure_account_identity", lambda *_a, **_k: None)
+
+    with pytest.raises(UploadBlockedError, match="did not mount") as caught:
+        _open_create_view(
+            page,
+            _create_view_config(),
+            _create_view_selectors(creator_form_ready_timeout_seconds=0),
+        )
+
+    assert entry.clicked is True
+    assert caught.value.diagnostics["expected_creator_form_frame_path"] == (
+        "/micro/content/post/create"
+    )
 
 
 def test_video_file_input_is_found_in_main_frame_when_form_fields_are_in_iframe() -> None:

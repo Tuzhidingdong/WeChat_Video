@@ -771,6 +771,57 @@ _DOM_VISIBLE_ELEMENT_SCAN = r"""(payload) => {
         if (containsText !== null && !actual.includes(containsText)) return false;
         return true;
     });
+    const clip = (value, size) => String(value == null ? "" : value).slice(0, size);
+    const attributesOf = (element) => {
+        const out = {};
+        const attrs = element && element.attributes ? Array.from(element.attributes) : [];
+        for (const attr of attrs) {
+            const name = String(attr.name || "").slice(0, 64);
+            if (name) out[name] = clip(attr.value, 240);
+        }
+        return out;
+    };
+    const hrefPath = (element) => {
+        try {
+            const raw = element && element.getAttribute
+                ? element.getAttribute("href") : "";
+            if (!raw) return "";
+            return new URL(raw, location.href).pathname || "";
+        } catch (_) { return ""; }
+    };
+    const navigationHrefOf = (element) => {
+        const own = String(element.getAttribute("href") || "");
+        if (own) return hrefPath(element);
+        for (let node = element.parentElement; node && node.nodeType === 1;
+             node = node.parentElement) {
+            const path = hrefPath(node);
+            if (path) return path;
+        }
+        return "";
+    };
+    const ancestorsOf = (element) => {
+        const out = [];
+        let node = element.parentElement;
+        for (let depth = 0; node && node.nodeType === 1 && depth < 6;
+             depth += 1, node = node.parentElement) {
+            out.push({
+                tag: node.tagName.toLowerCase(),
+                id: clip(node.id, 120),
+                class_name: clip(typeof node.className === "string" ? node.className : "", 240),
+                role: clip(node.getAttribute("role") || "", 80),
+                href: hrefPath(node),
+                attributes: attributesOf(node)
+            });
+        }
+        return out;
+    };
+    const rectOf = (element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+            x: Math.round(rect.left), y: Math.round(rect.top),
+            w: Math.round(rect.width), h: Math.round(rect.height)
+        };
+    };
     const limit = Math.max(1, Math.min(64, Number(payload.limit || 8)));
     const describe = (element, visible_index) => {
         const info = labelInfo(element);
@@ -782,7 +833,17 @@ _DOM_VISIBLE_ELEMENT_SCAN = r"""(payload) => {
             matched_label: info.label.slice(0, 160),
             label_source: info.label_source,
             disabled: Boolean(element.disabled) ||
-                element.getAttribute("aria-disabled") === "true"
+                element.getAttribute("aria-disabled") === "true",
+            /* Structural evidence for the semantic creator-entry rule.
+               class/id/data-*/aria-*/href/ancestors are captured for diagnosis
+               and for proving a navigation target. Geometry (rect) is captured
+               ONLY to de-duplicate repeated scans of the same DOM node; it is
+               never used to choose which button to click. */
+            attributes: attributesOf(element),
+            outer_html: clip(element.outerHTML || "", 600),
+            href: navigationHrefOf(element),
+            ancestors: ancestorsOf(element),
+            rect: rectOf(element)
         };
     };
     return {
@@ -909,17 +970,327 @@ def _visible_element_handle(page: Any, selector_list: Any):
             return candidates[0]
     return None
 
+_CHANNELS_HOST = "channels.weixin.qq.com"
+_DEFAULT_CREATE_FORM_PATH = "/micro/content/post/create"
+# The post-card creator entry is a navigation control: its function is proven
+# by the creation route it targets, never by its position, index or a guessed
+# CSS class. Both the SPA create route and the embedded form route are accepted.
+_DEFAULT_CREATE_NAV_TARGETS = (
+    "/platform/post/create",
+    "/micro/content/post/create",
+)
+
+
+def _normalized_url_path(value: Any) -> str:
+    """Return the path of an absolute URL or a leading-slash path, else ''."""
+    text = str(value or "").strip()
+    if not text or ("://" not in text and not text.startswith("/")):
+        return ""
+    try:
+        parsed = urlparse(text)
+    except Exception:
+        return ""
+    path = parsed.path or ("" if "://" in text else text)
+    if not path:
+        return ""
+    path = re.sub(r"/+", "/", path).rstrip("/")
+    return path or "/"
+
+
+def _creator_entry_navigation_target(
+    item: dict[str, Any], target_paths: list[str],
+) -> dict[str, str] | None:
+    """Prove a button is the creator entry from its structural navigation target.
+
+    Only URL-bearing attributes (the element's own href / an ancestor anchor's
+    href / data-* or aria-* values that carry a URL or path) can prove this.
+    Class names, coordinates, DOM order and array index are deliberately not
+    consulted: they cannot prove what the control does.
+    """
+    values: list[Any] = []
+    own_href = item.get("href")
+    if own_href:
+        values.append(own_href)
+    url_attribute_tokens = ("href", "url", "route", "target", "link", "path")
+
+    def collect_url_values(attributes: dict[str, Any]) -> None:
+        for key, value in attributes.items():
+            lowered = str(key).casefold()
+            if any(token in lowered for token in url_attribute_tokens):
+                values.append(value)
+            elif _normalized_url_path(value):
+                # A data-*/aria-* value that is itself a URL/path also proves
+                # the navigation target, regardless of the attribute name.
+                values.append(value)
+
+    collect_url_values(item.get("attributes") or {})
+    for ancestor in item.get("ancestors") or []:
+        ancestor_href = ancestor.get("href")
+        if ancestor_href:
+            values.append(ancestor_href)
+        collect_url_values(ancestor.get("attributes") or {})
+
+    targets = [
+        path for path in (_normalized_url_path(target) for target in target_paths)
+        if path
+    ]
+    for value in values:
+        path = _normalized_url_path(value)
+        if not path:
+            continue
+        for target in targets:
+            if (
+                path == target
+                or path.endswith("/" + target.lstrip("/"))
+                or path.startswith(target + "/")
+            ):
+                return {
+                    "navigation_target": str(value)[:200],
+                    "matched_route": target,
+                }
+    return None
+
+
+def _creator_candidate_identity(item: dict[str, Any]) -> tuple[Any, ...]:
+    """Identity used only to de-duplicate repeated scans of the SAME node.
+
+    The structural signature is combined with the element's rect so that two
+    genuinely distinct buttons (even with identical markup) are kept apart,
+    while the same button re-observed through another CDP page/frame revisit
+    collapses to one candidate. Geometry is never used to pick a winner.
+    """
+    structure = {
+        "tag": str(item.get("tag") or ""),
+        "text": str(item.get("text") or ""),
+        "attributes": item.get("attributes") or {},
+        "href": str(item.get("href") or ""),
+        "ancestors": item.get("ancestors") or [],
+    }
+    try:
+        payload = json.dumps(structure, sort_keys=True, ensure_ascii=False, default=str)
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
+    except Exception:
+        digest = hashlib.sha256(repr(structure).encode("utf-8", "replace")).hexdigest()[:20]
+    rect = item.get("rect") or {}
+    return (digest, rect.get("x"), rect.get("y"), rect.get("w"), rect.get("h"))
+
+
+def _target_frame_observations(page: Any, frame_path: str, limit: int = 24) -> list[dict[str, Any]]:
+    """Capture sanitized, structure-rich observations for every target frame."""
+    observations: list[dict[str, Any]] = []
+    for frame in _frame_contexts(page):
+        parsed = urlparse(str(getattr(frame, "url", "")))
+        if (
+            parsed.hostname != _CHANNELS_HOST
+            or parsed.path.rstrip("/") != frame_path.rstrip("/")
+        ):
+            continue
+        try:
+            inventory = frame.evaluate(
+                _DOM_VISIBLE_ELEMENT_SCAN,
+                {
+                    "selector": "button, [role='button']",
+                    "limit": limit,
+                    "include_observed": True,
+                },
+            )
+            ready_state = frame.evaluate("() => document.readyState")
+            observations.append({
+                "frame_url": str(getattr(frame, "url", "")),
+                "ready_state": str(ready_state or ""),
+                "visible_button_count": int(
+                    inventory.get("match_count", 0)
+                ) if isinstance(inventory, dict) else None,
+                "visible_buttons": (
+                    inventory.get("observed_items", [])[:limit]
+                    if isinstance(inventory, dict) else []
+                ),
+            })
+        except Exception as exc:
+            observations.append({
+                "frame_url": str(getattr(frame, "url", "")),
+                "diagnostic_error": f"{type(exc).__name__}: {str(exc)[:180]}",
+            })
+    return observations
+
+
+def _collect_creator_entry_candidates(
+    page: Any,
+    frame_path: str,
+    button_text: str,
+    target_paths: list[str],
+    limit: int,
+) -> tuple[list[dict[str, Any]], list[str], int]:
+    """Scan only the target frame and return de-duplicated structural candidates."""
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    duplicates_removed = 0
+    scan_errors: list[str] = []
+    payload = {
+        "selector": "button, [role='button']",
+        "exact_text": button_text,
+        "contains_text": None,
+        "limit": int(limit),
+        "include_observed": False,
+    }
+    for frame in _frame_contexts(page):
+        parsed = urlparse(str(getattr(frame, "url", "")))
+        if (
+            parsed.hostname != _CHANNELS_HOST
+            or parsed.path.rstrip("/") != frame_path.rstrip("/")
+        ):
+            continue
+        frame_url = str(getattr(frame, "url", ""))
+        try:
+            inventory = frame.evaluate(_DOM_VISIBLE_ELEMENT_SCAN, payload)
+        except Exception as exc:
+            scan_errors.append(f"{type(exc).__name__}: {str(exc)[:180]}")
+            continue
+        if not isinstance(inventory, dict) or not isinstance(inventory.get("items"), list):
+            scan_errors.append("invalid same-frame DOM scan result")
+            continue
+        match_count = int(inventory.get("match_count") or 0)
+        if match_count > limit:
+            raise UploadBlockedError(
+                f"Too many visible exact '{button_text}' buttons ({match_count}) in "
+                f"frame {frame_path}; refusing an ambiguous action."
+            )
+        for item in inventory["items"]:
+            if not isinstance(item, dict):
+                continue
+            identity = _creator_candidate_identity(item)
+            if identity in seen:
+                duplicates_removed += 1
+                continue
+            seen.add(identity)
+            handle_payload = dict(payload)
+            handle_payload["visible_index"] = int(item.get("visible_index", -1))
+            try:
+                handle = frame.evaluate_handle(_DOM_VISIBLE_ELEMENT_HANDLE, handle_payload)
+                element = handle.as_element()
+                if element is None or not element.is_visible():
+                    raise ValueError("the candidate changed or became invisible")
+            except Exception as exc:
+                scan_errors.append(
+                    f"Could not bind candidate in {frame_url[:180]}: "
+                    f"{type(exc).__name__}: {str(exc)[:160]}"
+                )
+                continue
+            navigation = _creator_entry_navigation_target(item, target_paths)
+            candidates.append({
+                "handle": element,
+                "metadata": item,
+                "navigation_target": navigation["navigation_target"] if navigation else None,
+                "matched_route": navigation["matched_route"] if navigation else None,
+                "enabled": bool(element.is_enabled()),
+            })
+    return candidates, scan_errors, duplicates_removed
+
+
+def _sanitized_creator_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Strip ElementHandles from candidate records for JSON-safe diagnostics."""
+    result: list[dict[str, Any]] = []
+    for candidate in candidates:
+        metadata = candidate["metadata"]
+        result.append({
+            "tag": str(metadata.get("tag") or ""),
+            "text": str(metadata.get("text") or ""),
+            "aria_label": str(metadata.get("aria_label") or ""),
+            "disabled": bool(metadata.get("disabled")),
+            "enabled": bool(candidate["enabled"]),
+            "rect": metadata.get("rect") or {},
+            "attributes": metadata.get("attributes") or {},
+            "outer_html": str(metadata.get("outer_html") or ""),
+            "href": str(metadata.get("href") or ""),
+            "ancestors": metadata.get("ancestors") or [],
+            "navigation_target": candidate["navigation_target"],
+            "matched_route": candidate["matched_route"],
+        })
+    return result
+
+
+def _creator_entry_diagnostics(
+    *,
+    button_text: str,
+    frame_path: str,
+    target_paths: list[str],
+    candidates: list[dict[str, Any]],
+    duplicates_removed: int,
+    frame_count: int,
+    frame_urls: list[str],
+    frame_observations: list[dict[str, Any]],
+    scan_errors: list[str],
+) -> dict[str, Any]:
+    return {
+        "expected_button_label": button_text,
+        "expected_frame_path": frame_path,
+        "expected_navigation_targets": list(target_paths),
+        "matching_frame_count": frame_count,
+        "unique_candidate_count": len(candidates),
+        "qualifying_candidate_count": sum(
+            1 for item in candidates if item["navigation_target"]
+        ),
+        "duplicate_scan_records_removed": duplicates_removed,
+        "creator_entry_candidates": _sanitized_creator_candidates(candidates),
+        "current_frame_urls": frame_urls,
+        "frame_observations": frame_observations,
+        "scan_errors": scan_errors[-3:],
+        "captured_at": _now(),
+    }
+
+
+def _wait_for_creator_form_frame(page: Any, selectors: dict[str, Any]):
+    """Wait until the creation form frame actually mounts after the CTA click."""
+    form_path = str(
+        selectors.get("creator_form_frame_path") or _DEFAULT_CREATE_FORM_PATH
+    )
+    timeout_seconds = max(
+        0.0, float(selectors.get("creator_form_ready_timeout_seconds", 15))
+    )
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        for frame in _frame_contexts(page):
+            parsed = urlparse(str(getattr(frame, "url", "")))
+            if (
+                parsed.hostname == _CHANNELS_HOST
+                and parsed.path.rstrip("/") == form_path.rstrip("/")
+            ):
+                return frame
+        if time.monotonic() >= deadline:
+            frame_urls = [
+                str(getattr(frame, "url", "")) for frame in _frame_contexts(page)
+            ]
+            raise UploadBlockedError(
+                f"The creator form frame {form_path} did not mount after activating "
+                "the creator entry. No video was selected or uploaded; no save or "
+                "publication action was taken.",
+                diagnostics={
+                    "expected_creator_form_frame_path": form_path,
+                    "current_frame_urls": frame_urls,
+                    "captured_at": _now(),
+                },
+            )
+        page.wait_for_timeout(400)
+
+
 def _open_create_view(
     page: Any,
     config: dict[str, Any],
     selectors: dict[str, Any],
 ) -> None:
-    """Mount the creator SPA through its exact visible post-card entry point.
+    """Mount the creator SPA through a structurally-proven post-card entry.
 
-    The entry is inspected and resolved with frame.evaluate/evaluate_handle in
-    the target frame itself. This deliberately avoids Playwright Locator APIs,
-    which have returned zero nodes for this live cross-origin iframe over CDP.
-    The resulting ElementHandle click is a navigation action only.
+    Same-name buttons in post-card.html are not distinguishable by text, index,
+    DOM order or coordinates. The entry is positively identified only when its
+    captured DOM structure proves a navigation target to the creation route
+    (own href, ancestor anchor href, or a URL-bearing data-*/aria-* value).
+    Re-scans of the same node (multiple CDP pages / frame revisits) are
+    de-duplicated by a structural signature plus geometry; geometry is used
+    only for identity, never to choose a button. If exactly one unique, enabled,
+    visible, navigation-proven entry remains, it is clicked once and the
+    creator form frame is awaited. Otherwise the workflow fails closed with
+    full candidate/ancestor diagnostics. Locator APIs are avoided: they have
+    returned zero nodes for this cross-origin iframe over CDP.
     """
     platform_url = str(
         config.get("platform_url") or "https://channels.weixin.qq.com/platform"
@@ -927,7 +1298,7 @@ def _open_create_view(
     parsed_platform = urlparse(platform_url)
     if (
         parsed_platform.scheme != "https"
-        or parsed_platform.hostname != "channels.weixin.qq.com"
+        or parsed_platform.hostname != _CHANNELS_HOST
         or parsed_platform.path.rstrip("/") != "/platform"
         or parsed_platform.query
         or parsed_platform.fragment
@@ -952,106 +1323,93 @@ def _open_create_view(
     if not button_text:
         raise UploadBlockedError("The creator-entry button text is not configured.")
 
+    configured_targets = selectors.get("create_nav_target_paths")
+    if not configured_targets:
+        target_paths = list(_DEFAULT_CREATE_NAV_TARGETS)
+    elif isinstance(configured_targets, str):
+        target_paths = [configured_targets]
+    else:
+        target_paths = [str(item) for item in configured_targets if str(item).strip()]
+
     timeout_seconds = max(
         0.0, float(selectors.get("create_nav_timeout_seconds", 15))
     )
     deadline = time.monotonic() + timeout_seconds
     last_scan_errors: list[str] = []
-    while True:
-        matching_frames = []
-        visible_buttons = []
-        for frame in _frame_contexts(page):
-            parsed_frame = urlparse(str(getattr(frame, "url", "")))
-            if (
-                parsed_frame.hostname != "channels.weixin.qq.com"
-                or parsed_frame.path.rstrip("/") != frame_path.rstrip("/")
-            ):
-                continue
-            matching_frames.append(frame)
-            try:
-                # Use the same label contract as channels-inspect: normalized
-                # rendered text first, falling back to aria-label when empty.
-                matches = _visible_element_handles(
-                    frame,
-                    "button, [role='button']",
-                    limit=32,
-                    exact_text=button_text,
-                )
-                visible_buttons.extend(matches)
-            except Exception as exc:
-                last_scan_errors.append(
-                    f"{type(exc).__name__}: {str(exc)[:180]}"
-                )
 
-        if len(visible_buttons) > 1:
+    def failure_diagnostics(candidates, duplicates_removed, frame_count, frame_urls):
+        return _creator_entry_diagnostics(
+            button_text=button_text,
+            frame_path=frame_path,
+            target_paths=target_paths,
+            candidates=candidates,
+            duplicates_removed=duplicates_removed,
+            frame_count=frame_count,
+            frame_urls=frame_urls,
+            frame_observations=_target_frame_observations(page, frame_path),
+            scan_errors=last_scan_errors,
+        )
+
+    while True:
+        candidates, scan_errors, duplicates_removed = _collect_creator_entry_candidates(
+            page, frame_path, button_text, target_paths, limit=32
+        )
+        last_scan_errors = (last_scan_errors + scan_errors)[-3:]
+        qualifying = [item for item in candidates if item["navigation_target"]]
+        matching_frame_count = sum(
+            1
+            for frame in _frame_contexts(page)
+            if urlparse(str(getattr(frame, "url", ""))).hostname == _CHANNELS_HOST
+            and urlparse(str(getattr(frame, "url", ""))).path.rstrip("/")
+            == frame_path.rstrip("/")
+        )
+        frame_urls = [
+            str(getattr(frame, "url", "")) for frame in _frame_contexts(page)
+        ]
+
+        if len(qualifying) > 1:
             raise UploadBlockedError(
-                f"More than one visible exact '{button_text}' creator-entry button "
-                f"exists in frame {frame_path}; refusing an ambiguous click."
+                f"More than one visible exact '{button_text}' button in frame "
+                f"{frame_path} proves a creator-entry navigation target; refusing "
+                "an ambiguous click.",
+                diagnostics=failure_diagnostics(
+                    candidates, duplicates_removed, matching_frame_count, frame_urls
+                ),
             )
-        if len(visible_buttons) == 1:
-            button = visible_buttons[0]
-            if button.is_enabled():
-                try:
-                    # ElementHandle.click sends a real browser input action while
-                    # retaining the node resolved in the frame's own context.
-                    button.click(timeout=10_000)
-                except Exception as exc:
-                    raise UploadBlockedError(
-                        "The unique visible creator-entry button could not be activated."
-                    ) from exc
-                return
+
+        if len(qualifying) == 1:
+            chosen = qualifying[0]
+            if not chosen["enabled"]:
+                raise UploadBlockedError(
+                    f"The structurally-identified '{button_text}' creator entry in "
+                    f"frame {frame_path} is disabled; refusing to click.",
+                    diagnostics=failure_diagnostics(
+                        candidates, duplicates_removed, matching_frame_count, frame_urls
+                    ),
+                )
+            try:
+                # ElementHandle.click sends a real browser input action while
+                # retaining the node resolved in the frame's own execution context.
+                chosen["handle"].click(timeout=10_000)
+            except Exception as exc:
+                raise UploadBlockedError(
+                    "The unique visible creator-entry button could not be activated."
+                ) from exc
+            _wait_for_creator_form_frame(page, selectors)
+            return
 
         if time.monotonic() >= deadline:
-            frame_urls = [
-                str(getattr(frame, "url", "")) for frame in _frame_contexts(page)
-            ]
-            frame_diagnostics: list[dict[str, Any]] = []
-            for frame in matching_frames:
-                try:
-                    inventory = frame.evaluate(
-                        _DOM_VISIBLE_ELEMENT_SCAN,
-                        {
-                            "selector": "button, [role='button']",
-                            "limit": 24,
-                            "include_observed": True,
-                        },
-                    )
-                    ready_state = frame.evaluate("() => document.readyState")
-                    frame_diagnostics.append({
-                        "frame_url": str(getattr(frame, "url", "")),
-                        "ready_state": str(ready_state or ""),
-                        "visible_button_count": int(
-                            inventory.get("match_count", 0)
-                        ) if isinstance(inventory, dict) else None,
-                        "visible_buttons": (
-                            inventory.get("observed_items", [])[:24]
-                            if isinstance(inventory, dict) else []
-                        ),
-                    })
-                except Exception as exc:
-                    frame_diagnostics.append({
-                        "frame_url": str(getattr(frame, "url", "")),
-                        "diagnostic_error": (
-                            f"{type(exc).__name__}: {str(exc)[:180]}"
-                        ),
-                    })
-            diagnostics = {
-                "expected_button_label": button_text,
-                "expected_frame_path": frame_path,
-                "matching_frame_count": len(matching_frames),
-                "current_frame_urls": frame_urls,
-                "frame_observations": frame_diagnostics,
-                "scan_errors": last_scan_errors[-3:],
-                "captured_at": _now(),
-            }
             raise UploadBlockedError(
-                f"Could not find exactly one enabled visible '{button_text}' "
-                f"creator-entry button in frame {frame_path}. "
-                f"Matching frame count: {len(matching_frames)}; "
-                f"current frame URLs: {frame_urls}. "
+                f"Could not identify a unique, structurally-proven '{button_text}' "
+                f"creator entry in frame {frame_path}. No same-name button proved a "
+                "navigation target to the creation route; refusing an ambiguous or "
+                f"guessed click. Unique same-name candidates: {len(candidates)}; "
+                f"matching frames: {matching_frame_count}; current frame URLs: {frame_urls}. "
                 "Sanitized target-frame button diagnostics were saved to the upload job. "
                 "No video was selected or uploaded; no save or publication action was taken.",
-                diagnostics=diagnostics,
+                diagnostics=failure_diagnostics(
+                    candidates, duplicates_removed, matching_frame_count, frame_urls
+                ),
             )
         page.wait_for_timeout(400)
 
