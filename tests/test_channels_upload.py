@@ -2007,11 +2007,21 @@ def test_video_file_input_fails_closed_when_any_frame_cannot_be_scanned() -> Non
 
 
 def test_account_identity_waits_and_checks_child_frames() -> None:
-    identity = _FakeElement(text="成核生长")
     main = _FakeFrame("https://channels.weixin.qq.com/platform/post/create")
     child = _FakeFrame(
         "https://channels.weixin.qq.com/micro/content/post/create",
-        selectors={"body *": [identity]},
+        identity_matches=[{
+            "tag": "h2",
+            "evidence_type": "visible_text",
+            "matched_value": "成核生长",
+            "region": "semantic_account_surface",
+            "semantic_account_surface": True,
+            "identity_surface": "finder_nickname",
+            "left": 235,
+            "top": 88,
+            "width": 212,
+            "height": 21,
+        }],
     )
     page = _FakePage([main, child])
 
@@ -2024,16 +2034,25 @@ def test_account_identity_waits_and_checks_child_frames() -> None:
 
 
 def test_draft_list_identity_waits_for_delayed_spa_account_node() -> None:
-    identity = _FakeElement(text="成核生长")
+    identity_evidence = {
+        "tag": "h2",
+        "evidence_type": "visible_text",
+        "matched_value": "成核生长",
+        "region": "semantic_account_surface",
+        "semantic_account_surface": True,
+        "identity_surface": "finder_nickname",
+        "left": 235,
+        "top": 88,
+        "width": 212,
+        "height": 21,
+    }
     frame = _FakeFrame(
         "https://channels.weixin.qq.com/platform/post/list",
-        selectors={"body *": []},
+        identity_matches=[],
     )
     page = _FakePage(
         [frame],
-        on_wait=lambda _milliseconds: frame.selectors.update(
-            {"body *": [identity]}
-        ),
+        on_wait=lambda _milliseconds: frame.identity_matches.append(identity_evidence),
     )
 
     _ensure_draft_list_account_identity(
@@ -2070,6 +2089,24 @@ def test_account_identity_uses_visible_lower_left_dom_text_and_accessible_attrib
     assert "__CHANNELS_ACCOUNT_IDENTITY_SCAN__" in main.last_evaluate_expression
     assert 'element.classList.contains("finder-nickname")' in main.last_evaluate_expression
     assert "normalize(element.innerText || element.textContent) === expected" in main.last_evaluate_expression
+
+
+def test_account_identity_rejects_generic_page_mention_without_account_surface() -> None:
+    generic_text = _FakeElement(text="成核生长", tag="p")
+    frame = _FakeFrame(
+        "https://channels.weixin.qq.com/platform",
+        selectors={"body *": [generic_text]},
+    )
+    page = _FakePage([frame])
+
+    assert _wait_for_account_identity(
+        page,
+        "成核生长",
+        {"account_identity": {"exact_text": "成核生长"}},
+        wait_seconds=0,
+    ) is False
+    assert "__CHANNELS_ACCOUNT_IDENTITY_SCAN__" in frame.last_evaluate_expression
+    assert "__CHANNELS_VISIBLE_ELEMENT_SCAN__" not in frame.last_evaluate_expression
 
 
 def test_account_identity_accepts_exact_finder_nickname_in_headless_header() -> None:
