@@ -1690,6 +1690,7 @@ def test_open_create_view_distinguishes_same_named_buttons_by_structure(monkeypa
     assert correct.clicked is True
     assert decoy.clicked is False
     assert create_frame.selectors["input[type='file']"]
+    assert page.wait_calls[0] == 750
 
 
 def test_open_create_view_deduplicates_repeated_scans_of_same_button(monkeypatch) -> None:
@@ -2082,6 +2083,99 @@ def test_account_identity_rejects_matching_name_outside_account_region() -> None
         }],
     )
     assert _account_identity_evidence(frame, "成核生长") == []
+
+
+def test_account_identity_failure_preserves_sanitized_frame_diagnostics(monkeypatch) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    frame = _FakeFrame("https://channels.weixin.qq.com/platform")
+    page = _FakePage([frame])
+    expected = {
+        "stage": "account_identity",
+        "expected_account_name": "成核生长",
+        "login_prompt_detected": False,
+        "frames": [{
+            "frame_url": frame.url,
+            "ready_state": "complete",
+            "body_contains_expected_name": True,
+            "visible_matching_node_count": 1,
+            "visible_matching_nodes": [{
+                "tag": "span",
+                "evidence_type": "visible_text",
+                "matched_value": "成核生长",
+                "lower_left": False,
+                "semantic_account_surface": False,
+            }],
+        }],
+    }
+    monkeypatch.setattr(uploader, "_wait_for_account_identity", lambda *_a, **_k: False)
+    monkeypatch.setattr(uploader, "_login_required_hint", lambda _page: False)
+    monkeypatch.setattr(uploader, "_account_identity_diagnostics", lambda _page, _name: expected)
+
+    with pytest.raises(UploadBlockedError, match="per-frame identity diagnostics") as caught:
+        uploader._ensure_account_identity(
+            page, "成核生长", {"account_identity": {"exact_text": "成核生长"}},
+            wait_seconds=0,
+        )
+
+    assert caught.value.diagnostics == expected
+    assert caught.value.diagnostics["frames"][0]["body_contains_expected_name"] is True
+    assert "page_body_text" not in caught.value.diagnostics
+    assert "input_values" not in caught.value.diagnostics
+
+
+def test_account_identity_diagnostics_records_frame_state_without_page_text(monkeypatch) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    class DiagnosticFrame:
+        url = "https://channels.weixin.qq.com/platform"
+
+        def evaluate(self, expression, *args):
+            if "document.readyState" in expression:
+                return "complete"
+            if "__CHANNELS_ACCOUNT_IDENTITY_DIAGNOSTICS__" in expression:
+                assert args == ("成核生长",)
+                return {
+                    "body_contains_expected_name": True,
+                    "visible_matching_node_count": 1,
+                    "visible_matching_nodes": [{
+                        "tag": "span",
+                        "evidence_type": "visible_text",
+                        "matched_value": "成核生长",
+                        "lower_left": False,
+                        "semantic_account_surface": False,
+                        "rect": {"x": 880, "y": 30, "width": 90, "height": 20},
+                    }],
+                }
+            raise AssertionError("Unexpected diagnostic DOM evaluation")
+
+    class DiagnosticPage:
+        url = "https://channels.weixin.qq.com/platform"
+
+        def __init__(self):
+            self.frames = [DiagnosticFrame()]
+            self.main_frame = self.frames[0]
+
+        def title(self):
+            return "视频号助手"
+
+    monkeypatch.setattr(
+        uploader, "_account_identity_evidence",
+        lambda _frame, _name: [],
+    )
+    monkeypatch.setattr(uploader, "_login_required_hint", lambda _page: False)
+
+    diagnostic = uploader._account_identity_diagnostics(
+        DiagnosticPage(), "成核生长"
+    )
+
+    assert diagnostic["stage"] == "account_identity"
+    assert diagnostic["page_title"] == "视频号助手"
+    assert diagnostic["frames"][0]["ready_state"] == "complete"
+    assert diagnostic["frames"][0]["body_contains_expected_name"] is True
+    assert diagnostic["frames"][0]["visible_matching_node_count"] == 1
+    assert diagnostic["frames"][0]["visible_matching_nodes"][0]["rect"]["x"] == 880
+    assert "page_body_text" not in diagnostic["frames"][0]
 
 
 def test_login_required_hint_requires_explicit_login_prompt() -> None:
