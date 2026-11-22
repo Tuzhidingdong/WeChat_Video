@@ -689,11 +689,9 @@ def _wait_for_account_identity(
                         actual = candidate.inner_text().strip()
                         if actual == expected_name or expected_name in actual:
                             return True
-                exact_matches = _visible_element_handles(
-                    frame, "body *", limit=8, exact_text=exact_text
-                )
-                if exact_matches:
-                    return True
+                # Do not accept an arbitrary page mention as account identity.
+                # Only the configured selector or semantically recognized
+                # account surfaces above are authoritative.
             except Exception:
                 continue
         if time.monotonic() >= deadline:
