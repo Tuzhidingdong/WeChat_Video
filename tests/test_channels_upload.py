@@ -2068,6 +2068,41 @@ def test_account_identity_uses_visible_lower_left_dom_text_and_accessible_attrib
         page, "成核生长", {"account_identity": {"exact_text": "成核生长"}}, wait_seconds=0
     ) is True
     assert "__CHANNELS_ACCOUNT_IDENTITY_SCAN__" in main.last_evaluate_expression
+    assert 'element.classList.contains("finder-nickname")' in main.last_evaluate_expression
+    assert "normalize(element.innerText || element.textContent) === expected" in main.last_evaluate_expression
+
+
+def test_account_identity_accepts_exact_finder_nickname_in_headless_header() -> None:
+    frame = _FakeFrame(
+        "https://channels.weixin.qq.com/platform",
+        identity_matches=[{
+            "tag": "h2",
+            "evidence_type": "visible_text",
+            "matched_value": "成核生长",
+            "region": "semantic_account_surface",
+            "semantic_account_surface": True,
+            "identity_surface": "finder_nickname",
+            "role": "",
+            "left": 235,
+            "top": 88,
+            "width": 212,
+            "height": 21,
+            "viewport_width": 800,
+            "viewport_height": 600,
+            "device_pixel_ratio": 1,
+        }],
+    )
+
+    evidence = _account_identity_evidence(frame, "成核生长")
+
+    assert len(evidence) == 1
+    assert evidence[0]["tag"] == "h2"
+    assert evidence[0]["identity_surface"] == "finder_nickname"
+    assert evidence[0]["region"] == "semantic_account_surface"
+    assert evidence[0]["viewport_width"] == 800
+    assert evidence[0]["viewport_height"] == 600
+    assert "__CHANNELS_ACCOUNT_IDENTITY_SCAN__" in frame.last_evaluate_expression
+    assert 'element.classList.contains("finder-nickname")' in frame.last_evaluate_expression
 
 
 def test_account_identity_rejects_matching_name_outside_account_region() -> None:
