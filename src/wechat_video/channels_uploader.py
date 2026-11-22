@@ -1133,6 +1133,26 @@ _DEFAULT_CREATE_NAV_TARGETS = (
     "/platform/post/create",
     "/micro/content/post/create",
 )
+# Real production DOM (upload job 20261122_192030_critical_nucleus) proved the
+# two same-name buttons are distinct creation entries rendered in two UI states:
+#   header entry:  button -> .weui-desktop-btn_wrp -> .post ->
+#                  .post-list-header -> .post-list -> .finder-card
+#   empty-state:   button -> .weui-desktop-btn_wrp -> .option ->
+#                  .none-post -> .post-list -> .finder-card
+# Both share identical markup and have no URL-bearing attribute (Vue click
+# handler), so an href-based rule alone can never qualify them. Ancestor class
+# tokens are used ONLY as positive structural proof of the create action, in
+# this explicit priority order: the persistent list-header action wins over
+# the empty-state action when both are mounted. A card token is required so a
+# same-name button elsewhere in the page can never qualify.
+_DEFAULT_CREATE_ENTRY_CONTEXTS = (
+    "post-list-header",
+    "none-post",
+)
+_DEFAULT_POST_CARD_CONTEXTS = (
+    "post-list",
+    "finder-card",
+)
 
 
 def _normalized_url_path(value: Any) -> str:
@@ -1205,6 +1225,36 @@ def _creator_entry_navigation_target(
     return None
 
 
+def _creator_entry_structural_context(
+    item: dict[str, Any],
+    entry_contexts: list[str],
+    card_contexts: list[str],
+) -> dict[str, Any] | None:
+    """Prove a same-name button is the create action from its ancestor structure.
+
+    The rule is built only from ancestor class tokens observed in the real
+    production DOM. A candidate must first prove it lives inside the post-card
+    content list, then match one of the configured create-entry contexts. The
+    context priority (its index in ``entry_contexts``) is used solely to pick a
+    single winner when two proven creation entries are mounted at once; it is
+    never used by itself to click a button. Geometry, DOM order and array index
+    remain unused. Returns ``None`` when the structure does not prove the role.
+    """
+    ancestors = item.get("ancestors") or []
+    tokens: set[str] = set()
+    for ancestor in ancestors:
+        if not isinstance(ancestor, dict):
+            continue
+        class_name = str(ancestor.get("class_name") or "")
+        tokens.update(token for token in class_name.split() if token)
+    if not any(token in tokens for token in card_contexts):
+        return None
+    for rank, context in enumerate(entry_contexts):
+        if context and context in tokens:
+            return {"context": context, "rank": rank}
+    return None
+
+
 def _creator_candidate_identity(item: dict[str, Any]) -> tuple[Any, ...]:
     """Identity used only to de-duplicate repeated scans of the SAME node.
 
@@ -1273,6 +1323,8 @@ def _collect_creator_entry_candidates(
     frame_path: str,
     button_text: str,
     target_paths: list[str],
+    entry_contexts: list[str],
+    card_contexts: list[str],
     limit: int,
 ) -> tuple[list[dict[str, Any]], list[str], int]:
     """Scan only the target frame and return de-duplicated structural candidates."""
@@ -1331,11 +1383,16 @@ def _collect_creator_entry_candidates(
                 )
                 continue
             navigation = _creator_entry_navigation_target(item, target_paths)
+            structural = _creator_entry_structural_context(
+                item, entry_contexts, card_contexts
+            )
             candidates.append({
                 "handle": element,
                 "metadata": item,
                 "navigation_target": navigation["navigation_target"] if navigation else None,
                 "matched_route": navigation["matched_route"] if navigation else None,
+                "entry_context": structural["context"] if structural else None,
+                "entry_context_rank": structural["rank"] if structural else None,
                 "enabled": bool(element.is_enabled()),
             })
     return candidates, scan_errors, duplicates_removed
@@ -1359,6 +1416,8 @@ def _sanitized_creator_candidates(candidates: list[dict[str, Any]]) -> list[dict
             "ancestors": metadata.get("ancestors") or [],
             "navigation_target": candidate["navigation_target"],
             "matched_route": candidate["matched_route"],
+            "entry_context": candidate.get("entry_context"),
+            "entry_context_rank": candidate.get("entry_context_rank"),
         })
     return result
 
@@ -1368,6 +1427,8 @@ def _creator_entry_diagnostics(
     button_text: str,
     frame_path: str,
     target_paths: list[str],
+    entry_contexts: list[str],
+    card_contexts: list[str],
     candidates: list[dict[str, Any]],
     duplicates_removed: int,
     frame_count: int,
@@ -1379,10 +1440,12 @@ def _creator_entry_diagnostics(
         "expected_button_label": button_text,
         "expected_frame_path": frame_path,
         "expected_navigation_targets": list(target_paths),
+        "expected_entry_contexts": list(entry_contexts),
+        "expected_card_contexts": list(card_contexts),
         "matching_frame_count": frame_count,
         "unique_candidate_count": len(candidates),
         "qualifying_candidate_count": sum(
-            1 for item in candidates if item["navigation_target"]
+            1 for item in candidates if item["navigation_target"] or item.get("entry_context")
         ),
         "duplicate_scan_records_removed": duplicates_removed,
         "creator_entry_candidates": _sanitized_creator_candidates(candidates),
@@ -1435,10 +1498,12 @@ def _open_create_view(
     """Mount the creator SPA through a structurally-proven post-card entry.
 
     Same-name buttons in post-card.html are not distinguishable by text, index,
-    DOM order or coordinates. The entry is positively identified only when its
-    captured DOM structure proves a navigation target to the creation route
-    (own href, ancestor anchor href, or a URL-bearing data-*/aria-* value).
-    Re-scans of the same node (multiple CDP pages / frame revisits) are
+    DOM order or coordinates. The entry is positively identified when its
+    captured DOM structure either proves a navigation target to the creation
+    route (own href, ancestor anchor href, or a URL-bearing data-*/aria-* value)
+    or matches a configured create-entry ancestor context inside the post card
+    (the real WeChat SPA uses JS click handlers with no URL attribute). Re-scans
+    of the same node (multiple CDP pages / frame revisits) are
     de-duplicated by a structural signature plus geometry; geometry is used
     only for identity, never to choose a button. If exactly one unique, enabled,
     visible, navigation-proven entry remains, it is clicked once and the
@@ -1488,6 +1553,21 @@ def _open_create_view(
     else:
         target_paths = [str(item) for item in configured_targets if str(item).strip()]
 
+    def _configured_contexts(key: str, defaults: tuple[str, ...]) -> list[str]:
+        configured = selectors.get(key)
+        if not configured:
+            return list(defaults)
+        if isinstance(configured, str):
+            configured = [configured]
+        return [str(item).strip() for item in configured if str(item).strip()]
+
+    entry_contexts = _configured_contexts(
+        "create_nav_entry_contexts", _DEFAULT_CREATE_ENTRY_CONTEXTS
+    )
+    card_contexts = _configured_contexts(
+        "create_nav_card_contexts", _DEFAULT_POST_CARD_CONTEXTS
+    )
+
     timeout_seconds = max(
         0.0, float(selectors.get("create_nav_timeout_seconds", 15))
     )
@@ -1499,6 +1579,8 @@ def _open_create_view(
             button_text=button_text,
             frame_path=frame_path,
             target_paths=target_paths,
+            entry_contexts=entry_contexts,
+            card_contexts=card_contexts,
             candidates=candidates,
             duplicates_removed=duplicates_removed,
             frame_count=frame_count,
@@ -1509,10 +1591,19 @@ def _open_create_view(
 
     while True:
         candidates, scan_errors, duplicates_removed = _collect_creator_entry_candidates(
-            page, frame_path, button_text, target_paths, limit=32
+            page,
+            frame_path,
+            button_text,
+            target_paths,
+            entry_contexts,
+            card_contexts,
+            limit=32,
         )
         last_scan_errors = (last_scan_errors + scan_errors)[-3:]
-        qualifying = [item for item in candidates if item["navigation_target"]]
+        qualifying = [
+            item for item in candidates
+            if item["navigation_target"] or item.get("entry_context")
+        ]
         matching_frame_count = sum(
             1
             for frame in _frame_contexts(page)
@@ -1524,7 +1615,13 @@ def _open_create_view(
             str(getattr(frame, "url", "")) for frame in _frame_contexts(page)
         ]
 
-        if len(qualifying) > 1:
+        # An explicit navigation target outranks a structural context. Two such
+        # entries remain genuinely ambiguous and still fail closed.
+        navigation_proven = [
+            item for item in qualifying if item["navigation_target"]
+        ]
+        chosen = None
+        if len(navigation_proven) > 1:
             raise UploadBlockedError(
                 f"More than one visible exact '{button_text}' button in frame "
                 f"{frame_path} proves a creator-entry navigation target; refusing "
@@ -1533,9 +1630,35 @@ def _open_create_view(
                     candidates, duplicates_removed, matching_frame_count, frame_urls
                 ),
             )
-
-        if len(qualifying) == 1:
+        if navigation_proven:
+            chosen = navigation_proven[0]
+        elif len(qualifying) > 1:
+            # Both buttons are proven creation entries (real SPA shape). The
+            # configured context priority picks the single primary action; a
+            # tie at the same priority stays ambiguous and fails closed.
+            best_rank = min(
+                int(item["entry_context_rank"])
+                for item in qualifying
+                if item.get("entry_context_rank") is not None
+            )
+            winners = [
+                item for item in qualifying
+                if item.get("entry_context_rank") == best_rank
+            ]
+            if len(winners) != 1:
+                raise UploadBlockedError(
+                    f"More than one visible exact '{button_text}' button in frame "
+                    f"{frame_path} matches the same highest-priority create-entry "
+                    "context; refusing an ambiguous click.",
+                    diagnostics=failure_diagnostics(
+                        candidates, duplicates_removed, matching_frame_count, frame_urls
+                    ),
+                )
+            chosen = winners[0]
+        elif len(qualifying) == 1:
             chosen = qualifying[0]
+
+        if chosen is not None:
             if not chosen["enabled"]:
                 raise UploadBlockedError(
                     f"The structurally-identified '{button_text}' creator entry in "
@@ -1559,8 +1682,8 @@ def _open_create_view(
             raise UploadBlockedError(
                 f"Could not identify a unique, structurally-proven '{button_text}' "
                 f"creator entry in frame {frame_path}. No same-name button proved a "
-                "navigation target to the creation route; refusing an ambiguous or "
-                f"guessed click. Unique same-name candidates: {len(candidates)}; "
+                "navigation target or a create-entry ancestor context; refusing an "
+                f"ambiguous or guessed click. Unique same-name candidates: {len(candidates)}; "
                 f"matching frames: {matching_frame_count}; current frame URLs: {frame_urls}. "
                 "Sanitized target-frame button diagnostics were saved to the upload job. "
                 "No video was selected or uploaded; no save or publication action was taken.",

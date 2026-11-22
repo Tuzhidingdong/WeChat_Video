@@ -19,11 +19,24 @@ create_nav_timeout_seconds: 15
 # uploader only clicks a button whose captured DOM structure proves a
 # navigation target to one of these creation routes (own href, ancestor anchor
 # href, or a URL-bearing data-*/aria-* value). Coordinates, DOM order, index
-# and CSS class names are never used to choose the entry. With no proven or
-# with multiple proven entries, the job fails closed.
+# and geometry are never used to choose the entry. With no proven or with
+# multiple proven entries, the job fails closed.
 create_nav_target_paths:
   - "/platform/post/create"
   - "/micro/content/post/create"
+# The real WeChat SPA renders these buttons with JS click handlers and no URL
+# attribute, so an href-only rule can never qualify them. An ancestor class
+# token below positively proves the create action, but only inside a post-card
+# content list (create_nav_card_contexts). Priority is explicit: the persistent
+# list-header action is preferred over the empty-state action when both are
+# mounted. A tie at the same priority still fails closed. These tokens come
+# from observed production DOM (upload job 20261122_192030_critical_nucleus).
+create_nav_entry_contexts:
+  - "post-list-header"
+  - "none-post"
+create_nav_card_contexts:
+  - "post-list"
+  - "finder-card"
 # Activating the entry is only navigation: wait for the creation form frame to
 # mount before the video file input is scanned and verified (exactly one).
 creator_form_frame_path: "/micro/content/post/create"

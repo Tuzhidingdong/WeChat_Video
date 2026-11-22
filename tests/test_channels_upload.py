@@ -1763,6 +1763,160 @@ def test_open_create_view_fails_closed_on_indistinguishable_ambiguity(monkeypatc
     assert second.clicked is False
 
 
+def test_open_create_view_clicks_primary_context_for_two_href_free_spa_entries(
+    monkeypatch,
+) -> None:
+    """Real 20261122_192030 DOM shape: two identical buttons, no URL attribute.
+
+    Both are genuine creation entries in different UI states; the persistent
+    list-header action must win over the empty-state action without using
+    coordinates, DOM order or array index.
+    """
+    import wechat_video.channels_uploader as uploader
+
+    create_frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create"
+    )
+    markup = (
+        '<button type="button" class="weui-desktop-btn weui-desktop-btn_primary">'
+        "发表视频</button>"
+    )
+    attrs = {"type": "button", "class": "weui-desktop-btn weui-desktop-btn_primary"}
+
+    def mount_form():
+        create_frame.selectors["input[type='file']"] = [
+            _FakeElement(attrs={"accept": "video/*"}, tag="input")
+        ]
+
+    header = _FakeElement(
+        text="发表视频",
+        tag="button",
+        attrs=dict(attrs),
+        outer_html=markup,
+        rect={"x": 985, "y": 485, "w": 120, "h": 40},
+        ancestors=[
+            {"tag": "div", "class": "weui-desktop-btn_wrp"},
+            {"tag": "div", "class": "post"},
+            {"tag": "div", "class": "post-list-header"},
+            {"tag": "div", "class": "post-list"},
+            {"tag": "div", "class": "finder-card wrap"},
+        ],
+        on_click=mount_form,
+    )
+    empty_state = _FakeElement(
+        text="发表视频",
+        tag="button",
+        attrs=dict(attrs),
+        outer_html=markup,
+        rect={"x": 569, "y": 791, "w": 120, "h": 40},
+        ancestors=[
+            {"tag": "div", "class": "weui-desktop-btn_wrp"},
+            {"tag": "div", "class": "option"},
+            {"tag": "div", "class": "none-post"},
+            {"tag": "div", "class": "post-list"},
+            {"tag": "div", "class": "finder-card wrap"},
+        ],
+        on_click=mount_form,
+    )
+    page = _FakePage([
+        _FakeFrame("https://channels.weixin.qq.com/platform"),
+        _post_card_frame(header, empty_state),
+        create_frame,
+    ])
+    monkeypatch.setattr(uploader, "_ensure_account_identity", lambda *_a, **_k: None)
+
+    _open_create_view(page, _create_view_config(), _create_view_selectors())
+
+    assert header.clicked is True
+    assert empty_state.clicked is False
+    assert create_frame.selectors["input[type='file']"]
+
+
+def test_open_create_view_fails_closed_when_two_spa_entries_share_context(
+    monkeypatch,
+) -> None:
+    """Two proven entries at the SAME priority remain ambiguous -> no click."""
+    import wechat_video.channels_uploader as uploader
+
+    first = _FakeElement(
+        text="发表视频",
+        tag="button",
+        rect={"x": 985, "y": 485, "w": 120, "h": 40},
+        ancestors=[
+            {"tag": "div", "class": "post-list-header"},
+            {"tag": "div", "class": "post-list"},
+            {"tag": "div", "class": "finder-card wrap"},
+        ],
+    )
+    second = _FakeElement(
+        text="发表视频",
+        tag="button",
+        rect={"x": 569, "y": 791, "w": 120, "h": 40},
+        ancestors=[
+            {"tag": "div", "class": "post-list-header"},
+            {"tag": "div", "class": "post-list"},
+            {"tag": "div", "class": "finder-card wrap"},
+        ],
+    )
+    page = _FakePage([
+        _FakeFrame("https://channels.weixin.qq.com/platform"),
+        _post_card_frame(first, second),
+    ])
+    monkeypatch.setattr(uploader, "_ensure_account_identity", lambda *_a, **_k: None)
+
+    with pytest.raises(UploadBlockedError, match="same highest-priority") as caught:
+        _open_create_view(page, _create_view_config(), _create_view_selectors())
+
+    assert caught.value.diagnostics["qualifying_candidate_count"] == 2
+    assert first.clicked is False
+    assert second.clicked is False
+
+
+def test_open_create_view_ignores_same_name_button_outside_post_card(
+    monkeypatch,
+) -> None:
+    """A same-name button lacking post-card ancestry can never be selected."""
+    import wechat_video.channels_uploader as uploader
+
+    create_frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create"
+    )
+
+    def mount_form():
+        create_frame.selectors["input[type='file']"] = [
+            _FakeElement(attrs={"accept": "video/*"}, tag="input")
+        ]
+
+    outside = _FakeElement(
+        text="发表视频",
+        tag="button",
+        rect={"x": 10, "y": 10, "w": 120, "h": 40},
+        ancestors=[{"tag": "div", "class": "site-global-header"}],
+    )
+    inside = _FakeElement(
+        text="发表视频",
+        tag="button",
+        rect={"x": 985, "y": 485, "w": 120, "h": 40},
+        ancestors=[
+            {"tag": "div", "class": "post-list-header"},
+            {"tag": "div", "class": "post-list"},
+            {"tag": "div", "class": "finder-card wrap"},
+        ],
+        on_click=mount_form,
+    )
+    page = _FakePage([
+        _FakeFrame("https://channels.weixin.qq.com/platform"),
+        _post_card_frame(outside, inside),
+        create_frame,
+    ])
+    monkeypatch.setattr(uploader, "_ensure_account_identity", lambda *_a, **_k: None)
+
+    _open_create_view(page, _create_view_config(), _create_view_selectors())
+
+    assert inside.clicked is True
+    assert outside.clicked is False
+
+
 def test_open_create_view_ignores_proven_entry_in_wrong_frame(monkeypatch) -> None:
     """Shape (d): a valid-looking entry in a different frame must never be clicked."""
     import wechat_video.channels_uploader as uploader
