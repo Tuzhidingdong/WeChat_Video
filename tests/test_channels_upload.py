@@ -548,6 +548,7 @@ class _FakeFrame:
         video_scan_error=False,
         dom_scan_error=False,
         bind_failures=0,
+        scan_failures=0,
     ):
         self.url = url
         self.selectors = dict(selectors or {})
@@ -559,6 +560,7 @@ class _FakeFrame:
         self.video_scan_error = video_scan_error
         self.dom_scan_error = dom_scan_error
         self.bind_failures = int(bind_failures)
+        self.scan_failures = int(scan_failures)
         self.last_evaluate_expression = ""
         self.last_evaluate_args = ()
         self.locator_calls = []
@@ -638,6 +640,11 @@ class _FakeFrame:
         self.last_evaluate_expression = expression
         self.last_evaluate_args = args
         if "__CHANNELS_VISIBLE_ELEMENT_SCAN__" in expression:
+            if self.scan_failures > 0:
+                self.scan_failures -= 1
+                raise RuntimeError(
+                    "此报错可以忽略，iframe主动中断主应用代码在子应用运行 LogicError"
+                )
             if self.dom_scan_error:
                 raise RuntimeError("simulated same-frame DOM scan failure")
             payload = args[0]
@@ -1700,6 +1707,21 @@ def test_visible_element_handles_retries_transient_bind_failure() -> None:
         "https://channels.weixin.qq.com/platform",
         selectors={"a": [entry]},
         bind_failures=1,
+    )
+    page = _FakePage([frame])
+
+    handles = _visible_element_handles(page, "a", limit=8, contains_text="草稿箱")
+
+    assert handles == [entry]
+
+
+def test_visible_element_handles_retries_benign_spa_scan_error() -> None:
+    """The SPA's ignorable LogicError must not abort a read-only lookup."""
+    entry = _FakeElement(text="草稿箱", tag="a")
+    frame = _FakeFrame(
+        "https://channels.weixin.qq.com/platform",
+        selectors={"a": [entry]},
+        scan_failures=1,
     )
     page = _FakePage([frame])
 
