@@ -683,6 +683,127 @@ def _wait_for_account_identity(
         page.wait_for_timeout(500)
 
 
+def _account_identity_diagnostics(page: Any, expected_name: str) -> dict[str, Any]:
+    """Capture privacy-safe per-frame evidence when the intended account cannot be verified.
+
+    Only the configured account name's presence/count and matching visible DOM
+    nodes are recorded. Arbitrary page text, form values, cookies and storage
+    are never collected.
+    """
+    expression = r"""(expectedName) => {
+        const expected = String(expectedName || "").replace(/\\s+/g, " ").trim();
+        const normalize = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+        const visible = (element) => {
+            if (!element || element.hidden) return false;
+            const rect = element.getBoundingClientRect();
+            if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+            for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+                const style = window.getComputedStyle(node);
+                if (style.display === "none" || style.visibility === "hidden" ||
+                    style.visibility === "collapse" || Number.parseFloat(style.opacity || "1") === 0) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const bodyText = normalize(document.body ? document.body.innerText : "");
+        const matches = [];
+        for (const element of Array.from(document.querySelectorAll("body *"))) {
+            if (!visible(element)) continue;
+            const rect = element.getBoundingClientRect();
+            const directText = Array.from(element.childNodes)
+                .filter(node => node.nodeType === Node.TEXT_NODE)
+                .map(node => normalize(node.nodeValue))
+                .filter(Boolean);
+            const candidates = directText.map(value => ["visible_text", value]);
+            for (const attr of ["aria-label", "title", "alt"]) {
+                const value = normalize(element.getAttribute(attr));
+                if (value) candidates.push([attr, value]);
+            }
+            for (const pseudo of ["::before", "::after"]) {
+                const value = normalize(window.getComputedStyle(element, pseudo).content)
+                    .replace(/^["']|["']$/g, "");
+                if (value && value !== "none" && value !== "normal") {
+                    candidates.push(["pseudo_text", value]);
+                }
+            }
+            const match = candidates.find(([, value]) => value.includes(expected));
+            if (!match) continue;
+            const semantic = [
+                element.getAttribute("role"),
+                element.getAttribute("aria-label"),
+                element.getAttribute("title"),
+                element.id,
+                typeof element.className === "string" ? element.className : ""
+            ].join(" ");
+            matches.push({
+                tag: element.tagName.toLowerCase(),
+                evidence_type: match[0],
+                matched_value: String(match[1]).slice(0, 80),
+                role: element.getAttribute("role") || "",
+                id: String(element.id || "").slice(0, 100),
+                class_name: String(typeof element.className === "string" ? element.className : "").slice(0, 160),
+                semantic_account_surface: /(account|profile|avatar|user|账号|用户|个人中心)/i.test(semantic),
+                lower_left: rect.left <= window.innerWidth * 0.45 &&
+                    rect.top >= window.innerHeight * 0.50,
+                rect: {
+                    x: Math.round(rect.left), y: Math.round(rect.top),
+                    width: Math.round(rect.width), height: Math.round(rect.height)
+                }
+            });
+            if (matches.length >= 12) break;
+        }
+        return {
+            body_contains_expected_name: Boolean(expected && bodyText.includes(expected)),
+            visible_matching_node_count: matches.length,
+            visible_matching_nodes: matches
+        };
+    }""";
+    result: dict[str, Any] = {
+        "stage": "account_identity",
+        "expected_account_name": str(expected_name),
+        "page_url": str(getattr(page, "url", "")),
+        "login_prompt_detected": False,
+        "frames": [],
+        "captured_at": _now(),
+    }
+    try:
+        result["page_title"] = str(page.title())[:160]
+    except Exception as exc:
+        result["page_title_error"] = type(exc).__name__
+    try:
+        result["login_prompt_detected"] = _login_required_hint(page)
+    except Exception as exc:
+        result["login_prompt_error"] = type(exc).__name__
+
+    for frame in _frame_contexts(page):
+        item: dict[str, Any] = {
+            "frame_url": str(getattr(frame, "url", ""))[:300],
+            "ready_state": None,
+            "verified_identity_evidence": [],
+        }
+        try:
+            item["ready_state"] = str(frame.evaluate("() => document.readyState") or "")
+        except Exception as exc:
+            item["ready_state_error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
+        try:
+            item["verified_identity_evidence"] = _account_identity_evidence(
+                frame, expected_name
+            )
+        except Exception as exc:
+            item["identity_evidence_error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
+        try:
+            raw = frame.evaluate(expression, expected_name)
+            if isinstance(raw, dict):
+                item.update(raw)
+            else:
+                item["diagnostic_scan_error"] = "unexpected result type"
+        except Exception as exc:
+            item["diagnostic_scan_error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
+        result["frames"].append(item)
+    return result
+
+
 def _ensure_account_identity(
     page: Any,
     expected_name: str,
@@ -694,15 +815,19 @@ def _ensure_account_identity(
         page, expected_name, selectors, wait_seconds=wait_seconds
     ):
         return
-    if _login_required_hint(page):
-        raise UploadBlockedError(
+    diagnostics = _account_identity_diagnostics(page, expected_name)
+    if diagnostics.get("login_prompt_detected"):
+        message = (
             "The dedicated Channels session is not logged in. Scan the QR code in the open Edge window, "
             "confirm the intended account, then rerun this command."
         )
-    raise UploadBlockedError(
-        f"Could not verify the intended Channels account identity {expected_name!r}. "
-        "No upload was attempted."
-    )
+    else:
+        message = (
+            f"Could not verify the intended Channels account identity {expected_name!r}. "
+            "The sanitized per-frame identity diagnostics were saved to the upload job. "
+            "No upload was attempted."
+        )
+    raise UploadBlockedError(message, diagnostics=diagnostics)
 
 
 def _ensure_draft_list_account_identity(
@@ -1308,6 +1433,9 @@ def _open_create_view(
         )
 
     page.goto(platform_url, wait_until="domcontentloaded", timeout=60_000)
+    settle_ms = max(0, int(config.get("ui_settle_ms", 750)))
+    if settle_ms:
+        page.wait_for_timeout(settle_ms)
     _ensure_account_identity(
         page,
         str(config["account_name"]),
@@ -2049,6 +2177,9 @@ def _open_draft_list_view(
         )
 
     page.goto(platform_url, wait_until="domcontentloaded", timeout=60_000)
+    settle_ms = max(0, int(config.get("ui_settle_ms", 750)))
+    if settle_ms:
+        page.wait_for_timeout(settle_ms)
     _ensure_draft_list_account_identity(page, config, selectors)
     _click_draft_list_nav_entry(page, selectors)
     # URL changes alone are not accepted: the existing strict frame and DOM
@@ -2628,7 +2759,10 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
     except Exception as exc:
         diagnostics = getattr(exc, "diagnostics", None)
         if isinstance(diagnostics, dict):
-            job["creator_navigation_diagnostics"] = diagnostics
+            if diagnostics.get("stage") == "account_identity":
+                job["account_identity_diagnostics"] = diagnostics
+            else:
+                job["creator_navigation_diagnostics"] = diagnostics
         if job.get("state") in {"SAVE_REQUESTED", "UPLOAD_UNKNOWN"}:
             job["state"] = "UPLOAD_UNKNOWN"
             job["last_error_type"] = type(exc).__name__
