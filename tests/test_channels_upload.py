@@ -103,6 +103,65 @@ def test_post_save_draft_verification_mounts_spa_once_then_polls_existing_view(
     assert page.wait_calls == [500]
 
 
+def test_post_save_verification_never_reclassifies_preexisting_same_title_as_new(
+    monkeypatch,
+) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    now = {"value": 0.0}
+    monkeypatch.setattr(uploader.time, "monotonic", lambda: now["value"])
+
+    class _AdvancingPage(_FakePage):
+        def wait_for_timeout(self, milliseconds):
+            super().wait_for_timeout(milliseconds)
+            now["value"] += milliseconds / 1000
+
+    page = _AdvancingPage([_FakeFrame("https://channels.weixin.qq.com/platform")])
+    snapshots = [
+        {
+            "view_type": "draft_list",
+            "view_verified": True,
+            "draft_count": 1,
+            "entries": ["临界半径如何决定成核 2026-11-22 10:30"],
+            "url": "https://channels.weixin.qq.com/platform",
+            "view_evidence": {"page_path": "/platform"},
+        }
+    ]
+    calls = {"snapshot": 0}
+
+    def open_view(_page, _config, _selectors):
+        return None
+
+    def read_snapshot(_page, _selectors):
+        calls["snapshot"] += 1
+        return snapshots[0]
+
+    monkeypatch.setattr(uploader, "_open_draft_list_view", open_view)
+    monkeypatch.setattr(uploader, "_draft_snapshot", read_snapshot)
+
+    after, matches, history, elapsed = _verify_new_draft_after_save(
+        page,
+        {
+            "draft_verify_timeout_seconds": 1,
+            "draft_verify_poll_interval_seconds": 0.5,
+            "draft_verify_initial_settle_seconds": 0,
+        },
+        {"draft_status_texts": ["草稿"]},
+        title="临界半径如何决定成核",
+        before_snapshot={
+            "entries": ["临界半径如何决定成核 2026-11-21 20:30"]
+        },
+    )
+
+    assert after is snapshots[0]
+    assert matches == []
+    assert calls["snapshot"] == 2
+    assert len(history) == 2
+    assert all(item["preexisting_title_match_count"] == 1 for item in history)
+    assert history[-1]["new_match_count"] == 1
+    assert elapsed == 1.0
+
+
 def _make_manual_review_job(root: Path, *, state: str = "UPLOAD_UNKNOWN") -> str:
     config_dir = root / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
