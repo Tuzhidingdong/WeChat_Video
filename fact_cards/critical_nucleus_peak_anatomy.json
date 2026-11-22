@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "fact_card_id": "CNT-HOMOGENEOUS-001",
+  "title": "临界半径与自由能垒：峰值位置与高度的区别",
+  "topic": "经典均匀成核理论中球形晶核的自由能垒、临界半径与长大趋势",
+  "scientific_question": "临界半径与自由能垒这两个量，分别描述自由能曲线的什么特征？",
+  "scope": "仅讨论经典均匀成核理论中、具有各向同性且与曲率无关界面能的球形晶核近似；不把该模型推广为所有真实材料的普适机制。",
+  "approval_status": "DRAFT_PENDING_USER_REVIEW",
+  "approved_by": null,
+  "approved_at": null,
+  "review_notice": "本卡沿用 CNT-HOMOGENEOUS-001 的全部已核实科学主张与来源，仅改变传播角度与短标题；仍为内部审阅样片，不得发布。",
+  "claims": [
+    {
+      "claim_id": "CNT-01",
+      "statement": "在经典均匀成核理论的球形近似下，形成半径为 r 的新相晶核时，总自由能变化由正的界面能代价与负的体相自由能收益共同构成：ΔG(r)=4πr²γ−(4/3)πr³Δg_v，其中 γ 为正的界面能，Δg_v 表示体相自由能驱动力的正值大小。",
+      "evidence_status": "FULL_TEXT_LOCATED",
+      "source_ids": [
+        "SRC-NIST-PF-2019"
+      ],
+      "conditions": [
+        "球形晶核",
+        "均匀成核",
+        "尖锐界面近似",
+        "各向同性且不随曲率变化的界面能"
+      ],
+      "caveats": [
+        "符号约定将体相自由能驱动力 Δg_v 定义为正值大小，因此体相项显式写成负号。",
+        "该表达式是经典毛细近似，不代表纳米尺度下所有真实晶核均为球形或具有体相材料参数。"
+      ]
+    },
+    {
+      "claim_id": "CNT-02",
+      "statement": "在上述模型中，界面项随晶核表面积增长，按 r² 缩放；体相收益随晶核体积增长，按 r³ 缩放。",
+      "evidence_status": "FULL_TEXT_LOCATED",
+      "source_ids": [
+        "SRC-NIST-PF-2019",
+        "SRC-ACS-CR400544S"
+      ],
+      "conditions": [
+        "球形晶核",
+        "均匀成核"
+      ],
+      "caveats": [
+        "比例关系描述模型中的几何缩放，不应与实际动力学速率混为一谈。"
+      ]
+    },
+    {
+      "claim_id": "CNT-03",
+      "statement": "对 ΔG(r) 求极值可得临界半径 r*=2γ/Δg_v；对应的均匀成核自由能垒为 ΔG*=16πγ³/(3Δg_v²)。",
+      "evidence_status": "FULL_TEXT_LOCATED",
+      "source_ids": [
+        "SRC-NIST-PF-2019",
+        "SRC-ACS-CR400544S"
+      ],
+      "conditions": [
+        "球形晶核",
+        "均匀成核",
+        "各向同性界面能"
+      ],
+      "caveats": [
+        "式中 Δg_v 采用正值驱动力大小的记号；不同文献可能把体相自由能变化 ΔG_v 写成负值。"
+      ]
+    },
+    {
+      "claim_id": "CNT-04",
+      "statement": "在该自由能曲线的热力学解释中，低于临界半径的胚胎倾向于缩小，超过临界半径的晶核在继续增大时总自由能倾向于下降。",
+      "evidence_status": "FULL_TEXT_LOCATED",
+      "source_ids": [
+        "SRC-NIST-PF-2019"
+      ],
+      "conditions": [
+        "经典均匀成核自由能模型"
+      ],
+      "caveats": [
+        "这是热力学趋势，不等于晶核会立刻长大；扩散、界面结构、输运和其他动力学限制仍会影响实际过程。",
+        "临界尺寸附近的涨落仍可能导致晶核尺寸改变。"
+      ]
+    },
+    {
+      "claim_id": "CNT-05",
+      "statement": "经典成核理论的球形近似依赖尖锐界面、各向同性且不随曲率变化的界面能等假设；真实晶核不一定为球形，极小晶核也可能偏离经典理论。",
+      "evidence_status": "FULL_TEXT_LOCATED",
+      "source_ids": [
+        "SRC-NIST-PF-2019"
+      ],
+      "conditions": [
+        "模型适用性说明"
+      ],
+      "caveats": [
+        "视频只把该内容作为模型边界，不据此断言某个具体材料体系必然偏离。"
+      ]
+    }
+  ],
+  "key_equations": [
+    {
+      "equation_id": "CNT-EQ-01",
+      "display": "ΔG(r) = 4πr²γ − (4/3)πr³Δg_v",
+      "spoken": "界面能代价减去体相自由能收益"
+    },
+    {
+      "equation_id": "CNT-EQ-02",
+      "display": "r* = 2γ / Δg_v",
+      "spoken": "临界半径等于二倍界面能除以体相自由能驱动力"
+    },
+    {
+      "equation_id": "CNT-EQ-03",
+      "display": "ΔG* = 16πγ³ / (3Δg_v²)",
+      "spoken": "自由能垒与界面能的三次方成正比"
+    }
+  ],
+  "source_ids": [
+    "SRC-NIST-PF-2019",
+    "SRC-ACS-CR400544S"
+  ],
+  "review_checklist": [
+    "确认视频是否采用上述 Δg_v 正值驱动力的符号约定。",
+    "确认“低于临界半径倾向缩小、超过临界半径倾向长大”需始终限定为经典模型的热力学趋势。",
+    "确认模型假设与局限性表述适合目标受众。",
+    "确认旁白、公式和动画没有把均匀成核误画成异相成核。"
+  ],
+  "channels_title": "峰的位置与高度",
+  "editorial_angle_id": "free_energy_barrier_perspective"
+}
