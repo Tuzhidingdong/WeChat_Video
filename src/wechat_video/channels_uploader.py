@@ -818,7 +818,7 @@ def _open_create_view(
                         continue
                     try:
                         actual_text = re.sub(
-                            r"\\s+", " ", str(candidate.inner_text(timeout=2_000))
+                            r"\s+", " ", str(candidate.inner_text(timeout=2_000))
                         ).strip()
                     except Exception:
                         actual_text = ""
