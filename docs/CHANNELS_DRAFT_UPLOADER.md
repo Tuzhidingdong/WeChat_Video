@@ -43,7 +43,7 @@ Approve_Latest_Run.bat remains available as an optional per-video audit record, 
 
 ## 5. State and recovery
 
-Job records are stored under ignored runtime/upload_jobs/. Relevant states include CREATED, PREPARED, UPLOADING, SAVE_REQUESTED, DRAFT_SAVED, UPLOAD_UNKNOWN and FAILED_BEFORE_SAVE.
+Job records are stored under ignored runtime/upload_jobs/. Relevant states include CREATED, PREPARED, UPLOADING, SAVE_REQUESTED, DRAFT_SAVED, UPLOAD_UNKNOWN, MANUALLY_CONFIRMED_DRAFT, MANUAL_REVIEW_NOT_FOUND and FAILED_BEFORE_SAVE.
 
 For an uncertain outcome, run the read-only command:
 
