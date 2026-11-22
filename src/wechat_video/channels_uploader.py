@@ -1745,6 +1745,14 @@ def _verify_new_draft_after_save(
     after: dict[str, Any] | None = None
     matches: list[str] = []
     before_entries = set(str(item) for item in before_snapshot.get("entries", []))
+    # A same-title row in the pre-upload snapshot is never eligible to be
+    # reinterpreted as a newly-saved draft, even if its timestamp or row text
+    # changes between reads.
+    preexisting_title_matches = [
+        str(item)
+        for item in before_snapshot.get("entries", [])
+        if title in str(item)
+    ]
 
     if initial_settle_seconds:
         remaining = max(0.0, deadline - time.monotonic())
@@ -1774,10 +1782,15 @@ def _verify_new_draft_after_save(
                 "draft_count": after.get("draft_count"),
                 "match_count": len(matches),
                 "new_match_count": len(new_matches),
+                "preexisting_title_match_count": len(preexisting_title_matches),
                 "matching_rows": matches[:5],
                 "view_evidence": after.get("view_evidence", {}),
             })
-            if len(matches) == 1 and len(new_matches) == 1:
+            if (
+                not preexisting_title_matches
+                and len(matches) == 1
+                and len(new_matches) == 1
+            ):
                 elapsed = max(0.0, time.monotonic() - started)
                 return after, matches, history, round(elapsed, 3)
         except Exception as exc:
