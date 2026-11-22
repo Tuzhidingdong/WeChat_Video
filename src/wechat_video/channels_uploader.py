@@ -807,12 +807,22 @@ def _open_create_view(
                 continue
             matching_frames.append(frame)
             try:
-                locator = frame.get_by_role(
-                    "button", name=button_text, exact=True
-                )
-                for index in range(min(locator.count(), 8)):
+                # Match the same DOM contract as _inspect_frame_controls:
+                # the live Channels shell exposes this entry as a visible
+                # button/[role=button], but its accessible name is not
+                # consistently surfaced by Playwright get_by_role().
+                locator = frame.locator("button, [role='button']")
+                for index in range(min(locator.count(), 32)):
                     candidate = locator.nth(index)
-                    if candidate.is_visible():
+                    if not candidate.is_visible():
+                        continue
+                    try:
+                        actual_text = re.sub(
+                            r"\\s+", " ", str(candidate.inner_text(timeout=2_000))
+                        ).strip()
+                    except Exception:
+                        actual_text = ""
+                    if actual_text == button_text:
                         visible_buttons.append(candidate)
             except Exception:
                 continue
