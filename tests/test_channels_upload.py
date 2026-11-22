@@ -1741,6 +1741,42 @@ class _FakeUploadInput:
             raise RuntimeError(self.error)
 
 
+class _StrictContentEditable:
+    """Models a real ElementHandle where inner_text() rejects a timeout kwarg."""
+
+    def __init__(self, value=""):
+        self.value = value
+        self.filled = None
+
+    def fill(self, text, timeout=None):
+        self.filled = text
+
+    def input_value(self, *args, **kwargs):
+        raise ValueError("not an input element")
+
+    def inner_text(self, *args, **kwargs):
+        if args or kwargs:
+            raise TypeError("inner_text() got an unexpected keyword argument 'timeout'")
+        return self.value
+
+
+def test_fill_field_reads_contenteditable_without_timeout_kwarg(monkeypatch) -> None:
+    """The ElementHandle inner_text fallback must not pass a timeout argument."""
+    import wechat_video.channels_uploader as uploader
+
+    field = _StrictContentEditable(value="临界半径如何决定成核")
+    monkeypatch.setattr(uploader, "_visible_element_handle", lambda *_a, **_k: field)
+
+    uploader._fill_field(
+        _FakePage([_FakeFrame("https://channels.weixin.qq.com/platform")]),
+        {"title_input": ["textarea"]},
+        "title_input",
+        "临界半径如何决定成核",
+    )
+
+    assert field.filled == "临界半径如何决定成核"
+
+
 def test_set_video_file_prefers_stable_locator(monkeypatch) -> None:
     """The historically proven, auto-rebinding Locator path is used first."""
     import wechat_video.channels_uploader as uploader

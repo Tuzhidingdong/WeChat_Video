@@ -1999,15 +1999,33 @@ def _fill_field(page: Any, selectors: dict[str, Any], key: str, value: str) -> N
         )
     try:
         handle.fill(value, timeout=10_000)
-        try:
-            actual = handle.input_value(timeout=3_000)
-        except Exception:
-            actual = handle.inner_text(timeout=3_000)
     except Exception as exc:
         raise UploadBlockedError(
             f"The {key} field was found in its frame DOM but could not be filled: "
-            f"{type(exc).__name__}."
+            f"{type(exc).__name__}: {str(exc)[:200]}."
         ) from exc
+    # ElementHandle.input_value has a timeout, but ElementHandle.inner_text does
+    # NOT (only Locator.inner_text does). Passing timeout there raises TypeError,
+    # so use the correct signatures and fall back to a frame-local DOM read for
+    # contenteditable surfaces that have no input value.
+    actual: Any = None
+    try:
+        actual = handle.input_value(timeout=3_000)
+    except Exception:
+        try:
+            actual = handle.inner_text()
+        except Exception:
+            try:
+                actual = handle.evaluate(
+                    "(element) => element.innerText || element.textContent || ''"
+                )
+            except Exception:
+                actual = None
+    if actual is None:
+        raise UploadBlockedError(
+            f"The {key} field was filled but its value could not be read back; "
+            "no save action was taken."
+        )
     if str(actual).strip() != value.strip():
         raise UploadBlockedError(f"The {key} field did not retain the exact supplied text.")
 
