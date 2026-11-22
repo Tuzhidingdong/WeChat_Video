@@ -61,6 +61,8 @@ def test_one_click_slice_a_command_uploads_the_exact_run_and_records_draft(
         (run_dir / "channels_upload_report.json").read_text(encoding="utf-8")
     )
     assert upload_report["state"] == "DRAFT_SAVED"
+    assert upload_report["source_run_id"] == "run-123"
+    assert upload_report["upload_attempt"] == 1
     assert upload_report["account_name"] == "成核生长"
     assert upload_report["automatic_publication"] is False
 
