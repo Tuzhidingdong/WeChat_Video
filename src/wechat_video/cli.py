@@ -13,6 +13,7 @@ from .channels_uploader import (
     inspect_channels_ui,
     open_channels_session,
     reconcile_upload,
+    record_manual_review,
     upload_latest_approved_run,
     upload_run_to_channels,
 )
@@ -153,6 +154,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reconcile.add_argument("--project-root", type=Path, default=root)
     reconcile.add_argument("--job-id", required=True)
+
+    manual_review = sub.add_parser(
+        "channels-record-manual-review",
+        help="Record an explicit user inspection of an uncertain draft; never opens a browser or retries upload.",
+    )
+    manual_review.add_argument("--project-root", type=Path, default=root)
+    manual_review.add_argument("--job-id", required=True)
+    manual_review.add_argument(
+        "--result",
+        choices=("draft-found", "not-found"),
+        required=True,
+    )
+    manual_review.add_argument("--reviewed-by", default=getpass.getuser())
+    manual_review.add_argument("--row-text")
+    manual_review.add_argument("--note", default="")
+    manual_review.add_argument("--confirmation", required=True)
 
     return parser
 
@@ -299,6 +316,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "channels-reconcile":
             result = reconcile_upload(args.project_root.resolve(), args.job_id)
             print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "channels-record-manual-review":
+            result = record_manual_review(
+                args.project_root.resolve(),
+                args.job_id,
+                result=args.result,
+                reviewed_by=args.reviewed_by,
+                row_text=args.row_text,
+                note=args.note,
+                confirmation=args.confirmation,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print("Manual review recorded. No browser, upload, save or publication action was performed.")
             return 0
         return 2
     except UploadBlockedError as exc:
