@@ -590,6 +590,14 @@ def _account_identity_evidence(frame: Any, expected_name: str) -> list[dict[str,
             const matched = candidates.find(([, value]) => value.includes(expected));
             if (!matched) continue;
 
+            // The headless platform shell renders the authenticated account
+            // nickname in this explicit WeChat surface rather than the headed
+            // lower-left account panel. Accept only an exact configured-name
+            // match on the observed h2.finder-nickname node.
+            const finderNicknameSurface =
+                element.tagName.toLowerCase() === "h2" &&
+                Boolean(element.classList && element.classList.contains("finder-nickname")) &&
+                normalize(element.innerText || element.textContent) === expected;
             const semanticHint = [
                 element.getAttribute("role"),
                 element.getAttribute("aria-label"),
@@ -597,7 +605,7 @@ def _account_identity_evidence(frame: Any, expected_name: str) -> list[dict[str,
                 element.getAttribute("id"),
                 typeof element.className === "string" ? element.className : ""
             ].join(" ");
-            const semanticAccountSurface =
+            const semanticAccountSurface = finderNicknameSurface ||
                 /(account|profile|avatar|user|账号|用户|个人中心)/i.test(semanticHint);
             const lowerLeft =
                 rect.left <= window.innerWidth * 0.45 &&
@@ -610,7 +618,12 @@ def _account_identity_evidence(frame: Any, expected_name: str) -> list[dict[str,
                 matched_value: matched[1].slice(0, 80),
                 region: lowerLeft ? "lower_left" : "semantic_account_surface",
                 semantic_account_surface: semanticAccountSurface,
+                identity_surface: finderNicknameSurface ? "finder_nickname" :
+                    (semanticAccountSurface ? "semantic_account_surface" : "lower_left"),
                 role: element.getAttribute("role") || "",
+                viewport_width: Math.round(window.innerWidth),
+                viewport_height: Math.round(window.innerHeight),
+                device_pixel_ratio: Number(window.devicePixelRatio || 1),
                 left: Math.round(rect.left),
                 top: Math.round(rect.top),
                 width: Math.round(rect.width),
@@ -638,7 +651,11 @@ def _account_identity_evidence(frame: Any, expected_name: str) -> list[dict[str,
             "evidence_type": str(item.get("evidence_type") or "")[:24],
             "matched_value": str(item.get("matched_value") or "")[:80],
             "region": region,
+            "identity_surface": str(item.get("identity_surface") or "")[:40],
             "role": str(item.get("role") or "")[:40],
+            "viewport_width": int(item.get("viewport_width") or 0),
+            "viewport_height": int(item.get("viewport_height") or 0),
+            "device_pixel_ratio": float(item.get("device_pixel_ratio") or 1),
             "left": int(item.get("left") or 0),
             "top": int(item.get("top") or 0),
             "width": int(item.get("width") or 0),
@@ -733,6 +750,10 @@ def _account_identity_diagnostics(page: Any, expected_name: str) -> dict[str, An
             const match = candidates.find(([, value]) => value.includes(expected));
             if (!match) continue;
             visibleMatchCount += 1;
+            const finderNicknameNode =
+                element.tagName.toLowerCase() === "h2" &&
+                Boolean(element.classList && element.classList.contains("finder-nickname")) &&
+                normalize(element.innerText || element.textContent) === expected;
             const semantic = [
                 element.getAttribute("role"),
                 element.getAttribute("aria-label"),
@@ -747,7 +768,8 @@ def _account_identity_diagnostics(page: Any, expected_name: str) -> dict[str, An
                 role: element.getAttribute("role") || "",
                 id: String(element.id || "").slice(0, 100),
                 class_name: String(typeof element.className === "string" ? element.className : "").slice(0, 160),
-                semantic_account_surface: /(account|profile|avatar|user|账号|用户|个人中心)/i.test(semantic),
+                semantic_account_surface: finderNicknameNode || /(account|profile|avatar|user|账号|用户|个人中心)/i.test(semantic),
+                finder_nickname_node: finderNicknameNode,
                 lower_left: rect.left <= window.innerWidth * 0.45 &&
                     rect.top >= window.innerHeight * 0.50,
                 rect: {
@@ -758,6 +780,13 @@ def _account_identity_diagnostics(page: Any, expected_name: str) -> dict[str, An
         }
         return {
             body_contains_expected_name: Boolean(expected && bodyText.includes(expected)),
+            viewport: {
+                width: Math.round(window.innerWidth),
+                height: Math.round(window.innerHeight),
+                device_pixel_ratio: Number(window.devicePixelRatio || 1),
+                scroll_x: Math.round(window.scrollX || 0),
+                scroll_y: Math.round(window.scrollY || 0)
+            },
             visible_matching_node_count: visibleMatchCount,
             visible_matching_nodes: matches
         };
