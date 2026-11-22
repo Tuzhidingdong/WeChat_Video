@@ -709,6 +709,7 @@ def _account_identity_diagnostics(page: Any, expected_name: str) -> dict[str, An
         };
         const bodyText = normalize(document.body ? document.body.innerText : "");
         const matches = [];
+        let visibleMatchCount = 0;
         for (const element of Array.from(document.querySelectorAll("body *"))) {
             if (!visible(element)) continue;
             const rect = element.getBoundingClientRect();
@@ -730,6 +731,7 @@ def _account_identity_diagnostics(page: Any, expected_name: str) -> dict[str, An
             }
             const match = candidates.find(([, value]) => value.includes(expected));
             if (!match) continue;
+            visibleMatchCount += 1;
             const semantic = [
                 element.getAttribute("role"),
                 element.getAttribute("aria-label"),
@@ -737,7 +739,7 @@ def _account_identity_diagnostics(page: Any, expected_name: str) -> dict[str, An
                 element.id,
                 typeof element.className === "string" ? element.className : ""
             ].join(" ");
-            matches.push({
+            if (matches.length < 12) matches.push({
                 tag: element.tagName.toLowerCase(),
                 evidence_type: match[0],
                 matched_value: String(match[1]).slice(0, 80),
@@ -752,11 +754,10 @@ def _account_identity_diagnostics(page: Any, expected_name: str) -> dict[str, An
                     width: Math.round(rect.width), height: Math.round(rect.height)
                 }
             });
-            if (matches.length >= 12) break;
         }
         return {
             body_contains_expected_name: Boolean(expected && bodyText.includes(expected)),
-            visible_matching_node_count: matches.length,
+            visible_matching_node_count: visibleMatchCount,
             visible_matching_nodes: matches
         };
     }""";
@@ -3374,6 +3375,10 @@ def inspect_channels_ui(project_root: Path) -> dict[str, Any]:
             selectors,
             wait_seconds=ready_timeout,
         )
+        account_identity_diagnostics = (
+            _account_identity_diagnostics(page, expected_name)
+            if not account_verified else None
+        )
         account_identity_evidence: list[dict[str, Any]] = []
         for frame in _frame_contexts(page):
             for item in _account_identity_evidence(frame, expected_name):
@@ -3393,6 +3398,7 @@ def inspect_channels_ui(project_root: Path) -> dict[str, Any]:
             "account_verified": account_verified,
             "manual_login_required": login_required,
             "account_identity_evidence": account_identity_evidence,
+            "account_identity_diagnostics": account_identity_diagnostics,
             "page_url": page.url,
             "page_title": page.title(),
             "frame_count": len(frame_inventory),
