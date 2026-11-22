@@ -676,7 +676,6 @@ def _wait_for_account_identity(
         raise UploadBlockedError(f"Unexpected website host for Channels operation: {parsed.hostname}")
     account_cfg = selectors.get("account_identity", {}) or {}
     selector = account_cfg.get("selector")
-    exact_text = str(account_cfg.get("exact_text") or expected_name)
     deadline = time.monotonic() + max(0, wait_seconds)
     while True:
         for frame in _frame_contexts(page):
