@@ -2173,6 +2173,8 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
         return {
             "state": job["state"],
             "job_id": job_id,
+            "source_run_id": source_run_id,
+            "upload_attempt": upload_attempt,
             "title": metadata["title"],
             "account_name": config["account_name"],
             "verified_draft": job["verified_draft"],
