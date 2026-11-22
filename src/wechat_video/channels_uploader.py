@@ -548,6 +548,7 @@ def _account_identity_evidence(frame: Any, expected_name: str) -> list[dict[str,
     text dumps are collected.
     """
     expression = r"""(expectedName) => {
+        /* __CHANNELS_ACCOUNT_IDENTITY_DIAGNOSTICS__ */
         const marker = "__CHANNELS_ACCOUNT_IDENTITY_SCAN__";
         const expected = String(expectedName || "").replace(/\s+/g, " ").trim();
         if (!expected) return [];
