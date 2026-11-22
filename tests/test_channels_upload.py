@@ -779,7 +779,7 @@ def test_open_draft_list_view_uses_platform_navigation_to_mount_spa_frame() -> N
         "https://channels.weixin.qq.com/platform/post/list",
         selectors={
             ".finder-ui-desktop-menu__sub__wrp": [nav_parent],
-            ".finder-ui-desktop-sub-menu__item:has-text('草稿箱')": [nav_entry],
+            ".finder-ui-desktop-sub-menu__item": [nav_entry],
         },
         texts={("成核生长", True): [identity]},
     )
@@ -1509,7 +1509,7 @@ def test_account_identity_waits_and_checks_child_frames() -> None:
     main = _FakeFrame("https://channels.weixin.qq.com/platform/post/create")
     child = _FakeFrame(
         "https://channels.weixin.qq.com/micro/content/post/create",
-        texts={("成核生长", True): [identity]},
+        selectors={"body *": [identity]},
     )
     page = _FakePage([main, child])
 
@@ -1523,11 +1523,14 @@ def test_account_identity_waits_and_checks_child_frames() -> None:
 
 def test_draft_list_identity_waits_for_delayed_spa_account_node() -> None:
     identity = _FakeElement(text="成核生长")
-    frame = _FakeFrame("https://channels.weixin.qq.com/platform/post/list")
+    frame = _FakeFrame(
+        "https://channels.weixin.qq.com/platform/post/list",
+        selectors={"body *": []},
+    )
     page = _FakePage(
         [frame],
-        on_wait=lambda _milliseconds: frame.texts.update(
-            {("成核生长", True): [identity]}
+        on_wait=lambda _milliseconds: frame.selectors.update(
+            {"body *": [identity]}
         ),
     )
 
