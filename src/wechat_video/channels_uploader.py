@@ -1628,18 +1628,27 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
                 "The save-draft action may have been submitted. Reconcile the draft list; do not click save again."
             ) from exc
 
-        attempts = int(config.get("draft_verify_attempts", 5))
-        interval = int(config.get("draft_verify_interval_seconds", 2))
-        verified: list[str] = []
-        after: dict[str, Any] | None = None
-        for attempt in range(attempts):
-            _open_draft_list_view(draft_page, config, selectors)
-            after = _draft_snapshot(draft_page, selectors)
-            verified = _matching_draft_entries(after, str(metadata["title"]), selectors)
-            if verified:
-                break
-            if attempt + 1 < attempts:
-                draft_page.wait_for_timeout(interval * 1000)
+        job["draft_verification_started_at"] = _now()
+        after, verified, verification_history, verification_elapsed = (
+            _verify_new_draft_after_save(
+                draft_page,
+                config,
+                selectors,
+                title=str(metadata["title"]),
+                before_snapshot=before,
+            )
+        )
+        job["draft_verification"] = {
+            "started_at": job["draft_verification_started_at"],
+            "finished_at": _now(),
+            "timeout_seconds": int(config.get("draft_verify_timeout_seconds", 90)),
+            "poll_interval_seconds": float(
+                config.get("draft_verify_poll_interval_seconds", 3)
+            ),
+            "elapsed_seconds": verification_elapsed,
+            "navigation_count": 1,
+            "samples": verification_history,
+        }
 
         if len(verified) != 1:
             job["state"] = "UPLOAD_UNKNOWN"
@@ -1648,15 +1657,9 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
             _save_job(job_path, job)
             raise UploadUnknownError(
                 "The draft save was clicked once, but the new unpublished draft could not be uniquely "
-                "verified. The upload will not be repeated. Inspect the open Edge draft list."
+                "verified before the read-back timeout. No upload or save retry was attempted. "
+                "Inspect the target account's 草稿箱 and use the manual-review command to record the result."
             )
-
-        before_entries = set(before.get("entries", []))
-        if verified[0] in before_entries:
-            job["state"] = "UPLOAD_UNKNOWN"
-            job["post_upload_snapshot"] = after
-            _save_job(job_path, job)
-            raise UploadUnknownError("The matching draft was already present in the pre-upload snapshot.")
 
         job["state"] = "DRAFT_SAVED"
         job["post_upload_snapshot"] = after
@@ -1704,18 +1707,98 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
         playwright.stop()
 
 
+def _verify_new_draft_after_save(
+    page: Any,
+    config: dict[str, Any],
+    selectors: dict[str, Any],
+    *,
+    title: str,
+    before_snapshot: dict[str, Any],
+) -> tuple[dict[str, Any] | None, list[str], list[dict[str, Any]], float]:
+    """Read back a just-saved draft without repeatedly remounting the SPA.
+
+    The upload/save action has already happened exactly once before this helper
+    is called. This helper only navigates to DraftListManager once, then polls
+    its already-mounted DOM until a unique new row appears or the deadline is
+    reached. It never clicks the save control or resubmits media.
+    """
+    timeout_seconds = max(1.0, float(config.get("draft_verify_timeout_seconds", 90)))
+    poll_interval_seconds = max(
+        0.5, float(config.get("draft_verify_poll_interval_seconds", 3))
+    )
+    initial_settle_seconds = max(
+        0.0, float(config.get("draft_verify_initial_settle_seconds", 3))
+    )
+    started = time.monotonic()
+    deadline = started + timeout_seconds
+    history: list[dict[str, Any]] = []
+    after: dict[str, Any] | None = None
+    matches: list[str] = []
+    before_entries = set(str(item) for item in before_snapshot.get("entries", []))
+
+    if initial_settle_seconds:
+        remaining = max(0.0, deadline - time.monotonic())
+        wait_seconds = min(initial_settle_seconds, remaining)
+        if wait_seconds > 0:
+            page.wait_for_timeout(int(wait_seconds * 1000))
+
+    # One SPA navigation refreshes the server-backed draft list after Save.
+    # Do not navigate again during polling: repeated remounts can interrupt the
+    # platform's asynchronous list loading and make a successful save invisible.
+    try:
+        _open_draft_list_view(page, config, selectors)
+    except Exception as exc:
+        history.append({
+            "captured_at": _now(),
+            "read_error": f"{type(exc).__name__}: {str(exc)[:240]}",
+            "navigation": "single_refresh_failed",
+        })
+
+    while True:
+        try:
+            after = _draft_snapshot(page, selectors)
+            matches = _matching_draft_entries(after, title, selectors)
+            new_matches = [item for item in matches if item not in before_entries]
+            history.append({
+                "captured_at": _now(),
+                "draft_count": after.get("draft_count"),
+                "match_count": len(matches),
+                "new_match_count": len(new_matches),
+                "matching_rows": matches[:5],
+                "view_evidence": after.get("view_evidence", {}),
+            })
+            if len(matches) == 1 and len(new_matches) == 1:
+                elapsed = max(0.0, time.monotonic() - started)
+                return after, matches, history, round(elapsed, 3)
+        except Exception as exc:
+            history.append({
+                "captured_at": _now(),
+                "read_error": f"{type(exc).__name__}: {str(exc)[:240]}",
+            })
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        wait_seconds = min(poll_interval_seconds, remaining)
+        page.wait_for_timeout(max(1, int(wait_seconds * 1000)))
+
+    elapsed = max(0.0, time.monotonic() - started)
+    return after, matches, history, round(elapsed, 3)
+
+
 def reconcile_upload(project_root: Path, job_id: str) -> dict[str, Any]:
     """Read the draft list and reconcile an uncertain upload; never resubmit."""
     project_root = project_root.resolve()
     config, selectors = _load_config(project_root)
     job_path = _job_path(project_root, config, job_id)
     job = _read_json(job_path)
-    if job.get("state") == "DRAFT_SAVED":
+    if job.get("state") in {"DRAFT_SAVED", "MANUALLY_CONFIRMED_DRAFT"}:
         return {
-            "state": "DRAFT_SAVED",
+            "state": job.get("state"),
             "job_id": job_id,
             "verified_draft": job.get("verified_draft"),
-            "message": "Already verified; no upload action was performed.",
+            "manual_review": job.get("manual_review"),
+            "message": "Already confirmed; no browser, upload, or save action was performed.",
         }
     if job.get("state") not in {"SAVE_REQUESTED", "UPLOAD_UNKNOWN", "UPLOADING", "PREPARED"}:
         raise UploadBlockedError(
@@ -1729,11 +1812,24 @@ def reconcile_upload(project_root: Path, job_id: str) -> dict[str, Any]:
     playwright, browser, context = _connect_playwright(websocket_url)
     try:
         page = context.new_page()
-        _open_draft_list_view(page, config, selectors)
-        after = _draft_snapshot(page, selectors)
-        matches = _matching_draft_entries(after, str(job.get("title") or ""), selectors)
-        prior = _matching_draft_entries(before, str(job.get("title") or ""), selectors)
-        if len(matches) == 1 and not prior:
+        job["draft_reconciliation_started_at"] = _now()
+        after, matches, history, elapsed = _verify_new_draft_after_save(
+            page,
+            config,
+            selectors,
+            title=str(job.get("title") or ""),
+            before_snapshot=before,
+        )
+        job["draft_reconciliation"] = {
+            "started_at": job["draft_reconciliation_started_at"],
+            "finished_at": _now(),
+            "timeout_seconds": int(config.get("draft_verify_timeout_seconds", 90)),
+            "elapsed_seconds": elapsed,
+            "navigation_count": 1,
+            "samples": history,
+            "read_only": True,
+        }
+        if after is not None and len(matches) == 1:
             job["state"] = "DRAFT_SAVED"
             job["post_upload_snapshot"] = after
             job["verified_draft"] = {
@@ -1742,24 +1838,134 @@ def reconcile_upload(project_root: Path, job_id: str) -> dict[str, Any]:
                 "verified_at": _now(),
                 "draft_list_url": after["url"],
                 "reconciled_read_only": True,
+                "verification_method": "read_only_draft_list_polling",
             }
             _save_job(job_path, job)
             return {
                 "state": "DRAFT_SAVED",
                 "job_id": job_id,
                 "verified_draft": job["verified_draft"],
+                "draft_reconciliation": job["draft_reconciliation"],
                 "automatic_publication": False,
+                "upload_or_save_retried": False,
             }
         job["state"] = "UPLOAD_UNKNOWN"
         job["post_upload_snapshot"] = after
         job["verification_matches"] = len(matches)
         _save_job(job_path, job)
         raise UploadUnknownError(
-            "Read-only reconciliation found no unique new draft. No second upload or save click was made. "
-            "Inspect the account manually before taking any further action."
+            "Read-only reconciliation found no unique new draft within the verification window. "
+            "No upload or save click was performed. Inspect the account manually; do not retry the upload."
         )
     finally:
         playwright.stop()
+
+
+def record_manual_review(
+    project_root: Path,
+    job_id: str,
+    *,
+    result: str,
+    reviewed_by: str,
+    confirmation: str,
+    row_text: str | None = None,
+    note: str = "",
+) -> dict[str, Any]:
+    """Append a user-attested review of an uncertain draft without browser actions."""
+    project_root = project_root.resolve()
+    config, _ = _load_config(project_root)
+    job_path = _job_path(project_root, config, job_id)
+    job = _read_json(job_path)
+
+    if job.get("state") not in {"UPLOAD_UNKNOWN", "MANUAL_REVIEW_NOT_FOUND"}:
+        raise UploadBlockedError(
+            f"Job state {job.get('state')!r} is not eligible for manual review recording."
+        )
+    if int(job.get("save_click_count", 0)) != 1:
+        raise UploadBlockedError(
+            "Manual review recording requires an uncertain job with exactly one recorded Save click."
+        )
+    reviewer = str(reviewed_by or "").strip()
+    if not reviewer:
+        raise UploadBlockedError("reviewed_by must identify the person who inspected the account.")
+
+    normalized_result = str(result).strip().casefold()
+    expected_confirmation = {
+        "draft-found": f"CONFIRM CHANNELS DRAFT FOUND {job_id}",
+        "not-found": f"CONFIRM CHANNELS DRAFT NOT FOUND {job_id}",
+    }
+    if normalized_result not in expected_confirmation:
+        raise UploadBlockedError("result must be exactly 'draft-found' or 'not-found'.")
+    if str(confirmation).strip() != expected_confirmation[normalized_result]:
+        raise UploadBlockedError(
+            f"Manual review confirmation did not match. Required phrase: {expected_confirmation[normalized_result]}"
+        )
+
+    title = str(job.get("title") or "").strip()
+    row = str(row_text or "").strip()
+    review_note = str(note or "").strip()
+    if normalized_result == "draft-found":
+        if not row or title not in row:
+            raise UploadBlockedError(
+                "For draft-found, row_text must be copied from 草稿箱 and contain the exact job title."
+            )
+        recorded_result = "draft_found_by_user"
+        next_state = "MANUALLY_CONFIRMED_DRAFT"
+    else:
+        if not review_note:
+            raise UploadBlockedError(
+                "For not-found, note is required to record what was checked."
+            )
+        recorded_result = "not_found_at_review_time"
+        next_state = "MANUAL_REVIEW_NOT_FOUND"
+
+    event = {
+        "result": recorded_result,
+        "reviewed_at": _now(),
+        "reviewed_by": reviewer,
+        "account_name": str(config.get("account_name") or ""),
+        "checked_area": "草稿箱",
+        "title": title,
+        "row_text": row if normalized_result == "draft-found" else None,
+        "note": review_note,
+        "confirmation_phrase": expected_confirmation[normalized_result],
+        "no_browser_or_upload_action": True,
+    }
+    history = job.get("manual_reviews")
+    if not isinstance(history, list):
+        history = []
+    history.append(event)
+    job["manual_reviews"] = history
+    job["manual_review"] = event
+    job["state"] = next_state
+    if normalized_result == "draft-found":
+        job["verified_draft"] = {
+            "title": title,
+            "row_text": row,
+            "verified_at": event["reviewed_at"],
+            "verification_method": "manual_user_attestation",
+            "reviewed_by": reviewer,
+            "checked_area": "草稿箱",
+            "mobile_app_visibility": "not_verified",
+        }
+    job["automatic_publication"] = False
+    _save_job(job_path, job)
+    return {
+        "state": next_state,
+        "job_id": job_id,
+        "manual_review": event,
+        "verified_draft": job.get("verified_draft"),
+        "save_click_count": int(job.get("save_click_count", 0)),
+        "upload_or_save_retried": False,
+        "same_job_retry_allowed": False,
+        "note": (
+            "A user-reported absence is time-scoped and does not prove that the prior save request "
+            "was never processed. The job remains blocked from another upload."
+            if normalized_result == "not-found"
+            else "This is a manual user attestation, not an automated DraftListManager read-back."
+        ),
+        "automatic_publication": False,
+    }
 
 
 def latest_qa_pass_run(project_root: Path) -> Path:
