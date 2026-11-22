@@ -7,6 +7,10 @@ account_identity:
   selector: null
   exact_text: "成核生长"
 
+# The creator form may mount its file control asynchronously. The uploader
+# inspects every frame, including hidden file inputs, and waits this long for
+# the video-specific control to appear before failing closed.
+video_file_input_timeout_seconds: 15
 video_file_input:
   - "input[type='file'][accept*='video']"
   - "input[type='file']"
