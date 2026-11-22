@@ -24,6 +24,9 @@ from wechat_video.channels_uploader import (
     _draft_save_button,
     _draft_save_button_with_info,
     _click_draft_save_once,
+    _click_draft_save_by_browser_mouse_once,
+    _verify_browser_mouse_target,
+    _matching_new_draft_rows,
     MANUAL_SAVE_MONITOR_JS,
     install_manual_save_monitor,
     read_manual_save_monitor,
@@ -427,6 +430,7 @@ class _FakeElement:
         self.click_error = click_error
         self.native_click_count = 0
         self.dom_click_count = 0
+        self.bounding_box_value = None
 
     def structure(self):
         """Structural evidence returned by the enhanced same-frame DOM scan."""
@@ -497,6 +501,14 @@ class _FakeElement:
     def set_input_files(self, paths, timeout=None):
         self.files_set = list(paths) if isinstance(paths, (list, tuple)) else [paths]
 
+    def bounding_box(self):
+        if self.bounding_box_value is not None:
+            return dict(self.bounding_box_value)
+        return {
+            "x": self.rect["x"], "y": self.rect["y"],
+            "width": self.rect["w"], "height": self.rect["h"],
+        }
+
     def hover(self, timeout=None):
         self.hovered = True
         if self.on_hover is not None:
@@ -513,6 +525,24 @@ class _FakeElement:
             self.dom_click_count += 1
             self._activate()
             return None
+        if "getBoundingClientRect" in expression and "getComputedStyle" in expression:
+            return {
+                "text": self.text,
+                "className": str(self.attrs.get("class") or ""),
+                "disabled": self.attrs.get("disabled"),
+                "ariaDisabled": self.attrs.get("aria-disabled"),
+                "rect": dict(self.rect),
+                "pointerEvents": "auto",
+                "cursor": "pointer",
+                "opacity": "1",
+                "visibility": "visible",
+                "connected": True,
+            }
+        if "getBoundingClientRect" in expression:
+            return {
+                "x": self.rect["x"], "y": self.rect["y"],
+                "w": self.rect["w"], "h": self.rect["h"],
+            }
         raise NotImplementedError(expression)
 
 
@@ -570,6 +600,7 @@ class _FakeFrame:
         self.dom_scan_error = dom_scan_error
         self.bind_failures = int(bind_failures)
         self.scan_failures = int(scan_failures)
+        self.hit_test_result = None
         self.last_evaluate_expression = ""
         self.last_evaluate_args = ()
         self.locator_calls = []
@@ -648,6 +679,18 @@ class _FakeFrame:
     def evaluate(self, expression, *args):
         self.last_evaluate_expression = expression
         self.last_evaluate_args = args
+        if "elementFromPoint" in expression:
+            if self.hit_test_result is not None:
+                return self.hit_test_result
+            return {
+                "hitTag": "button",
+                "hitClass": "weui-desktop-btn weui-desktop-btn_default",
+                "buttonText": "保存草稿",
+                "buttonClass": "weui-desktop-btn weui-desktop-btn_default",
+                "buttonOuterHTML": '<button type="button">保存草稿</button>',
+            }
+        if expression.strip() == "() => ({w: innerWidth, h: innerHeight})":
+            return {"w": 1920, "h": 1080}
         if "__CHANNELS_VISIBLE_ELEMENT_SCAN__" in expression:
             if self.scan_failures > 0:
                 self.scan_failures -= 1
@@ -775,6 +818,14 @@ class _FakeFrame:
         return _FakeLocator(self.texts.get((text, exact), []))
 
 
+class _FakeMouse:
+    def __init__(self):
+        self.clicks = []
+
+    def click(self, x, y, **kwargs):
+        self.clicks.append((x, y))
+
+
 class _FakePage:
     def __init__(self, frames, *, on_wait=None):
         self.frames = list(frames)
@@ -782,6 +833,12 @@ class _FakePage:
         self.url = "https://channels.weixin.qq.com/platform/post/create"
         self.on_wait = on_wait
         self.wait_calls = []
+        self.mouse = _FakeMouse()
+
+    def evaluate(self, expression, *args):
+        if expression.strip() == "() => ({w: innerWidth, h: innerHeight})":
+            return {"w": 1920, "h": 1080}
+        return None
 
     def goto(self, url, wait_until=None, timeout=None):
         self.url = url
@@ -1561,6 +1618,140 @@ def test_summarize_manual_save_click_records_replacement() -> None:
     assert summary["trusted_click_count"] == 0
     assert summary["save_button_clicked"] is False
     assert summary["mutation_count"] == 1
+
+
+def _mouse_save_page(button=None, *, hit=None):
+    button = button or _FakeElement(
+        text="保存草稿", tag="button", attrs={"class": "weui-desktop-btn weui-desktop-btn_default"}
+    )
+    button.bounding_box_value = {"x": 890.0, "y": 714.0, "width": 120.0, "height": 40.0}
+    child = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create",
+        roles={("button", "保存草稿", True): [button]},
+        locator_unsupported=True,
+    )
+    if hit is not None:
+        child.hit_test_result = hit
+    page = _FakePage([_FakeFrame("https://channels.weixin.qq.com/platform/post/create"), child])
+    return page, child, button
+
+
+def test_mouse_save_clicks_once_with_real_browser_input(tmp_path, monkeypatch) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    page, _child, button = _mouse_save_page()
+    monkeypatch.setattr(uploader, "_save_job", lambda *_a, **_k: None)
+    job = {"state": "PREPARED"}
+
+    _click_draft_save_by_browser_mouse_once(page, _SAVE_SELECTORS, job, tmp_path / "job.json")
+
+    assert len(page.mouse.clicks) == 1
+    x, y = page.mouse.clicks[0]
+    assert x == 950.0
+    assert y == 734.0
+    assert button.native_click_count == 0
+    assert button.dom_click_count == 0
+    assert job["state"] == "SAVE_REQUESTED"
+    assert job["save_click_attempted"] is True
+    assert job["save_click_returned"] is True
+    assert job["save_click_count"] == 1
+    diag = job["save_button_diagnostics"]
+    assert diag["method"] == "page_mouse_click_real_browser_input"
+    assert diag["viewport_point"]["hit_test"]["buttonText"] == "保存草稿"
+
+
+def test_mouse_save_refuses_disabled_button(tmp_path, monkeypatch) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    button = _FakeElement(
+        text="保存草稿", tag="button",
+        attrs={"class": "weui-desktop-btn weui-desktop-btn_disabled"}, enabled=True,
+    )
+    page, _child, _button = _mouse_save_page(button)
+    monkeypatch.setattr(uploader, "_save_job", lambda *_a, **_k: None)
+    job = {"state": "PREPARED"}
+
+    with pytest.raises(UploadBlockedError, match="disabled-looking"):
+        _click_draft_save_by_browser_mouse_once(page, _SAVE_SELECTORS, job, tmp_path / "job.json")
+
+    assert page.mouse.clicks == []
+    assert job["state"] == "PREPARED"
+
+
+def test_mouse_save_refuses_when_element_from_point_misses_save_button(tmp_path, monkeypatch) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    hit = {
+        "hitTag": "button",
+        "hitClass": "weui-desktop-btn weui-desktop-btn_primary",
+        "buttonText": "发表",
+        "buttonClass": "weui-desktop-btn weui-desktop-btn_primary",
+        "buttonOuterHTML": '<button>发表</button>',
+    }
+    page, _child, _button = _mouse_save_page(hit=hit)
+    monkeypatch.setattr(uploader, "_save_job", lambda *_a, **_k: None)
+    job = {"state": "PREPARED"}
+
+    with pytest.raises(UploadBlockedError):
+        _click_draft_save_by_browser_mouse_once(page, _SAVE_SELECTORS, job, tmp_path / "job.json")
+
+    assert page.mouse.clicks == []
+    assert job["state"] == "PREPARED"
+
+
+def test_mouse_save_uses_main_viewport_box_for_iframe_and_css_scale() -> None:
+    page, child, button = _mouse_save_page()
+    button.bounding_box_value = {"x": 900.0, "y": 700.0, "width": 120.0, "height": 40.0}
+    target = _draft_save_button_with_info(page, _SAVE_SELECTORS)
+    assert target is not None
+    point = _verify_browser_mouse_target(page, target, _SAVE_SELECTORS)
+
+    # The main-viewport bounding box wins over frame-local rect when scaled.
+    assert point["x"] == 960.0
+    assert point["y"] == 720.0
+    assert point["bounding_box"] == button.bounding_box_value
+    assert point["hit_test"]["buttonText"] == "保存草稿"
+
+
+def test_mouse_save_click_exception_leaves_state_uncertain(tmp_path, monkeypatch) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    page, _child, _button = _mouse_save_page()
+    original_click = page.mouse.click
+
+    def raising_click(x, y, **kwargs):
+        original_click(x, y)
+        raise TimeoutError("Page.mouse.click timed out")
+
+    page.mouse.click = raising_click
+    monkeypatch.setattr(uploader, "_save_job", lambda *_a, **_k: None)
+    job = {"state": "PREPARED"}
+
+    with pytest.raises(UploadUnknownError):
+        _click_draft_save_by_browser_mouse_once(page, _SAVE_SELECTORS, job, tmp_path / "job.json")
+
+    assert len(page.mouse.clicks) == 1
+    assert job["state"] == "UPLOAD_UNKNOWN"
+    assert job["save_click_returned"] is False
+    assert job["save_click_error_type"] == "TimeoutError"
+    assert job["save_click_error_message"] == "Page.mouse.click timed out"
+
+
+def test_matching_new_draft_rows_uses_description_not_short_title() -> None:
+    description = "为什么跨越自由能垒之后晶核才会自发长大？\n\n仅讨论经典均匀成核理论。\n\n#成核生长"
+    before = {"view_type": "draft_list", "view_verified": True, "entries": ["old draft row"]}
+    after = {
+        "view_type": "draft_list",
+        "view_verified": True,
+        "entries": [
+            "old draft row",
+            "为什么跨越自由能垒之后晶核才会自发长大？ 仅讨论经典均匀成核理论。 #成核生长 2026年11月22日 21:30",
+        ],
+    }
+    assert _matching_draft_entries(after, "能垒决定晶核命运", _SAVE_SELECTORS) == []
+    rows = _matching_new_draft_rows(after, before, "能垒决定晶核命运", description, _SAVE_SELECTORS)
+    assert len(rows) == 1
+    assert "能垒" in rows[0]
 
 
 def test_finalize_draft_verification_requires_unique_new_row(tmp_path, monkeypatch) -> None:

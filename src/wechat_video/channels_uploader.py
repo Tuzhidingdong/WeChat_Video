@@ -2180,6 +2180,234 @@ def _click_draft_save_once(
     ]
     _save_job(job_path, job)
 
+_SAVE_BUTTON_STATE_JS = r"""(element) => {
+  const rect = element.getBoundingClientRect();
+  const style = getComputedStyle(element);
+  return {
+    text: String(element.innerText || '').replace(/\s+/g, ' ').trim(),
+    className: String(element.className || ''),
+    disabled: element.getAttribute('disabled'),
+    ariaDisabled: element.getAttribute('aria-disabled'),
+    rect: {
+      x: Math.round(rect.left), y: Math.round(rect.top),
+      w: Math.round(rect.width), h: Math.round(rect.height)
+    },
+    pointerEvents: style.pointerEvents,
+    cursor: style.cursor,
+    opacity: style.opacity,
+    visibility: style.visibility,
+    connected: element.isConnected
+  };
+}"""
+
+_SAVE_BUTTON_HIT_JS = r"""(point) => {
+  const hit = document.elementFromPoint(point.x, point.y);
+  const button = hit && hit.closest ? hit.closest('button, [role=button]') : null;
+  return {
+    hitTag: hit ? hit.tagName.toLowerCase() : null,
+    hitClass: hit ? String(hit.className || '').slice(0, 200) : null,
+    buttonText: button ? String(button.innerText || '').replace(/\s+/g, ' ').trim() : null,
+    buttonClass: button ? String(button.className || '') : null,
+    buttonOuterHTML: button ? String(button.outerHTML || '').slice(0, 240) : null
+  };
+}"""
+
+
+def _wait_for_stable_save_button(
+    page: Any,
+    selectors: dict[str, Any],
+    *,
+    stable_checks: int = 4,
+    poll_ms: int = 250,
+    timeout_seconds: float = 10.0,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Re-scan until the unique save button is stable across a quiet window."""
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    previous = None
+    streak = 0
+    last_target: dict[str, Any] | None = None
+    last_state: dict[str, Any] | None = None
+    while time.monotonic() < deadline:
+        target = _draft_save_button_with_info(page, selectors)
+        if target is not None:
+            try:
+                state = target["handle"].evaluate(_SAVE_BUTTON_STATE_JS)
+            except Exception:
+                state = None
+            if isinstance(state, dict) and state.get("connected"):
+                rect = state.get("rect") or {}
+                signature = (
+                    str(state.get("text") or ""),
+                    str(state.get("className") or ""),
+                    str(state.get("disabled")),
+                    str(state.get("ariaDisabled")),
+                    rect.get("x"), rect.get("y"), rect.get("w"), rect.get("h"),
+                )
+                streak = streak + 1 if signature == previous else 1
+                previous = signature
+                last_target, last_state = target, state
+                if streak >= max(2, int(stable_checks)):
+                    return target, state
+        else:
+            streak = 0
+            previous = None
+        page.wait_for_timeout(max(0, int(poll_ms)))
+    raise UploadBlockedError(
+        "The unique draft-save button never reached a stable state; no click was attempted."
+    )
+
+
+def _verify_browser_mouse_target(
+    page: Any,
+    target: dict[str, Any],
+    selectors: dict[str, Any],
+) -> dict[str, Any]:
+    """Prove the computed main-viewport point really lands on the save button."""
+    form_path = str(
+        selectors.get("creator_form_frame_path") or _DEFAULT_CREATE_FORM_PATH
+    )
+    frame = next(
+        (
+            item for item in _frame_contexts(page)
+            if urlparse(str(getattr(item, "url", ""))).path.rstrip("/")
+            == form_path.rstrip("/")
+        ),
+        None,
+    )
+    if frame is None:
+        raise UploadBlockedError("The creator form frame is gone; refusing to click.")
+
+    button = target["handle"]
+    # Playwright's bounding_box() is already relative to the MAIN frame viewport
+    # and accounts for nested iframes and CSS scaling.
+    box = button.bounding_box()
+    if not isinstance(box, dict) or not box or float(box.get("width") or 0) <= 0 or float(box.get("height") or 0) <= 0:
+        raise UploadBlockedError("The save button has no usable viewport bounding box.")
+    center_x = float(box["x"]) + float(box["width"]) / 2.0
+    center_y = float(box["y"]) + float(box["height"]) / 2.0
+    viewport = page.evaluate("() => ({w: innerWidth, h: innerHeight})")
+    if not isinstance(viewport, dict):
+        raise UploadBlockedError("Could not read the main viewport size.")
+    if not (0 <= center_x <= float(viewport.get("w") or 0) and 0 <= center_y <= float(viewport.get("h") or 0)):
+        raise UploadBlockedError(
+            f"The save button center ({center_x:.1f}, {center_y:.1f}) is outside the main viewport."
+        )
+
+    # Verify the same point inside the creator frame hits the SAME button.
+    frame_rect = button.evaluate(
+        "(el) => { const r = el.getBoundingClientRect(); "
+        "return {x: r.left, y: r.top, w: r.width, h: r.height}; }"
+    )
+    frame_point = {
+        "x": float(frame_rect["x"]) + float(frame_rect["w"]) / 2.0,
+        "y": float(frame_rect["y"]) + float(frame_rect["h"]) / 2.0,
+    }
+    hit = frame.evaluate(_SAVE_BUTTON_HIT_JS, frame_point)
+    if not isinstance(hit, dict):
+        raise UploadBlockedError("The frame hit-test returned no result.")
+    hit_text = str(hit.get("buttonText") or "")
+    save_texts = [str(item).strip() for item in selectors.get("draft_save_button_text", ["存草稿", "保存草稿"])]
+    if hit_text not in save_texts:
+        raise UploadBlockedError(
+            f"The viewport point does not hit the draft-save button (hit button text {hit_text!r})."
+        )
+    if any(token in hit_text for token in ("发表", "发布", "群发", "定时")):
+        raise UploadBlockedError("The viewport point targets a publication control; refusing.")
+    return {
+        "x": center_x,
+        "y": center_y,
+        "viewport": viewport,
+        "bounding_box": box,
+        "frame_rect": frame_rect,
+        "frame_point": frame_point,
+        "hit_test": hit,
+        "frame_url": str(getattr(frame, "url", "")),
+    }
+
+
+def _click_draft_save_by_browser_mouse_once(
+    page: Any,
+    selectors: dict[str, Any],
+    job: dict[str, Any],
+    job_path: Path,
+) -> None:
+    """Click the unique save button ONCE with real browser mouse input.
+
+    Playwright's ``page.mouse.click`` dispatches a trusted browser input event,
+    matching the human click that was proven to save successfully. It does not
+    depend on an ElementHandle surviving Playwright's actionability/scroll
+    phase, which is exactly what invalidated ``ElementHandle.click``. There is
+    no fallback of any kind after this single call.
+    """
+    target, state = _wait_for_stable_save_button(page, selectors)
+    if not target["enabled"] or not target["handle"].is_enabled():
+        raise UploadBlockedError("The draft-save button is not enabled; no click was attempted.")
+    class_name = str(state.get("className") or "")
+    if (
+        state.get("disabled") is not None
+        or str(state.get("ariaDisabled") or "").lower() == "true"
+        or "disabled" in class_name.lower()
+        or str(state.get("pointerEvents") or "") == "none"
+        or str(state.get("cursor") or "") == "not-allowed"
+    ):
+        raise UploadBlockedError(
+            "The draft-save button is in a disabled-looking state; no click was attempted."
+        )
+    point = _verify_browser_mouse_target(page, target, selectors)
+
+    form_path = str(
+        selectors.get("creator_form_frame_path") or _DEFAULT_CREATE_FORM_PATH
+    )
+    if urlparse(str(target["frame_url"])).path.rstrip("/") != form_path.rstrip("/"):
+        raise UploadBlockedError("The save button is not in the creator form frame.")
+
+    diagnostics: dict[str, Any] = {
+        "control": "draft_save",
+        "method": "page_mouse_click_real_browser_input",
+        "frame_url": target["frame_url"],
+        "text": target["text"],
+        "class": str(target["attributes"].get("class") or ""),
+        "attributes": target["attributes"],
+        "outer_html_excerpt": target["outer_html"],
+        "state": state,
+        "viewport_point": point,
+        "page_url_before": str(getattr(page, "url", "")),
+        "frame_urls_before": [
+            str(getattr(frame, "url", "")) for frame in _frame_contexts(page)
+        ],
+    }
+    job["save_button_diagnostics"] = diagnostics
+    job["state"] = "SAVE_REQUESTED"
+    job["save_requested_at"] = _now()
+    job["save_click_attempted"] = True
+    job["save_click_attempted_at"] = _now()
+    job["save_click_count"] = 1
+    _save_job(job_path, job)
+
+    try:
+        page.mouse.click(point["x"], point["y"])
+    except Exception as exc:
+        job["state"] = "UPLOAD_UNKNOWN"
+        job["save_click_returned"] = False
+        job["save_click_error_type"] = type(exc).__name__
+        job["save_click_error_message"] = str(exc)[:1200]
+        job["save_click_traceback"] = traceback.format_exc()[-6000:]
+        job["save_failed_at"] = _now()
+        _save_job(job_path, job)
+        raise UploadUnknownError(
+            "The single browser-mouse save click raised an exception. The save may or "
+            "may not have been submitted; only one read-only reconciliation is allowed."
+        ) from exc
+
+    job["save_click_returned"] = True
+    job["save_click_returned_at"] = _now()
+    job["save_page_url_after"] = str(getattr(page, "url", ""))
+    job["save_frame_urls_after"] = [
+        str(getattr(frame, "url", "")) for frame in _frame_contexts(page)
+    ]
+    _save_job(job_path, job)
+
+
 # Read-only monitor used by the human-takeover save checkpoint. The listeners
 # only record; they never preventDefault/stopPropagation, never dispatch events,
 # never click and never submit a form. This is derived from the real 2026-11-22
@@ -2911,6 +3139,42 @@ def _matching_draft_entries(
             matches.append(text)
     return matches
 
+def _matching_new_draft_rows(
+    snapshot: dict[str, Any],
+    before_snapshot: dict[str, Any],
+    title: str,
+    description: str,
+    selectors: dict[str, Any],
+) -> list[str]:
+    """Match the ONE newly created row using the joint evidence available.
+
+    WeChat Channels renders the description (not the short title) as the draft
+    list preview text. A title-only row match therefore rejects every real
+    save. A row qualifies only when it is genuinely new relative to the
+    pre-upload snapshot AND either the title or a distinctive normalized slice
+    of the description appears in it, inside a verified DraftListManager.
+    """
+    if not (
+        snapshot.get("view_type") == "draft_list"
+        and snapshot.get("view_verified") is True
+    ):
+        return []
+    before_entries = {str(item) for item in before_snapshot.get("entries", [])}
+    normalize = lambda value: " ".join(str(value or "").split())
+    description_signature = normalize(description)[:60]
+    matched: list[str] = []
+    for entry in snapshot.get("entries", []):
+        text = str(entry)
+        if text in before_entries:
+            continue
+        if title and title in text:
+            matched.append(text)
+            continue
+        if description_signature and description_signature in normalize(text):
+            matched.append(text)
+    return list(dict.fromkeys(matched))
+
+
 def _safe_failed_before_upload(job: dict[str, Any]) -> bool:
     """A failed job is retryable only when set_input_files was never entered."""
     return (
@@ -3295,6 +3559,7 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
         "upload_attempt": upload_attempt,
         "state": "CREATED",
         "title": metadata["title"],
+        "description": metadata["description"],
         "video_path": str((run_dir / "final.mp4").resolve()),
         "video_sha256": _sha256(run_dir / "final.mp4"),
         "approval_type": approval["approval_type"],
@@ -3358,10 +3623,11 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
         _fill_field(create_page, selectors, "title_input", str(metadata["title"]))
         _fill_field(create_page, selectors, "description_input", str(metadata["description"]))
 
-        # Re-locate and bind the button immediately before the single click;
-        # the creator SPA re-renders and invalidates handles cached earlier.
-        # All state transitions and click evidence are recorded by this helper.
-        _click_draft_save_once(create_page, selectors, job, job_path)
+        # Real browser mouse input on the verified viewport point. This is the
+        # mechanism proven to produce an isTrusted click and a 201 save response
+        # in the real 2026-11-22 session; ElementHandle.click was proven to fail
+        # because the SPA replaces the node during Playwright's scroll phase.
+        _click_draft_save_by_browser_mouse_once(create_page, selectors, job, job_path)
 
         job["draft_verification_started_at"] = _now()
         after, verified, verification_history, verification_elapsed = (
@@ -3370,6 +3636,7 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
                 config,
                 selectors,
                 title=str(metadata["title"]),
+                description=str(metadata["description"]),
                 before_snapshot=before,
             )
         )
@@ -3438,6 +3705,7 @@ def _verify_new_draft_after_save(
     *,
     title: str,
     before_snapshot: dict[str, Any],
+    description: str = "",
 ) -> tuple[dict[str, Any] | None, list[str], list[dict[str, Any]], float]:
     """Read back a just-saved draft without repeatedly remounting the SPA.
 
@@ -3489,7 +3757,12 @@ def _verify_new_draft_after_save(
     while True:
         try:
             after = _draft_snapshot(page, selectors)
-            matches = _matching_draft_entries(after, title, selectors)
+            if description:
+                matches = _matching_new_draft_rows(
+                    after, before_snapshot, title, description, selectors
+                )
+            else:
+                matches = _matching_draft_entries(after, title, selectors)
             new_matches = [item for item in matches if item not in before_entries]
             history.append({
                 "captured_at": _now(),
@@ -3557,6 +3830,7 @@ def reconcile_upload(project_root: Path, job_id: str) -> dict[str, Any]:
             config,
             selectors,
             title=str(job.get("title") or ""),
+            description=str(job.get("description") or ""),
             before_snapshot=before,
         )
         job["draft_reconciliation"] = {
