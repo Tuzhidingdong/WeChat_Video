@@ -3763,6 +3763,7 @@ def _verify_new_draft_after_save(
     # One SPA navigation refreshes the server-backed draft list after Save.
     # Do not navigate again during polling: repeated remounts can interrupt the
     # platform's asynchronous list loading and make a successful save invisible.
+    direct_refresh_done = False
     try:
         _open_draft_list_view(page, config, selectors)
     except Exception as exc:
@@ -3771,10 +3772,37 @@ def _verify_new_draft_after_save(
             "read_error": f"{type(exc).__name__}: {str(exc)[:240]}",
             "navigation": "single_refresh_failed",
         })
+        direct_refresh_done = True
+        try:
+            page.goto(
+                str(config.get("draft_list_url") or ""),
+                wait_until="domcontentloaded", timeout=60_000,
+            )
+            page.wait_for_timeout(1000)
+        except Exception as refresh_exc:
+            history.append({
+                "captured_at": _now(),
+                "read_error": f"direct_refresh: {type(refresh_exc).__name__}: {str(refresh_exc)[:240]}",
+            })
 
     while True:
         try:
             after = _draft_snapshot(page, selectors)
+            if not direct_refresh_done and not (
+                isinstance(after, dict)
+                and after.get("view_type") == "draft_list"
+                and after.get("view_verified") is True
+            ):
+                # The SPA menu can leave the list frame unmounted. A single
+                # direct read-only reload of the official route is enough to
+                # refresh the server-backed list; never retry the save action.
+                direct_refresh_done = True
+                page.goto(
+                    str(config.get("draft_list_url") or ""),
+                    wait_until="domcontentloaded", timeout=60_000,
+                )
+                page.wait_for_timeout(1000)
+                after = _draft_snapshot(page, selectors)
             if description:
                 matches = _matching_new_draft_rows(
                     after, before_snapshot, title, description, selectors
