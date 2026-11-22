@@ -1250,6 +1250,25 @@ def test_video_file_input_rejects_multiple_equally_valid_video_controls() -> Non
         )
 
 
+def test_video_file_input_fails_closed_when_any_frame_cannot_be_scanned() -> None:
+    upload = _FakeElement(attrs={"accept": "video/mp4"}, tag="input")
+    main = _FakeFrame(
+        "https://channels.weixin.qq.com/platform/post/create",
+        selectors={"input[type='file']": [upload]},
+    )
+    unscannable = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create",
+        inspection={"not_a_video_scan_result": True},
+    )
+    page = _FakePage([main, unscannable])
+
+    with pytest.raises(UploadBlockedError, match="frame scan summary"):
+        _video_file_input(
+            page,
+            {"video_file_input": ["input[type='file']"], "video_file_input_timeout_seconds": 0},
+        )
+
+
 def test_account_identity_waits_and_checks_child_frames() -> None:
     identity = _FakeElement(text="成核生长")
     main = _FakeFrame("https://channels.weixin.qq.com/platform/post/create")
