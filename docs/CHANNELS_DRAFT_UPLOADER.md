@@ -100,6 +100,22 @@ GitHub Actions runs portable unit tests, including a frame-split creator-page fi
 A passing unit test, UI inventory or toast message is not proof of a real draft. Success means the newly-created unpublished draft has been read back from the actual account's draft list and matched to the job.
 
 
+## Headless account identity
+
+The authenticated account check is independent of browser mode. In the normal
+headed layout, the account name may be shown in the lower-left account panel.
+The headless platform shell can render the same authenticated nickname in the
+top header as the exact `h2.finder-nickname` element. The verifier therefore
+accepts that specific element only when its normalized visible text exactly
+equals the configured account name. A generic page mention or the separate
+`已绑定公众号` notice is not accepted as account identity on its own.
+
+When identity verification fails, the ignored upload job records sanitized
+per-frame evidence: frame URL and ready state, whether the expected name is
+present in visible text, matching node tag/class/position, viewport dimensions,
+device-pixel ratio, scroll position, and explicit login-prompt detection.
+It does not collect cookies, storage, form values, or arbitrary page text.
+
 ## Headless operation and draft persistence
 
 Automated uploads use the dedicated project Edge profile in `--headless=new`
