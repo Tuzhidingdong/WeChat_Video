@@ -2663,8 +2663,9 @@ def _inspect_frame_controls(frame: Any, frame_url: str) -> dict[str, Any]:
         const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
         const allButtons = Array.from(document.querySelectorAll("button, [role='button']"));
         const visibleButtons = allButtons.filter(isVisible).map((element) => ({
+            tag: element.tagName.toLowerCase(),
             text: normalize(element.innerText || element.textContent),
-            aria_label: element.getAttribute("aria-label")
+            aria_label: normalize(element.getAttribute("aria-label") || "")
         }));
         const fieldSelector =
             "input[type='text'], input:not([type]), textarea, [contenteditable], [role='textbox']";
@@ -2707,10 +2708,15 @@ def _inspect_frame_controls(frame: Any, frame_url: str) -> dict[str, Any]:
         if not isinstance(item, dict):
             continue
         label = re.sub(r"\s+", " ", str(item.get("text") or "")).strip()
-        aria_label = str(item.get("aria_label") or "").strip()
+        aria_label = re.sub(
+            r"\s+", " ", str(item.get("aria_label") or "")
+        ).strip()
         if label or aria_label:
             buttons.append({
+                "tag": str(item.get("tag") or "")[:24],
                 "text": (label or aria_label)[:120],
+                "aria_label": aria_label[:120],
+                "label_source": "visible_text" if label else "aria_label",
                 "frame_url": frame_url,
             })
 
