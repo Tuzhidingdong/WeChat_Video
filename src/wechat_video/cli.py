@@ -224,6 +224,8 @@ def main(argv: list[str] | None = None) -> int:
             upload_report = {
                 "schema_version": 1,
                 "job_id": upload["job_id"],
+                "source_run_id": upload.get("source_run_id", run_dir.name),
+                "upload_attempt": upload.get("upload_attempt", 1),
                 "state": upload["state"],
                 "account_name": upload["account_name"],
                 "title": upload["title"],
