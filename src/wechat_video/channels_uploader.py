@@ -692,6 +692,7 @@ def _account_identity_diagnostics(page: Any, expected_name: str) -> dict[str, An
     are never collected.
     """
     expression = r"""(expectedName) => {
+        /* __CHANNELS_ACCOUNT_IDENTITY_DIAGNOSTICS__ */
         const expected = String(expectedName || "").replace(/\s+/g, " ").trim();
         const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
         const visible = (element) => {
