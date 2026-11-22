@@ -748,41 +748,190 @@ def _visible_locator(page: Any, selector_list: Any):
 
 
 def _video_file_input(page: Any, selectors: dict[str, Any]):
+    """Find the unique video-upload input across all live page frames.
+
+    File inputs are commonly visually hidden and may omit an accept
+    attribute. Inspect sanitized DOM metadata in each frame, prefer explicit
+    video MIME/extensions or video-specific labels, and never fall back to an
+    arbitrary input when multiple candidates remain.
+    """
     selectors_list = selectors.get(
         "video_file_input",
         ["input[type='file'][accept*='video']", "input[type='file']"],
     )
-    for selector in selectors_list:
-        candidates = []
-        for frame in _frame_contexts(page):
-            try:
-                locator = frame.locator(str(selector))
-                candidates.extend(
-                    locator.nth(index)
-                    for index in range(min(locator.count(), 8))
-                )
-            except Exception:
-                continue
-        video_inputs = [
-            item
-            for item in candidates
-            if any(
-                token in str(item.get_attribute("accept") or "").casefold()
-                for token in ("video", "mp4")
-            )
-        ]
-        if len(video_inputs) == 1:
-            return video_inputs[0]
-        if len(video_inputs) > 1:
-            raise UploadBlockedError(
-                "More than one video file input is present across the page frames; refusing ambiguous selection."
-            )
-        if len(candidates) == 1:
-            return candidates[0]
-    raise UploadBlockedError(
-        "Could not identify exactly one video upload input across the page frames. "
-        "Inspect the page and adjust config/selectors.yaml."
+    if not isinstance(selectors_list, list):
+        selectors_list = [str(selectors_list)] if selectors_list else []
+    selectors_list = [str(item) for item in selectors_list if str(item).strip()]
+    timeout_seconds = max(
+        0.0, float(selectors.get("video_file_input_timeout_seconds", 15))
     )
+    deadline = time.monotonic() + timeout_seconds
+    last_diagnostics: list[dict[str, Any]] = []
+
+    scan_expression = r"""(preferredSelectors) => {
+        const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+        const isVisible = (element) => {
+            const rect = element.getBoundingClientRect();
+            if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+            for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+                const style = window.getComputedStyle(node);
+                if (style.display === "none" || style.visibility === "hidden" ||
+                    style.visibility === "collapse" || Number.parseFloat(style.opacity || "1") === 0) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        return Array.from(document.querySelectorAll("input[type='file']")).map((element, index) => {
+            const labels = Array.from(element.labels || []).map((label) =>
+                normalize(label.innerText || label.textContent)
+            ).filter(Boolean);
+            const context = [];
+            let node = element.parentElement;
+            for (let depth = 0; node && depth < 4; depth += 1, node = node.parentElement) {
+                const text = normalize(node.innerText || node.textContent);
+                if (text && text.length <= 240 && !context.includes(text)) context.push(text);
+            }
+            const matchedSelectors = [];
+            for (const selector of preferredSelectors) {
+                try {
+                    if (element.matches(selector)) matchedSelectors.push(selector);
+                } catch (_) {}
+            }
+            return {
+                index,
+                accept: element.getAttribute("accept") || "",
+                name: element.getAttribute("name") || "",
+                id: element.id || "",
+                class_name: typeof element.className === "string" ? element.className : "",
+                aria_label: element.getAttribute("aria-label") || "",
+                title: element.getAttribute("title") || "",
+                data_testid: element.getAttribute("data-testid") || "",
+                labels,
+                context_text: context,
+                visible: isVisible(element),
+                matched_selectors: matchedSelectors
+            };
+        });
+    }"""
+
+    def candidate_score(item: dict[str, Any]) -> tuple[int, str] | None:
+        accept = str(item.get("accept") or "").casefold()
+        identity = " ".join(
+            str(item.get(key) or "")
+            for key in ("name", "id", "class_name", "aria_label", "title", "data_testid")
+        ).casefold()
+        labels = " ".join(str(value) for value in item.get("labels", [])).casefold()
+        contexts = [str(value) for value in item.get("context_text", [])]
+        context = " ".join(contexts[:2]).casefold()
+        video_terms = ("video", "mp4", "quicktime", "m4v", "webm", "mpeg", "avi")
+        image_terms = ("image/", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
+        accept_is_video = any(term in accept for term in video_terms)
+        accept_is_image_only = (
+            any(term in accept for term in image_terms) and not accept_is_video
+        )
+        if accept_is_image_only:
+            return None
+        if accept_is_video:
+            return 100, "video_accept"
+        if any(term in identity for term in video_terms):
+            return 90, "video_identity_attribute"
+        if any(term in labels for term in ("视频", "video")):
+            return 85, "video_label"
+        if any(term in context for term in ("视频", "video")):
+            return 75, "video_container_context"
+        if not accept:
+            return 10, "single_or_remaining_untyped_file_input"
+        return 5, "generic_file_accept"
+
+    while True:
+        candidates: list[dict[str, Any]] = []
+        diagnostics: list[dict[str, Any]] = []
+        for frame in _frame_contexts(page):
+            frame_url = str(getattr(frame, "url", ""))
+            try:
+                raw_items = frame.evaluate(scan_expression, selectors_list)
+                if not isinstance(raw_items, list):
+                    raise ValueError("DOM scan did not return a list.")
+                diagnostics.append({
+                    "frame_url": frame_url,
+                    "file_input_count": len(raw_items),
+                    "scan_error": None,
+                })
+                for raw in raw_items:
+                    if not isinstance(raw, dict):
+                        continue
+                    scored = candidate_score(raw)
+                    if scored is None:
+                        continue
+                    score, reason = scored
+                    candidates.append({
+                        "frame": frame,
+                        "frame_url": frame_url,
+                        "index": int(raw.get("index", -1)),
+                        "score": score,
+                        "reason": reason,
+                        "metadata": raw,
+                    })
+            except Exception as exc:
+                diagnostics.append({
+                    "frame_url": frame_url,
+                    "file_input_count": None,
+                    "scan_error": f"{type(exc).__name__}: {str(exc)[:160]}",
+                })
+
+        last_diagnostics = diagnostics
+        if candidates:
+            highest = max(item["score"] for item in candidates)
+            best = [item for item in candidates if item["score"] == highest]
+            if len(best) == 1:
+                selected = best[0]
+                frame = selected["frame"]
+                index = selected["index"]
+                try:
+                    locator = frame.locator("input[type='file']")
+                    if index < 0 or index >= locator.count():
+                        raise UploadBlockedError(
+                            "The selected video file input changed after DOM inspection."
+                        )
+                    candidate = locator.nth(index)
+                    current_accept = str(candidate.get_attribute("accept") or "")
+                    expected_accept = str(selected["metadata"].get("accept") or "")
+                    if current_accept != expected_accept:
+                        raise UploadBlockedError(
+                            "The video file input changed after DOM inspection; refusing to upload."
+                        )
+                    return candidate
+                except UploadBlockedError:
+                    raise
+                except Exception as exc:
+                    raise UploadBlockedError(
+                        "The unique video file input was identified in the DOM but could not be "
+                        f"bound to a Playwright locator ({type(exc).__name__})."
+                    ) from exc
+
+        if time.monotonic() >= deadline:
+            summaries = []
+            for item in candidates:
+                metadata = item["metadata"]
+                summaries.append({
+                    "frame_url": item["frame_url"],
+                    "index": item["index"],
+                    "accept": str(metadata.get("accept") or "")[:100],
+                    "name": str(metadata.get("name") or "")[:80],
+                    "id": str(metadata.get("id") or "")[:80],
+                    "aria_label": str(metadata.get("aria_label") or "")[:80],
+                    "labels": [str(value)[:80] for value in metadata.get("labels", [])[:3]],
+                    "reason": item["reason"],
+                    "score": item["score"],
+                })
+            raise UploadBlockedError(
+                "Could not identify exactly one unambiguous video upload input across the page frames. "
+                f"Candidate summary: {summaries}; frame scan summary: {last_diagnostics}. "
+                "No video file was selected or uploaded."
+            )
+
+        page.wait_for_timeout(500)
 
 
 def _fill_field(page: Any, selectors: dict[str, Any], key: str, value: str) -> None:
