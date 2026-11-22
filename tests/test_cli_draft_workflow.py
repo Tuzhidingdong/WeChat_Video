@@ -73,3 +73,24 @@ def test_one_click_slice_a_command_uploads_the_exact_run_and_records_draft(
     assert "## Unpublished Channels draft" in (run_dir / "REVIEW.md").read_text(
         encoding="utf-8"
     )
+
+
+def test_manual_review_cli_requires_explicit_result_and_confirmation() -> None:
+    args = cli.build_parser().parse_args([
+        "channels-record-manual-review",
+        "--job-id",
+        "20261121_224049_critical_nucleus",
+        "--result",
+        "draft-found",
+        "--reviewed-by",
+        "local reviewer",
+        "--row-text",
+        "临界半径如何决定成核 2026-11-22 10:30",
+        "--confirmation",
+        "CONFIRM CHANNELS DRAFT FOUND 20261121_224049_critical_nucleus",
+    ])
+
+    assert args.command == "channels-record-manual-review"
+    assert args.result == "draft-found"
+    assert args.job_id == "20261121_224049_critical_nucleus"
+    assert args.confirmation.startswith("CONFIRM CHANNELS DRAFT FOUND ")
