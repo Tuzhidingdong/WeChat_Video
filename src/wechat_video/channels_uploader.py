@@ -2054,6 +2054,43 @@ def _preview_ready(page: Any, selectors: dict[str, Any]) -> bool:
                 continue
     return False
 
+
+def _set_video_file(
+    page: Any,
+    selectors: dict[str, Any],
+    video_path: str,
+    *,
+    retries: int = 5,
+    retry_delay_ms: int = 300,
+) -> None:
+    """Select the generated MP4 using a freshly bound file-input handle.
+
+    The creator SPA can re-render between `_video_file_input()` and the actual
+    file selection, which makes the previously bound handle detached. Playwright
+    rejects `set_input_files` before any file is selected in that case, so a
+    fresh lookup is safe. Non-detachment errors are never retried and surface
+    unchanged.
+    """
+    attempts = max(1, int(retries))
+    last_detach_error: Exception | None = None
+    for attempt in range(attempts):
+        if attempt:
+            page.wait_for_timeout(max(0, int(retry_delay_ms)))
+        video_input = _video_file_input(page, selectors)
+        try:
+            video_input.set_input_files(video_path, timeout=30_000)
+            return
+        except Exception as exc:
+            if "detached" not in str(exc).casefold():
+                raise
+            last_detach_error = exc
+    assert last_detach_error is not None
+    raise UploadBlockedError(
+        "The video file input became detached repeatedly and no file was selected. "
+        "No upload was performed."
+    ) from last_detach_error
+
+
 def _wait_upload_ready(
     page: Any,
     selectors: dict[str, Any],
@@ -2861,7 +2898,11 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
         job["state"] = "UPLOADING"
         job["upload_started_at"] = _now()
         _save_job(job_path, job)
-        video_input.set_input_files(str((run_dir / "final.mp4").resolve()), timeout=30_000)
+        _set_video_file(
+            create_page,
+            selectors,
+            str((run_dir / "final.mp4").resolve()),
+        )
 
         _wait_upload_ready(
             create_page,

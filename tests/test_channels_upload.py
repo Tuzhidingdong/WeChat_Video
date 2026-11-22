@@ -26,6 +26,7 @@ from wechat_video.channels_uploader import (
     _open_draft_list_view,
     _open_create_view,
     _video_file_input,
+    _set_video_file,
     _wait_for_account_identity,
     _ensure_draft_list_account_identity,
     _account_identity_evidence,
@@ -1702,6 +1703,56 @@ def test_visible_element_handles_retries_transient_bind_failure() -> None:
     handles = _visible_element_handles(page, "a", limit=8, contains_text="草稿箱")
 
     assert handles == [entry]
+
+
+class _FakeUploadInput:
+    def __init__(self, error=None):
+        self.error = error
+        self.calls = 0
+
+    def set_input_files(self, path, timeout=None):
+        self.calls += 1
+        if self.error is not None:
+            raise RuntimeError(self.error)
+
+
+def test_set_video_file_refreshes_detached_input(monkeypatch) -> None:
+    """A detached input is rebound once before any file is actually selected."""
+    import wechat_video.channels_uploader as uploader
+
+    stale = _FakeUploadInput("Cannot set input files to detached element")
+    fresh = _FakeUploadInput()
+    inputs = iter([stale, fresh])
+    monkeypatch.setattr(uploader, "_video_file_input", lambda *_a, **_k: next(inputs))
+
+    uploader._set_video_file(
+        _FakePage([_FakeFrame("https://channels.weixin.qq.com/platform")]), {}, "video.mp4"
+    )
+
+    assert stale.calls == 1
+    assert fresh.calls == 1
+
+
+def test_set_video_file_does_not_retry_other_errors(monkeypatch) -> None:
+    """Only detachment is retried; every other failure surfaces immediately."""
+    import wechat_video.channels_uploader as uploader
+
+    failing = _FakeUploadInput("permission denied")
+    lookups = []
+
+    def fake_lookup(*_a, **_k):
+        lookups.append(1)
+        return failing
+
+    monkeypatch.setattr(uploader, "_video_file_input", fake_lookup)
+
+    with pytest.raises(RuntimeError, match="permission denied"):
+        uploader._set_video_file(
+        _FakePage([_FakeFrame("https://channels.weixin.qq.com/platform")]), {}, "video.mp4"
+    )
+
+    assert failing.calls == 1
+    assert len(lookups) == 1
 
 
 def test_open_create_view_distinguishes_same_named_buttons_by_structure(monkeypatch) -> None:
