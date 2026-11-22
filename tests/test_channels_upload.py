@@ -20,6 +20,7 @@ from wechat_video.channels_uploader import (
     _draft_save_button,
     _draft_snapshot,
     _open_draft_list_view,
+    _open_create_view,
     _video_file_input,
     _wait_for_account_identity,
     _ensure_draft_list_account_identity,
@@ -1173,6 +1174,129 @@ def test_draft_save_button_is_found_inside_child_iframe() -> None:
     assert _draft_save_button(
         page, {"draft_save_button_text": ["保存草稿"]}
     ) is save
+
+
+def test_open_create_view_activates_unique_post_card_spa_entry(monkeypatch) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    upload = _FakeElement(
+        attrs={"accept": "video/mp4,video/*"},
+        tag="input",
+        visible=False,
+    )
+    create_frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create"
+    )
+    entry_clicks = {"count": 0}
+
+    def mount_creator_form():
+        entry_clicks["count"] += 1
+        create_frame.selectors["input[type='file']"] = [upload]
+
+    entry = _FakeElement(
+        text="发表视频",
+        tag="button",
+        on_click=mount_creator_form,
+    )
+    main = _FakeFrame("https://channels.weixin.qq.com/platform")
+    card = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/iframe/post-card.html",
+        roles={("button", "发表视频", True): [entry]},
+    )
+    page = _FakePage([main, create_frame, card])
+    identity_checks = []
+    monkeypatch.setattr(
+        uploader,
+        "_ensure_account_identity",
+        lambda *_args, **_kwargs: identity_checks.append("verified"),
+    )
+
+    _open_create_view(
+        page,
+        {
+            "platform_url": "https://channels.weixin.qq.com/platform",
+            "account_name": "成核生长",
+        },
+        {
+            "create_nav_frame_path": "/micro/content/iframe/post-card.html",
+            "create_nav_button_text": "发表视频",
+            "create_nav_timeout_seconds": 0,
+        },
+    )
+
+    assert page.url == "https://channels.weixin.qq.com/platform"
+    assert identity_checks == ["verified"]
+    assert entry.clicked is True
+    assert entry_clicks["count"] == 1
+    assert create_frame.selectors["input[type='file']"] == [upload]
+
+
+def test_open_create_view_rejects_ambiguous_creator_entry_without_clicking(
+    monkeypatch,
+) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    first = _FakeElement(text="发表视频", tag="button")
+    second = _FakeElement(text="发表视频", tag="button")
+    main = _FakeFrame("https://channels.weixin.qq.com/platform")
+    card = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/iframe/post-card.html",
+        roles={("button", "发表视频", True): [first, second]},
+    )
+    page = _FakePage([main, card])
+    monkeypatch.setattr(
+        uploader, "_ensure_account_identity", lambda *_args, **_kwargs: None
+    )
+
+    with pytest.raises(UploadBlockedError, match="More than one visible exact"):
+        _open_create_view(
+            page,
+            {
+                "platform_url": "https://channels.weixin.qq.com/platform",
+                "account_name": "成核生长",
+            },
+            {
+                "create_nav_frame_path": "/micro/content/iframe/post-card.html",
+                "create_nav_button_text": "发表视频",
+                "create_nav_timeout_seconds": 0,
+            },
+        )
+
+    assert first.clicked is False
+    assert second.clicked is False
+
+
+def test_open_create_view_does_not_click_same_text_in_unconfigured_frame(
+    monkeypatch,
+) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    entry = _FakeElement(text="发表视频", tag="button")
+    main = _FakeFrame("https://channels.weixin.qq.com/platform")
+    wrong_frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create",
+        roles={("button", "发表视频", True): [entry]},
+    )
+    page = _FakePage([main, wrong_frame])
+    monkeypatch.setattr(
+        uploader, "_ensure_account_identity", lambda *_args, **_kwargs: None
+    )
+
+    with pytest.raises(UploadBlockedError, match="creator-entry button"):
+        _open_create_view(
+            page,
+            {
+                "platform_url": "https://channels.weixin.qq.com/platform",
+                "account_name": "成核生长",
+            },
+            {
+                "create_nav_frame_path": "/micro/content/iframe/post-card.html",
+                "create_nav_button_text": "发表视频",
+                "create_nav_timeout_seconds": 0,
+            },
+        )
+
+    assert entry.clicked is False
 
 
 def test_video_file_input_is_found_in_main_frame_when_form_fields_are_in_iframe() -> None:
