@@ -528,7 +528,9 @@ class _FakeFrame:
             seen.add(id(item))
             if not item.is_visible():
                 continue
-            actual = " ".join(str(item.inner_text() or "").split())
+            visible_text = " ".join(str(item.inner_text() or "").split())
+            aria_label = " ".join(str(item.get_attribute("aria-label") or "").split())
+            actual = visible_text or aria_label
             exact = payload.get("exact_text")
             contains = payload.get("contains_text")
             if exact is not None and actual != " ".join(str(exact).split()):
@@ -576,6 +578,16 @@ class _FakeFrame:
                         "visible_index": index,
                         "tag": item.tag,
                         "text": " ".join(str(item.inner_text() or "").split())[:160],
+                        "aria_label": str(item.get_attribute("aria-label") or "")[:160],
+                        "matched_label": (
+                            " ".join(str(item.inner_text() or "").split())
+                            or str(item.get_attribute("aria-label") or "").strip()
+                        )[:160],
+                        "label_source": (
+                            "visible_text" if str(item.inner_text() or "").strip()
+                            else "aria_label" if str(item.get_attribute("aria-label") or "").strip()
+                            else "none"
+                        ),
                         "disabled": not item.is_enabled(),
                     }
                     for index, item in enumerate(candidates[:limit])
@@ -1390,6 +1402,45 @@ def test_open_create_view_activates_unique_post_card_spa_entry(monkeypatch) -> N
     assert create_frame.selectors["input[type='file']"] == [upload]
     assert card.locator_calls == []
     assert "__CHANNELS_VISIBLE_ELEMENT_SCAN__" in card.last_evaluate_expression
+
+
+def test_open_create_view_matches_aria_label_when_button_has_no_rendered_text(
+    monkeypatch,
+) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    entry = _FakeElement(
+        text="",
+        attrs={"aria-label": "发表视频"},
+        tag="button",
+    )
+    main = _FakeFrame("https://channels.weixin.qq.com/platform")
+    card = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/iframe/post-card.html",
+        selectors={"button, [role='button']": [entry]},
+        locator_unsupported=True,
+    )
+    page = _FakePage([main, card])
+    monkeypatch.setattr(
+        uploader, "_ensure_account_identity", lambda *_args, **_kwargs: None
+    )
+
+    _open_create_view(
+        page,
+        {
+            "platform_url": "https://channels.weixin.qq.com/platform",
+            "account_name": "成核生长",
+        },
+        {
+            "create_nav_frame_path": "/micro/content/iframe/post-card.html",
+            "create_nav_button_text": "发表视频",
+            "create_nav_timeout_seconds": 0,
+        },
+    )
+
+    assert entry.clicked is True
+    assert card.locator_calls == []
+    assert "getAttribute(\"aria-label\")" in card.last_evaluate_expression
 
 
 def test_open_create_view_rejects_ambiguous_creator_entry_without_clicking(
