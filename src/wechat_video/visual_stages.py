@@ -90,7 +90,10 @@ def transition_ms(duration_ms: int) -> int:
 
 
 def build_stage_manifest(
-    cues: list[dict[str, Any]], units: list[dict[str, Any]], fps: int = 30
+    cues: list[dict[str, Any]],
+    units: list[dict[str, Any]],
+    fps: int = 30,
+    visual_strategy: str = "",
 ) -> dict[str, Any]:
     if len(cues) != len(units):
         raise ValueError("cue/units length mismatch in visual stage manifest")
@@ -125,7 +128,12 @@ def build_stage_manifest(
         )
     return {
         "schema_version": 2,
-        "template": "critical_nucleus_free_energy_barrier",
+        "template": (
+            "critical_nucleus_barrier_peak_anatomy"
+            if visual_strategy == "barrier_peak_anatomy"
+            else "critical_nucleus_free_energy_barrier"
+        ),
+        "visual_strategy": visual_strategy or "particle_growth_curve",
         "camera": "static portrait",
         "fps": fps,
         "time_origin": "final_mp4_first_frame",

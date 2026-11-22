@@ -136,6 +136,32 @@ def test_new_script_claims_are_valid() -> None:
         validate_script_claim_links(script, card)
 
 
+def test_stage_manifest_template_follows_visual_strategy() -> None:
+    from wechat_video.visual_stages import build_stage_manifest
+
+    cues = [{"start_ms": 0, "end_ms": 3000}]
+    unit = [{
+        "unit_id": "V01", "visual_trigger_ids": ["CRITICAL_PEAK"],
+        "rhythm_block_id": "HOOK",
+    }]
+    growth = build_stage_manifest(cues, unit, visual_strategy="particle_growth_curve")
+    barrier = build_stage_manifest(cues, unit, visual_strategy="barrier_peak_anatomy")
+    assert growth["template"] == "critical_nucleus_free_energy_barrier"
+    assert barrier["template"] == "critical_nucleus_barrier_peak_anatomy"
+    assert barrier["visual_strategy"] == "barrier_peak_anatomy"
+
+
+def test_barrier_curve_hook_is_curve_first() -> None:
+    from wechat_video.scenes.critical_nucleus import _barrier_curve_hook
+
+    src = Path(__file__).parent.parent / "src" / "wechat_video" / "scenes" / "critical_nucleus.py"
+    body = src.read_text(encoding="utf-8")
+    fn = body[body.index("def _barrier_curve_hook"):body.index("class CriticalNucleusScene")]
+    assert "Free energy along the pathway" in fn
+    assert "r^*" in fn and "\\Delta G^*" in fn
+    assert _barrier_curve_hook is not None
+
+
 def test_real_barrier_script_differs_from_original(tmp_path) -> None:
     root = Path(__file__).resolve().parents[1]
     old = json.loads((root / "content" / "sample_script.en.json").read_text(encoding="utf-8"))

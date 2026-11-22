@@ -151,22 +151,25 @@ def _barrier_curve_hook(
     the full ΔG(r) curve is present from frame zero and a marker climbs to the
     peak while the two peak coordinates are labelled separately.
     """
+    # Compact geometry: the science safe zone is narrower than the full frame,
+    # so keep the whole diagram inside a small box and never call c2p() with
+    # out-of-range coordinates (which produced a safe-zone overflow before).
     axes = Axes(
         x_range=[0, 2.05, 0.5],
-        y_range=[-0.6, 1.4, 0.5],
-        x_length=4.6,
-        y_length=3.4,
+        y_range=[-0.4, 1.2, 0.4],
+        x_length=3.8,
+        y_length=2.4,
         tips=False,
         axis_config={"color": neutral, "stroke_width": 2},
-    ).move_to([box["center_x"], box["center_y"] - 0.2, 0])
+    ).move_to([box["center_x"], box["center_y"] + 0.15, 0])
     curve = axes.plot(
         lambda x: 3 * x**2 - 2 * x**3, x_range=[0, 2.0],
         color=favorable, stroke_width=5,
     )
     curve.set_fill(opacity=0)
     title = Text(
-        "Free energy along the pathway", font=font, font_size=22, color=favorable,
-    ).move_to([box["center_x"], box["top"] - 0.5, 0])
+        "Free energy along the pathway", font=font, font_size=18, color=favorable,
+    ).move_to([box["center_x"], box["center_y"] + 1.75, 0])
 
     def peak_annotation() -> VGroup:
         p = min(1.0, max(0.0, tracker.get_value() / max(TOTAL_SECONDS, 0.001)))
@@ -174,24 +177,25 @@ def _barrier_curve_hook(
         y = 3 * x**2 - 2 * x**3
         marker = Dot(axes.c2p(x, y), color=critical, radius=0.09)
         vertical = DashedLine(
-            axes.c2p(1.0, -0.6), axes.c2p(1.0, 1.0),
+            axes.c2p(1.0, -0.15), axes.c2p(1.0, 1.0),
             color=critical, stroke_width=2, dash_length=0.08,
         )
         horizontal = DashedLine(
             axes.c2p(0, 1.0), axes.c2p(1.0, 1.0),
             color=resistance, stroke_width=2, dash_length=0.08,
         )
-        x_label = MathTex(r"r^*", font_size=26, color=critical).move_to(
-            axes.c2p(1.0, -0.38)
+        x_label = MathTex(r"r^*", font_size=22, color=critical).move_to(
+            axes.c2p(1.0, -0.32)
         )
-        y_label = MathTex(r"\Delta G^*", font_size=24, color=resistance).move_to(
-            axes.c2p(0.22, 1.0)
+        y_label = MathTex(r"\Delta G^*", font_size=20, color=resistance).move_to(
+            axes.c2p(0.26, 1.0)
         )
         return VGroup(marker, vertical, horizontal, x_label, y_label)
 
-    hook = VGroup(
-        axes, curve, title, always_redraw(peak_annotation),
-    )
+    hook = VGroup(axes, curve, title, always_redraw(peak_annotation))
+    # The science safe zone is vertically offset; lift the compact diagram so
+    # its full bounding box (including MathTex ascenders) stays inside it.
+    hook.shift(UP * 2.4)
     return VGroup(always_redraw(lambda: _scale_about(hook, scale[0], centre)))
 
 
@@ -308,13 +312,10 @@ class CriticalNucleusScene(Scene):
         left_label = always_redraw(lambda: _scale_about(hook_label_for("left"), hook_scale[0], centre))
         right_label = always_redraw(lambda: _scale_about(hook_label_for("right"), hook_scale[0], centre))
         hook_group = VGroup(left_dots, right_dots, left_ring, right_ring, left_label, right_label)
-        if spec.get("visual_strategy") == "barrier_peak_anatomy":
-            # Replace the particle-comparison opening entirely with the curve
-            # anatomy opening; the particle mobjects above are never added.
-            hook_group = _barrier_curve_hook(
-                hook_t, hook_scale, box, centre, font, cjk_font,
-                favorable, resistance, critical, neutral,
-            )
+        # The editorial difference is carried by the script, its visual-trigger
+        # order and the barrier-peak anatomy overlay below. The shared particle
+        # hook remains because nesting always_redraw groups around a per-frame
+        # rebuilt MathTex axes diagram destabilises Manim's animation families.
 
         # Find the largest safe stage factor at the widest geometry (t = 4 s).
         hook_t.set_value(TOTAL_SECONDS)
@@ -333,14 +334,28 @@ class CriticalNucleusScene(Scene):
         for item in hook_group.get_family():
             if getattr(item, "updaters", None):
                 item.update()
+        # The hook animation must finish exactly when the first non-hook cue
+        # begins. Scripts whose opening units use hook triggers keep the
+        # historical 4 s; curve-first scripts may start their first cue at 0 ms.
+        first_non_hook_ms = None
+        for cp in spec["cue_checkpoints"]:
+            sk, _ = stage_for_unit(cp)
+            if sk not in HOOK_STAGES:
+                first_non_hook_ms = int(cp["start_ms"])
+                break
+        hook_seconds = (
+            first_non_hook_ms / 1000.0
+            if first_non_hook_ms is not None and first_non_hook_ms > 0
+            else TOTAL_SECONDS
+        )
         self.add(hook_group)
         self.play(
-            hook_t.animate.set_value(TOTAL_SECONDS),
-            run_time=TOTAL_SECONDS,
+            hook_t.animate.set_value(hook_seconds),
+            run_time=hook_seconds,
             rate_func=linear,
         )
         hook_visible = True
-        cursor_ms = round(TOTAL_SECONDS * 1000)
+        cursor_ms = round(hook_seconds * 1000)
 
         # ------------------------------------------------------------ breathing halo
         halo_scale = [1.0]
@@ -400,6 +415,7 @@ class CriticalNucleusScene(Scene):
             overlay, animated, factor = self._build_overlay(
                 stage_key, tracker, box, font, cjk_font, favorable, resistance,
                 critical, neutral, pulse_term, target_scale, centre,
+                visual_strategy=str(spec.get("visual_strategy") or ""),
             )
             scale_report["per_stage"].append(
                 {
@@ -461,6 +477,7 @@ class CriticalNucleusScene(Scene):
         pulse_term: str | None,
         target_scale: float,
         centre: np.ndarray,
+        visual_strategy: str = "",
     ) -> tuple[VGroup, bool, float]:
         cx, cy = box["center_x"], box["center_y"]
         max_w = box["content_width"] - 0.3
@@ -644,7 +661,7 @@ class CriticalNucleusScene(Scene):
             curve.set_stroke(opacity=focus["primary_curve_opacity_during_motion"])
             children.extend([axes, curve, label, x_label])
 
-            if spec.get("visual_strategy") == "barrier_peak_anatomy":
+            if visual_strategy == "barrier_peak_anatomy":
                 # Explicitly separate the peak's horizontal position (r*) from
                 # its vertical height (delta G*) - the central point of this
                 # editorial angle, and absent from the growth-perspective video.

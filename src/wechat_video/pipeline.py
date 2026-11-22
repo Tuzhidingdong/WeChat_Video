@@ -293,7 +293,8 @@ def run_slice_a(
     _write_json(run_dir / "storyboard.json", storyboard)
 
     stage_manifest = build_stage_manifest(
-        timeline["speech_units"], units, fps=int(timeline["fps"])
+        timeline["speech_units"], units, fps=int(timeline["fps"]),
+        visual_strategy=str(storyboard.get("visual_strategy") or ""),
     )
     _write_json(run_dir / "visual_stage_manifest.json", stage_manifest)
     motion_manifest = build_motion_manifest(
