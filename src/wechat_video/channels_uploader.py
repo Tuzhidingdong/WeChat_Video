@@ -827,7 +827,7 @@ def _video_file_input(page: Any, selectors: dict[str, Any]):
         context = " ".join(contexts[:2]).casefold()
         video_terms = (
             "视频", "video", "mp4", "quicktime", "m4v", "webm", "mpeg",
-            "avi", ".mov", ".mkv", ".wmv", ".flv", ".3gp",
+            ".avi", ".mov", ".mkv", ".wmv", ".flv", ".3gp",
         )
         image_terms = ("image/", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
         accept_is_video = any(term in accept for term in video_terms)
@@ -897,7 +897,7 @@ def _video_file_input(page: Any, selectors: dict[str, Any]):
                 })
 
         last_diagnostics = diagnostics
-        # A single visible candidate is not sufficient evidence if another
+        # A single candidate is not sufficient evidence if another
         # frame could not be inspected: that frame may contain a competing
         # file control. Retry while the creator UI settles, then fail closed.
         all_frames_scanned = all(item.get("scan_error") is None for item in diagnostics)
@@ -950,7 +950,7 @@ def _video_file_input(page: Any, selectors: dict[str, Any]):
                 except Exception as exc:
                     raise UploadBlockedError(
                         "The unique video file input was identified in the DOM but could not be "
-                        f"bound to a Playwright locator ({type(exc).__name__})."
+                        f"bound to a DOM element handle ({type(exc).__name__})."
                     ) from exc
 
         if time.monotonic() >= deadline:
