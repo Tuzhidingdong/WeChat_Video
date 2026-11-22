@@ -15,7 +15,7 @@ from wechat_video.channels_uploader import (
     _approval_record,
     _matching_draft_entries,
     _validate_run_for_upload,
-    _visible_locator,
+    _visible_element_handle,
     _fill_field,
     _draft_save_button,
     _draft_snapshot,
@@ -1189,7 +1189,7 @@ def test_description_locator_matches_empty_contenteditable_in_child_iframe() -> 
     )
     page = _FakePage([main, child])
 
-    locator = _visible_locator(
+    locator = _visible_element_handle(
         page,
         [
             "[contenteditable][data-placeholder='添加描述']",
