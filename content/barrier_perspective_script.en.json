@@ -268,31 +268,31 @@
     {
       "unit_id": "V13",
       "raw_text": "At small radius, the surface term dominates the curve.",
-      "display_text": "At small radius, the surface term dominates the curve.",
-      "spoken_text": "At small radius, the surface term dominates the curve.",
-      "display_text_zh": "半径很小时，表面项主导整条曲线。",
+      "display_text": "Left of the peak, the curve rises and shrinking is favored.",
+      "spoken_text": "Left of the peak, the curve rises and shrinking is favored.",
+      "display_text_zh": "峰点左侧，曲线上升，收缩更受青睐。",
       "claim_ids": [
-        "CNT-02"
+        "CNT-04"
       ],
       "visual_trigger_ids": [
-        "SMALL_R_SURFACE"
+        "SUBCRITICAL_RETURN"
       ],
       "rhythm_block_id": "MECHANISM",
       "visual_keyword": "surface dominated",
       "pause_after_ms": 200,
-      "sfx_trigger_id": "term_conflict"
+      "sfx_trigger_id": "crossover"
     },
     {
       "unit_id": "V14",
       "raw_text": "At larger radius, the bulk term takes over.",
-      "display_text": "At larger radius, the bulk term takes over.",
-      "spoken_text": "At larger radius, the bulk term takes over.",
-      "display_text_zh": "半径变大后，体相项开始占上风。",
+      "display_text": "Right of the peak, the curve falls and growth lowers free energy.",
+      "spoken_text": "Right of the peak, the curve falls and growth lowers free energy.",
+      "display_text_zh": "峰点右侧，曲线下降，长大使自由能降低。",
       "claim_ids": [
-        "CNT-01"
+        "CNT-04"
       ],
       "visual_trigger_ids": [
-        "COMPETITION"
+        "SUPERCRITICAL_DESCENT"
       ],
       "rhythm_block_id": "MECHANISM",
       "visual_keyword": "bulk dominated",
