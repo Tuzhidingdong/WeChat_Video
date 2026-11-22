@@ -909,12 +909,23 @@ def _video_file_input(page: Any, selectors: dict[str, Any]):
                 frame = selected["frame"]
                 index = selected["index"]
                 try:
-                    locator = frame.locator("input[type='file']")
-                    if index < 0 or index >= locator.count():
+                    if index < 0:
+                        raise UploadBlockedError(
+                            "The selected video file input has an invalid DOM index."
+                        )
+                    # Bind the inspected node in its own frame execution
+                    # context. This avoids the observed CDP issue where
+                    # cross-origin iframe locators report zero nodes even
+                    # though querySelectorAll inside that frame sees them.
+                    handle = frame.evaluate_handle(
+                        "(index) => document.querySelectorAll(\"input[type='file']\")[index] || null",
+                        index,
+                    )
+                    candidate = handle.as_element()
+                    if candidate is None:
                         raise UploadBlockedError(
                             "The selected video file input changed after DOM inspection."
                         )
-                    candidate = locator.nth(index)
                     current_accept = str(candidate.get_attribute("accept") or "")
                     expected_accept = str(selected["metadata"].get("accept") or "")
                     if current_accept != expected_accept:
