@@ -28,6 +28,15 @@ from .topic_approval import TopicApprovalError, verify_fact_card_approval
 class UploadBlockedError(RuntimeError):
     """A safety or precondition gate prevents upload."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        diagnostics: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.diagnostics = diagnostics
+
 
 class UploadUnknownError(RuntimeError):
     """The save outcome is uncertain; reconcile, never upload again."""
@@ -741,27 +750,49 @@ _DOM_VISIBLE_ELEMENT_SCAN = r"""(payload) => {
         }
         return true;
     };
+    const labelInfo = (element) => {
+        const visibleText = normalize(element.innerText || element.textContent || "");
+        const ariaLabel = normalize(element.getAttribute("aria-label") || "");
+        return {
+            visible_text: visibleText,
+            aria_label: ariaLabel,
+            label: visibleText || ariaLabel,
+            label_source: visibleText ? "visible_text" : (ariaLabel ? "aria_label" : "none")
+        };
+    };
     const selector = String(payload.selector || "");
     const exactText = payload.exact_text == null ? null : normalize(payload.exact_text);
     const containsText = payload.contains_text == null ? null : normalize(payload.contains_text);
-    const matches = Array.from(document.querySelectorAll(selector)).filter((element) => {
-        if (!isVisible(element)) return false;
+    const visibleElements = Array.from(document.querySelectorAll(selector)).filter(isVisible);
+    const matches = visibleElements.filter((element) => {
         if (exactText === null && containsText === null) return true;
-        const actual = normalize(element.innerText || element.textContent || "");
+        const actual = labelInfo(element).label;
         if (exactText !== null && actual !== exactText) return false;
         if (containsText !== null && !actual.includes(containsText)) return false;
         return true;
     });
     const limit = Math.max(1, Math.min(64, Number(payload.limit || 8)));
-    return {
-        match_count: matches.length,
-        items: matches.slice(0, limit).map((element, visible_index) => ({
+    const describe = (element, visible_index) => {
+        const info = labelInfo(element);
+        return {
             visible_index,
             tag: element.tagName.toLowerCase(),
-            text: normalize(element.innerText || element.textContent || "").slice(0, 160),
+            text: info.visible_text.slice(0, 160),
+            aria_label: info.aria_label.slice(0, 160),
+            matched_label: info.label.slice(0, 160),
+            label_source: info.label_source,
             disabled: Boolean(element.disabled) ||
                 element.getAttribute("aria-disabled") === "true"
-        }))
+        };
+    };
+    return {
+        match_count: matches.length,
+        items: matches.slice(0, limit).map((element, visible_index) =>
+            describe(element, visible_index)
+        ),
+        observed_items: payload.include_observed === true
+            ? visibleElements.slice(0, limit).map((element, index) => describe(element, index))
+            : []
     };
 }""";
 
@@ -781,13 +812,18 @@ _DOM_VISIBLE_ELEMENT_HANDLE = r"""(payload) => {
         }
         return true;
     };
+    const labelOf = (element) => {
+        const visibleText = normalize(element.innerText || element.textContent || "");
+        const ariaLabel = normalize(element.getAttribute("aria-label") || "");
+        return visibleText || ariaLabel;
+    };
     const selector = String(payload.selector || "");
     const exactText = payload.exact_text == null ? null : normalize(payload.exact_text);
     const containsText = payload.contains_text == null ? null : normalize(payload.contains_text);
     const matches = Array.from(document.querySelectorAll(selector)).filter((element) => {
         if (!isVisible(element)) return false;
         if (exactText === null && containsText === null) return true;
-        const actual = normalize(element.innerText || element.textContent || "");
+        const actual = labelOf(element);
         if (exactText !== null && actual !== exactText) return false;
         if (containsText !== null && !actual.includes(containsText)) return false;
         return true;
@@ -933,9 +969,8 @@ def _open_create_view(
                 continue
             matching_frames.append(frame)
             try:
-                # Use the exact same direct-DOM visibility/text semantics as
-                # channels-inspect: button/[role=button], innerText || textContent,
-                # normalized whitespace, and the target iframe's own context.
+                # Use the same label contract as channels-inspect: normalized
+                # rendered text first, falling back to aria-label when empty.
                 matches = _visible_element_handles(
                     frame,
                     "button, [role='button']",
@@ -970,13 +1005,53 @@ def _open_create_view(
             frame_urls = [
                 str(getattr(frame, "url", "")) for frame in _frame_contexts(page)
             ]
+            frame_diagnostics: list[dict[str, Any]] = []
+            for frame in matching_frames:
+                try:
+                    inventory = frame.evaluate(
+                        _DOM_VISIBLE_ELEMENT_SCAN,
+                        {
+                            "selector": "button, [role='button']",
+                            "limit": 24,
+                            "include_observed": True,
+                        },
+                    )
+                    ready_state = frame.evaluate("() => document.readyState")
+                    frame_diagnostics.append({
+                        "frame_url": str(getattr(frame, "url", "")),
+                        "ready_state": str(ready_state or ""),
+                        "visible_button_count": int(
+                            inventory.get("match_count", 0)
+                        ) if isinstance(inventory, dict) else None,
+                        "visible_buttons": (
+                            inventory.get("observed_items", [])[:24]
+                            if isinstance(inventory, dict) else []
+                        ),
+                    })
+                except Exception as exc:
+                    frame_diagnostics.append({
+                        "frame_url": str(getattr(frame, "url", "")),
+                        "diagnostic_error": (
+                            f"{type(exc).__name__}: {str(exc)[:180]}"
+                        ),
+                    })
+            diagnostics = {
+                "expected_button_label": button_text,
+                "expected_frame_path": frame_path,
+                "matching_frame_count": len(matching_frames),
+                "current_frame_urls": frame_urls,
+                "frame_observations": frame_diagnostics,
+                "scan_errors": last_scan_errors[-3:],
+                "captured_at": _now(),
+            }
             raise UploadBlockedError(
                 f"Could not find exactly one enabled visible '{button_text}' "
                 f"creator-entry button in frame {frame_path}. "
                 f"Matching frame count: {len(matching_frames)}; "
-                f"current frame URLs: {frame_urls}; "
-                f"DOM scan errors: {last_scan_errors[-3:]}. "
-                "No video was selected or uploaded; no save or publication action was taken."
+                f"current frame URLs: {frame_urls}. "
+                "Sanitized target-frame button diagnostics were saved to the upload job. "
+                "No video was selected or uploaded; no save or publication action was taken.",
+                diagnostics=diagnostics,
             )
         page.wait_for_timeout(400)
 
@@ -2064,6 +2139,12 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
     try:
         create_page = context.new_page()
         _open_create_view(create_page, config, selectors)
+        # A CTA click alone does not prove the creator form is mounted. Confirm
+        # the actual video input before moving on to the draft-list baseline.
+        video_input = _video_file_input(create_page, selectors)
+        job["creator_form_ready_at"] = _now()
+        job["creator_form_file_input_confirmed"] = True
+        _save_job(job_path, job)
 
         draft_page = context.new_page()
         _open_draft_list_view(draft_page, config, selectors)
@@ -2082,7 +2163,6 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
         _save_job(job_path, job)
 
         # The upload page stays in the background; automated Edge is headless.
-        video_input = _video_file_input(create_page, selectors)
         job["state"] = "UPLOADING"
         job["upload_started_at"] = _now()
         _save_job(job_path, job)
@@ -2188,6 +2268,9 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
     except UploadUnknownError:
         raise
     except Exception as exc:
+        diagnostics = getattr(exc, "diagnostics", None)
+        if isinstance(diagnostics, dict):
+            job["creator_navigation_diagnostics"] = diagnostics
         if job.get("state") in {"SAVE_REQUESTED", "UPLOAD_UNKNOWN"}:
             job["state"] = "UPLOAD_UNKNOWN"
             job["last_error_type"] = type(exc).__name__
