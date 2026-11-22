@@ -2502,3 +2502,14 @@ def test_inspector_readiness_aggregates_controls_across_frames() -> None:
     assert buttons[0]["text"] == "保存草稿"
     assert any(item.get("data_placeholder") == "添加描述" for item in textboxes)
     assert files[0]["accept"] == "video/mp4,video/*"
+
+
+def test_creator_entry_dom_scan_comment_cannot_terminate_javascript_comment_early() -> None:
+    import wechat_video.channels_uploader as uploader
+
+    expression = uploader._DOM_VISIBLE_ELEMENT_SCAN
+    # A literal "*/" inside explanatory comment text terminates the JS block
+    # comment and makes Frame.evaluate fail before the DOM scan can run.
+    assert "data-*/" not in expression
+    assert "aria-*/" not in expression
+    assert "Class, id, data, aria, href and ancestor attributes" in expression
