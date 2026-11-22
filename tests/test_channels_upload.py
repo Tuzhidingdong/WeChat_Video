@@ -395,6 +395,7 @@ class _FakeElement:
         rect=None,
         ancestors=None,
         outer_html=None,
+        click_error=None,
     ):
         self.text = text
         self.attrs = dict(attrs or {})
@@ -414,6 +415,9 @@ class _FakeElement:
         }
         self.ancestors = list(ancestors or [])
         self.outer_html = outer_html
+        self.click_error = click_error
+        self.native_click_count = 0
+        self.dom_click_count = 0
 
     def structure(self):
         """Structural evidence returned by the enhanced same-frame DOM scan."""
@@ -466,10 +470,18 @@ class _FakeElement:
     def fill(self, value, timeout=None):
         self.text = value
 
-    def click(self, timeout=None):
+    def _activate(self):
         self.clicked = True
         if self.on_click is not None:
             self.on_click()
+
+    def click(self, timeout=None):
+        self.native_click_count += 1
+        if self.click_error is not None:
+            error = self.click_error
+            self.click_error = None  # only the first native attempt fails
+            raise RuntimeError(error)
+        self._activate()
 
     def hover(self, timeout=None):
         self.hovered = True
@@ -483,6 +495,10 @@ class _FakeElement:
             return False
         if "Array.from(element.children)" in expression:
             return list(self.child_texts)
+        if "element.click()" in expression:
+            self.dom_click_count += 1
+            self._activate()
+            return None
         raise NotImplementedError(expression)
 
 
@@ -1829,6 +1845,51 @@ def test_open_create_view_clicks_primary_context_for_two_href_free_spa_entries(
 
     assert header.clicked is True
     assert empty_state.clicked is False
+    assert create_frame.selectors["input[type='file']"]
+
+
+def test_open_create_view_falls_back_to_single_dom_click_when_native_click_fails(
+    monkeypatch,
+) -> None:
+    """Off-viewport SPA button: native click rejected, one DOM click activates."""
+    import wechat_video.channels_uploader as uploader
+
+    create_frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create"
+    )
+    activations = {"count": 0}
+
+    def mount_form():
+        activations["count"] += 1
+        if create_frame not in page.frames:
+            page.frames.append(create_frame)
+        create_frame.selectors["input[type='file']"] = [
+            _FakeElement(attrs={"accept": "video/*"}, tag="input")
+        ]
+
+    entry = _FakeElement(
+        text="发表视频",
+        tag="button",
+        rect={"x": 985, "y": 485, "w": 120, "h": 40},
+        ancestors=[
+            {"tag": "div", "class": "post-list-header"},
+            {"tag": "div", "class": "post-list"},
+            {"tag": "div", "class": "finder-card wrap"},
+        ],
+        click_error="Element is outside of viewport",
+        on_click=mount_form,
+    )
+    page = _FakePage([
+        _FakeFrame("https://channels.weixin.qq.com/platform"),
+        _post_card_frame(entry),
+    ])
+    monkeypatch.setattr(uploader, "_ensure_account_identity", lambda *_a, **_k: None)
+
+    _open_create_view(page, _create_view_config(), _create_view_selectors())
+
+    assert entry.native_click_count == 1
+    assert entry.dom_click_count == 1
+    assert activations["count"] == 1
     assert create_frame.selectors["input[type='file']"]
 
 

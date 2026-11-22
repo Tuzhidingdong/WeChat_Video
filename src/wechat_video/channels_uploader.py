@@ -1667,14 +1667,45 @@ def _open_create_view(
                         candidates, duplicates_removed, matching_frame_count, frame_urls
                     ),
                 )
+            diagnostics = lambda: failure_diagnostics(
+                candidates, duplicates_removed, matching_frame_count, frame_urls
+            )
             try:
                 # ElementHandle.click sends a real browser input action while
                 # retaining the node resolved in the frame's own execution context.
                 chosen["handle"].click(timeout=10_000)
             except Exception as exc:
-                raise UploadBlockedError(
-                    "The unique visible creator-entry button could not be activated."
-                ) from exc
+                native_click_error = f"{type(exc).__name__}: {str(exc)[:400]}"
+                # A real mouse click can be rejected for this button because it
+                # sits off-viewport inside a cross-origin iframe. Before using
+                # any other activation, prove the first click did not already
+                # open the form so a second activation can never happen.
+                form_path = str(
+                    selectors.get("creator_form_frame_path") or _DEFAULT_CREATE_FORM_PATH
+                )
+                already_mounted = any(
+                    urlparse(str(getattr(frame, "url", ""))).hostname == _CHANNELS_HOST
+                    and urlparse(str(getattr(frame, "url", ""))).path.rstrip("/")
+                    == form_path.rstrip("/")
+                    for frame in _frame_contexts(page)
+                )
+                if already_mounted:
+                    _wait_for_creator_form_frame(page, selectors)
+                    return
+                # One DOM click event on the same bound node is an equivalent
+                # activation and does not depend on viewport geometry.
+                try:
+                    chosen["handle"].evaluate("(element) => element.click()")
+                except Exception as dom_exc:
+                    info = diagnostics()
+                    info["native_click_error"] = native_click_error
+                    info["dom_click_error"] = (
+                        f"{type(dom_exc).__name__}: {str(dom_exc)[:400]}"
+                    )
+                    raise UploadBlockedError(
+                        "The unique visible creator-entry button could not be activated.",
+                        diagnostics=info,
+                    ) from dom_exc
             _wait_for_creator_form_frame(page, selectors)
             return
 
