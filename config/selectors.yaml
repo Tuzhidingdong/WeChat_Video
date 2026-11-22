@@ -10,6 +10,12 @@ account_identity:
 # The creator form may mount its file control asynchronously. The uploader
 # inspects every frame, including hidden file inputs, and waits this long for
 # the video-specific control to appear before failing closed.
+# The signed-in platform shell exposes the creator entry inside this
+# frame. The uploader activates this SPA entry before scanning for file inputs.
+create_nav_frame_path: "/micro/content/iframe/post-card.html"
+create_nav_button_text: "发表视频"
+create_nav_timeout_seconds: 15
+
 video_file_input_timeout_seconds: 15
 video_file_input:
   - "input[type='file'][accept*='video']"
