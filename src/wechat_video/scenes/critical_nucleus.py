@@ -779,6 +779,26 @@ class CriticalNucleusScene(Scene):
                 scaled_redraw(pulsing_equation),
                 short_line("Free-energy barrier", critical),
             ]
+            if visual_strategy == "barrier_peak_anatomy":
+                # Side-by-side "where / how much" inset: a small curve with the
+                # peak's horizontal position and vertical height marked apart.
+                # This is semantic content absent from the growth perspective.
+                inset = Axes(
+                    x_range=[0, 1.6, 0.8], y_range=[-0.2, 1.2, 0.7],
+                    x_length=2.2, y_length=1.5, tips=False,
+                    axis_config={"color": neutral, "stroke_width": 1},
+                ).move_to([cx, cy - 1.9, 0])
+                inset_curve = inset.plot(
+                    lambda x: 3 * x**2 - 2 * x**3, x_range=[0, 1.3],
+                    color=favorable, stroke_width=3,
+                )
+                x_mark = MathTex(r"r^*", font_size=20, color=critical).move_to(
+                    inset.c2p(0.92, -0.12)
+                )
+                y_mark = MathTex(r"\Delta G^*", font_size=18, color=resistance).move_to(
+                    inset.c2p(0.28, 1.0)
+                )
+                children.extend([inset, inset_curve, x_mark, y_mark])
             animated = pulse_token is not None
 
         elif stage_key == "model_scope":
