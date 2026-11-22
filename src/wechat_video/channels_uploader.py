@@ -926,12 +926,24 @@ def _video_file_input(page: Any, selectors: dict[str, Any]):
                         raise UploadBlockedError(
                             "The selected video file input changed after DOM inspection."
                         )
-                    current_accept = str(candidate.get_attribute("accept") or "")
-                    expected_accept = str(selected["metadata"].get("accept") or "")
-                    if current_accept != expected_accept:
-                        raise UploadBlockedError(
-                            "The video file input changed after DOM inspection; refusing to upload."
+                    attribute_pairs = (
+                        ("accept", "accept"),
+                        ("name", "name"),
+                        ("id", "id"),
+                        ("class_name", "class"),
+                        ("aria_label", "aria-label"),
+                        ("title", "title"),
+                        ("data_testid", "data-testid"),
+                    )
+                    for metadata_key, attribute_name in attribute_pairs:
+                        current_value = str(candidate.get_attribute(attribute_name) or "")
+                        expected_value = str(
+                            selected["metadata"].get(metadata_key) or ""
                         )
+                        if current_value != expected_value:
+                            raise UploadBlockedError(
+                                "The video file input changed after DOM inspection; refusing to upload."
+                            )
                     return candidate
                 except UploadBlockedError:
                     raise
