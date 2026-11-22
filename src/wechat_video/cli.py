@@ -28,6 +28,26 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _validate_editorial_angle(card_path: Path, script_path: Path) -> None:
+    """Refuse a script that does not match the fact card's editorial angle."""
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    script = json.loads(script_path.read_text(encoding="utf-8"))
+    expected = str(card.get("editorial_angle_id") or "").strip()
+    actual = str(script.get("editorial_angle_id") or "").strip()
+    if expected and expected != actual:
+        raise SystemExit(
+            f"Fact Card editorial_angle_id {expected!r} does not match script "
+            f"{script_path.name} (editorial_angle_id {actual!r}). "
+            "Refusing to silently fall back to a different script. "
+            "Pass the matching --script explicitly."
+        )
+    if not expected and actual:
+        raise SystemExit(
+            f"Script {script_path.name} declares editorial angle {actual!r}, but the "
+            "Fact Card declares none. Pass the matching --fact-card explicitly."
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     root = _project_root()
     parser = argparse.ArgumentParser(
@@ -200,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(describe_tools(root), ensure_ascii=False, indent=2))
             return 0
         if args.command == "run-slice-a":
+            _validate_editorial_angle(args.fact_card, args.script)
             run_dir = run_slice_a(
                 args.project_root,
                 card_path=args.fact_card,
@@ -213,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Channels metadata: {run_dir / 'channels_draft.json'}")
             return 0
         if args.command == "run-slice-a-and-upload-draft":
+            _validate_editorial_angle(args.fact_card, args.script)
             run_dir = run_slice_a(
                 args.project_root,
                 card_path=args.fact_card,

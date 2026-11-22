@@ -133,6 +133,68 @@ def _max_safe_factor(
     return max(1.0, min(target, factor))
 
 
+def _barrier_curve_hook(
+    tracker: Any,
+    scale: list[float],
+    box: dict[str, float],
+    centre: Any,
+    font: str,
+    cjk_font: str,
+    favorable: Any,
+    resistance: Any,
+    critical: Any,
+    neutral: Any,
+) -> VGroup:
+    """Curve-first opening used only by the barrier-peak-anatomy strategy.
+
+    This is a genuinely different composition from the binary particle hook:
+    the full ΔG(r) curve is present from frame zero and a marker climbs to the
+    peak while the two peak coordinates are labelled separately.
+    """
+    axes = Axes(
+        x_range=[0, 2.05, 0.5],
+        y_range=[-0.6, 1.4, 0.5],
+        x_length=4.6,
+        y_length=3.4,
+        tips=False,
+        axis_config={"color": neutral, "stroke_width": 2},
+    ).move_to([box["center_x"], box["center_y"] - 0.2, 0])
+    curve = axes.plot(
+        lambda x: 3 * x**2 - 2 * x**3, x_range=[0, 2.0],
+        color=favorable, stroke_width=5,
+    )
+    curve.set_fill(opacity=0)
+    title = Text(
+        "Free energy along the pathway", font=font, font_size=22, color=favorable,
+    ).move_to([box["center_x"], box["top"] - 0.5, 0])
+
+    def peak_annotation() -> VGroup:
+        p = min(1.0, max(0.0, tracker.get_value() / max(TOTAL_SECONDS, 0.001)))
+        x = p
+        y = 3 * x**2 - 2 * x**3
+        marker = Dot(axes.c2p(x, y), color=critical, radius=0.09)
+        vertical = DashedLine(
+            axes.c2p(1.0, -0.6), axes.c2p(1.0, 1.0),
+            color=critical, stroke_width=2, dash_length=0.08,
+        )
+        horizontal = DashedLine(
+            axes.c2p(0, 1.0), axes.c2p(1.0, 1.0),
+            color=resistance, stroke_width=2, dash_length=0.08,
+        )
+        x_label = MathTex(r"r^*", font_size=26, color=critical).move_to(
+            axes.c2p(1.0, -0.38)
+        )
+        y_label = MathTex(r"\Delta G^*", font_size=24, color=resistance).move_to(
+            axes.c2p(0.22, 1.0)
+        )
+        return VGroup(marker, vertical, horizontal, x_label, y_label)
+
+    hook = VGroup(
+        axes, curve, title, always_redraw(peak_annotation),
+    )
+    return VGroup(always_redraw(lambda: _scale_about(hook, scale[0], centre)))
+
+
 class CriticalNucleusScene(Scene):
     """Static portrait camera with continuous, physically meaningful motion."""
 
@@ -246,6 +308,13 @@ class CriticalNucleusScene(Scene):
         left_label = always_redraw(lambda: _scale_about(hook_label_for("left"), hook_scale[0], centre))
         right_label = always_redraw(lambda: _scale_about(hook_label_for("right"), hook_scale[0], centre))
         hook_group = VGroup(left_dots, right_dots, left_ring, right_ring, left_label, right_label)
+        if spec.get("visual_strategy") == "barrier_peak_anatomy":
+            # Replace the particle-comparison opening entirely with the curve
+            # anatomy opening; the particle mobjects above are never added.
+            hook_group = _barrier_curve_hook(
+                hook_t, hook_scale, box, centre, font, cjk_font,
+                favorable, resistance, critical, neutral,
+            )
 
         # Find the largest safe stage factor at the widest geometry (t = 4 s).
         hook_t.set_value(TOTAL_SECONDS)
@@ -574,6 +643,26 @@ class CriticalNucleusScene(Scene):
             curve.set_fill(opacity=0)
             curve.set_stroke(opacity=focus["primary_curve_opacity_during_motion"])
             children.extend([axes, curve, label, x_label])
+
+            if spec.get("visual_strategy") == "barrier_peak_anatomy":
+                # Explicitly separate the peak's horizontal position (r*) from
+                # its vertical height (delta G*) - the central point of this
+                # editorial angle, and absent from the growth-perspective video.
+                vertical = DashedLine(
+                    axes.c2p(1.0, -4.0), axes.c2p(1.0, 1.0),
+                    color=critical, stroke_width=3, dash_length=0.09,
+                )
+                horizontal = DashedLine(
+                    axes.c2p(0, 1.0), axes.c2p(1.3, 1.0),
+                    color=resistance, stroke_width=3, dash_length=0.09,
+                )
+                x_mark = MathTex(r"r^*", font_size=30, color=critical).move_to(
+                    axes.c2p(1.0, -3.5)
+                )
+                y_mark = MathTex(r"\Delta G^*", font_size=28, color=resistance).move_to(
+                    axes.c2p(0.32, 1.0)
+                )
+                children.extend([vertical, horizontal, x_mark, y_mark])
 
             if stage_key == "critical_threshold":
                 marker = Dot(color=critical, radius=0.09).move_to(axes.c2p(1.0, 1.0))

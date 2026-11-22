@@ -91,12 +91,48 @@ def _make_logger(run_dir: Path) -> logging.Logger:
     return logger
 
 
+# Explicit, reviewable mapping from an editorial angle to its visual strategy.
+# Scene selection MUST come from this configuration - never from a Fact Card ID
+# or from a hard-coded single template.
+VISUAL_STRATEGIES = {
+    "critical_radius_growth_perspective": {
+        "scene_template": "critical_nucleus_free_energy_barrier",
+        "visual_strategy": "particle_growth_curve",
+        "opening": "particle_competition",
+        "focus": "critical radius separates shrinking from growing",
+    },
+    "free_energy_barrier_perspective": {
+        "scene_template": "critical_nucleus_barrier_peak_anatomy",
+        "visual_strategy": "barrier_peak_anatomy",
+        "opening": "full_free_energy_curve",
+        "focus": "peak position r-star versus peak height delta-G-star",
+    },
+}
+_DEFAULT_VISUAL_STRATEGY = "critical_radius_growth_perspective"
+
+
+def _visual_strategy(script: dict[str, Any]) -> dict[str, Any]:
+    angle = str(
+        script.get("editorial_angle_id") or script.get("visual_strategy") or ""
+    ).strip() or _DEFAULT_VISUAL_STRATEGY
+    if angle not in VISUAL_STRATEGIES:
+        raise FactCardError(
+            f"No registered visual strategy for editorial angle {angle!r}. "
+            f"Registered angles: {sorted(VISUAL_STRATEGIES)}."
+        )
+    return VISUAL_STRATEGIES[angle]
+
+
 def _build_storyboard(script: dict[str, Any]) -> dict[str, Any]:
+    strategy = _visual_strategy(script)
     return {
         "schema_version": 1,
-        "storyboard_id": "CNT-STORYBOARD-001",
-        "scene_template": "critical_nucleus_free_energy_barrier",
-        "scene_family_count": 1,
+        "storyboard_id": f"CNT-STORYBOARD-{script.get('script_id', '001')}",
+        "scene_template": strategy["scene_template"],
+        "visual_strategy": strategy["visual_strategy"],
+        "visual_opening": strategy["opening"],
+        "visual_focus": strategy["focus"],
+        "scene_family_count": len(VISUAL_STRATEGIES),
         "scene_count": 1,
         "question": script.get("title", "Why do some nuclei grow while others dissolve?"),
         "sequence": [
@@ -107,9 +143,11 @@ def _build_storyboard(script: dict[str, Any]) -> dict[str, Any]:
                 "template": "explicit_cover",
             },
             {
-                "scene_id": "scene_01_energy_competition",
-                "template": "critical_nucleus_free_energy_barrier",
-                "description": "One critical-nucleus template presents the competing energy terms, the free-energy curve, and the critical radius.",
+                "scene_id": "scene_01_editorial_visual",
+                "template": strategy["scene_template"],
+                "description": (
+                    f"{strategy['opening']} opening; visual focus: {strategy['focus']}."
+                ),
             },
         ],
         "cue_checkpoints": [
@@ -289,8 +327,12 @@ def run_slice_a(
             "bilingual_lines_per_cue": 2,
         },
     )
+    strategy = _visual_strategy(script)
     scene_spec = {
-        "scene_id": "scene_01_energy_competition",
+        "scene_id": "scene_01_editorial_visual",
+        "scene_template": strategy["scene_template"],
+        "visual_strategy": strategy["visual_strategy"],
+        "visual_opening": strategy["opening"],
         "font_family": font_family,
         "cjk_font_family": cjk_font,
         "layout": layout,
@@ -313,7 +355,8 @@ def run_slice_a(
     _write_json(
         run_dir / "scene_render_manifest.json",
         {
-            "template": "critical_nucleus_free_energy_barrier",
+            "template": strategy["scene_template"],
+            "visual_strategy": strategy["visual_strategy"],
             "scene_video": str(scene_video),
             "resolution": [1080, 1920],
             "fps": 30,
@@ -397,6 +440,25 @@ def run_slice_a(
             else None,
         },
     )
+    # Content uniqueness is an INDEPENDENT gate from technical QA: two runs may
+    # both pass QA and still be the same video because the script was copied.
+    from .content_uniqueness import content_uniqueness_gate
+
+    uniqueness = content_uniqueness_gate(
+        run_dir, project_root / output_root,
+    )
+    logger.info(
+        "Content uniqueness gate: %s (compared %d prior runs)",
+        "PASS" if uniqueness.get("passes") else "FAIL",
+        int(uniqueness.get("compared_run_count") or 0),
+    )
+    if not uniqueness.get("passes"):
+        raise FactCardError(
+            "Content uniqueness gate FAILED: this run reuses an existing script / "
+            f"visual identity. Blocking runs: {uniqueness.get('blocking_runs')}. "
+            "See content_difference_report.json. No upload was attempted."
+        )
+
     if pending:
         approval_label = "NOT_FOR_PUBLICATION_PENDING_USER_FACT_CARD_REVIEW"
     elif qa.get("overall_status") == "PASS":
