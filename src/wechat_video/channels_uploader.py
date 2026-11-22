@@ -747,6 +747,108 @@ def _visible_locator(page: Any, selector_list: Any):
     return None
 
 
+def _open_create_view(
+    page: Any,
+    config: dict[str, Any],
+    selectors: dict[str, Any],
+) -> None:
+    """Mount the creator SPA through its visible post-card entry point.
+
+    Direct navigation to /platform/post/create can leave the browser on the
+    /platform shell with an empty create iframe. The current shell exposes the
+    exact "发表视频" entry inside post-card.html; activating that entry mounts
+    the actual creator form. This is navigation only: media selection and the
+    draft-save action remain separate, guarded steps.
+    """
+    platform_url = str(
+        config.get("platform_url") or "https://channels.weixin.qq.com/platform"
+    )
+    parsed_platform = urlparse(platform_url)
+    if (
+        parsed_platform.scheme != "https"
+        or parsed_platform.hostname != "channels.weixin.qq.com"
+        or parsed_platform.path.rstrip("/") != "/platform"
+        or parsed_platform.query
+        or parsed_platform.fragment
+    ):
+        raise UploadBlockedError(
+            "platform_url must be the exact official Channels /platform shell URL."
+        )
+
+    page.goto(platform_url, wait_until="domcontentloaded", timeout=60_000)
+    _ensure_account_identity(
+        page,
+        str(config["account_name"]),
+        selectors,
+        wait_seconds=max(1, int(config.get("ui_ready_timeout_seconds", 15))),
+    )
+
+    frame_path = str(
+        selectors.get("create_nav_frame_path")
+        or "/micro/content/iframe/post-card.html"
+    )
+    button_text = str(selectors.get("create_nav_button_text") or "发表视频").strip()
+    if not button_text:
+        raise UploadBlockedError("The creator-entry button text is not configured.")
+
+    timeout_seconds = max(
+        0.0, float(selectors.get("create_nav_timeout_seconds", 15))
+    )
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        matching_frames = []
+        visible_buttons = []
+        for frame in _frame_contexts(page):
+            parsed_frame = urlparse(str(getattr(frame, "url", "")))
+            if (
+                parsed_frame.hostname != "channels.weixin.qq.com"
+                or parsed_frame.path.rstrip("/") != frame_path.rstrip("/")
+            ):
+                continue
+            matching_frames.append(frame)
+            try:
+                locator = frame.get_by_role(
+                    "button", name=button_text, exact=True
+                )
+                for index in range(min(locator.count(), 8)):
+                    candidate = locator.nth(index)
+                    if candidate.is_visible():
+                        visible_buttons.append(candidate)
+            except Exception:
+                continue
+
+        if len(visible_buttons) > 1:
+            raise UploadBlockedError(
+                f"More than one visible exact '{button_text}' creator-entry button "
+                f"exists in frame {frame_path}; refusing an ambiguous click."
+            )
+        if len(visible_buttons) == 1:
+            button = visible_buttons[0]
+            if button.is_enabled():
+                try:
+                    # This is the landing-page navigation entry, not the
+                    # final "发表"/publication control on the completed form.
+                    button.click(timeout=10_000)
+                except Exception as exc:
+                    raise UploadBlockedError(
+                        "The unique visible creator-entry button could not be activated."
+                    ) from exc
+                return
+
+        if time.monotonic() >= deadline:
+            frame_urls = [
+                str(getattr(frame, "url", "")) for frame in _frame_contexts(page)
+            ]
+            raise UploadBlockedError(
+                f"Could not find exactly one enabled visible '{button_text}' "
+                f"creator-entry button in frame {frame_path}. "
+                f"Matching frame count: {len(matching_frames)}; "
+                f"current frame URLs: {frame_urls}. "
+                "No video was selected or uploaded; no save or publication action was taken."
+            )
+        page.wait_for_timeout(400)
+
+
 def _video_file_input(page: Any, selectors: dict[str, Any]):
     """Find the unique video-upload input across all live page frames.
 
@@ -1762,17 +1864,7 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
     playwright, browser, context = _connect_playwright(websocket_url)
     try:
         create_page = context.new_page()
-        create_page.goto(
-            str(config["create_url"]),
-            wait_until="domcontentloaded",
-            timeout=60_000,
-        )
-        _ensure_account_identity(
-            create_page,
-            str(config["account_name"]),
-            selectors,
-            wait_seconds=int(config.get("login_wait_seconds", 180)),
-        )
+        _open_create_view(create_page, config, selectors)
 
         draft_page = context.new_page()
         _open_draft_list_view(draft_page, config, selectors)
@@ -2480,8 +2572,10 @@ def inspect_channels_ui(project_root: Path) -> dict[str, Any]:
     playwright, browser, context = _connect_playwright(websocket_url)
     try:
         page = context.new_page()
+        # Inspect the stable shell and its SPA creator-entry control. A
+        # direct /platform/post/create deep link may fall back to this shell.
         page.goto(
-            str(config["create_url"]),
+            str(config.get("platform_url") or "https://channels.weixin.qq.com/platform"),
             wait_until="domcontentloaded",
             timeout=60_000,
         )
