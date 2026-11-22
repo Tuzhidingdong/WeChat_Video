@@ -921,7 +921,6 @@ def _draft_list_test_selectors() -> dict:
 
 
 def test_open_draft_list_view_uses_platform_navigation_to_mount_spa_frame() -> None:
-    identity = _FakeElement(text="成核生长")
     draft_root = _FakeElement(text="草稿箱", visible=True)
     active_tab = _FakeElement(text="草稿箱 (0)", visible=True)
     header = _FakeElement(text="草稿箱 (0)", visible=True)
@@ -956,8 +955,19 @@ def test_open_draft_list_view_uses_platform_navigation_to_mount_spa_frame() -> N
         selectors={
             ".finder-ui-desktop-menu__sub__wrp": [nav_parent],
             ".finder-ui-desktop-sub-menu__item": [nav_entry],
-            "body *": [identity],
         },
+        identity_matches=[{
+            "tag": "h2",
+            "evidence_type": "visible_text",
+            "matched_value": "成核生长",
+            "region": "semantic_account_surface",
+            "semantic_account_surface": True,
+            "identity_surface": "finder_nickname",
+            "left": 235,
+            "top": 88,
+            "width": 212,
+            "height": 21,
+        }],
     )
     page = _FakePage([main, child])
     selectors = _draft_list_test_selectors()
