@@ -1,5 +1,5 @@
 {
-  "script_id": "CNT-VIDEO-003-EN-ZH-PEAK",
+  "script_id": "CNT-VIDEO-004-EN-ZH-PEAK",
   "editorial_angle_id": "free_energy_barrier_perspective",
   "title": "Peak Position Versus Peak Height",
   "language": "en-US",
@@ -63,10 +63,10 @@
   "speech_units": [
     {
       "unit_id": "V01",
-      "raw_text": "A curve hides two answers.",
-      "display_text": "A curve hides two answers.",
-      "spoken_text": "A curve hides two answers.",
-      "display_text_zh": "一条曲线藏着两个答案。",
+      "raw_text": "Two answers hide in one energy curve.",
+      "display_text": "Two answers hide in one energy curve.",
+      "spoken_text": "Two answers hide in one energy curve.",
+      "display_text_zh": "一条能量曲线里藏着两个答案。",
       "claim_ids": [
         "CNT-01"
       ],
@@ -352,10 +352,10 @@
     },
     {
       "unit_id": "V18",
-      "raw_text": "Position and height differ.",
-      "display_text": "Position and height differ.",
-      "spoken_text": "Position and height differ.",
-      "display_text_zh": "位置与高度并不相同。",
+      "raw_text": "Height and position are different answers.",
+      "display_text": "Height and position are different answers.",
+      "spoken_text": "Height and position are different answers.",
+      "display_text_zh": "高度与位置是不同的答案。",
       "claim_ids": [
         "CNT-03"
       ],
