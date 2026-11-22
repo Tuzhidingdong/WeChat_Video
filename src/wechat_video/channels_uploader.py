@@ -989,10 +989,10 @@ _DOM_VISIBLE_ELEMENT_SCAN = r"""(payload) => {
             disabled: Boolean(element.disabled) ||
                 element.getAttribute("aria-disabled") === "true",
             /* Structural evidence for the semantic creator-entry rule.
-               class/id/data-*/aria-*/href/ancestors are captured for diagnosis
-               and for proving a navigation target. Geometry (rect) is captured
-               ONLY to de-duplicate repeated scans of the same DOM node; it is
-               never used to choose which button to click. */
+               Class, id, data, aria, href and ancestor attributes are captured
+               for diagnosis and for proving a navigation target. Geometry
+               (rect) is captured ONLY to de-duplicate repeated scans of the
+               same DOM node; it is never used to choose which button to click. */
             attributes: attributesOf(element),
             outer_html: clip(element.outerHTML || "", 600),
             href: navigationHrefOf(element),
