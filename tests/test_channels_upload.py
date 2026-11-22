@@ -609,7 +609,7 @@ class _FakeFrame:
                     if payload.get("include_observed") is True else []
                 ),
             }
-        if "document.readyState" in expression:
+        if expression.strip() == "() => document.readyState":
             return "complete"
         if "__CHANNELS_ACCOUNT_IDENTITY_SCAN__" in expression:
             return self.identity_matches
