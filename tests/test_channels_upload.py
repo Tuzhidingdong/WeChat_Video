@@ -407,6 +407,8 @@ class _FakeFrame:
                         seen.add(id(item))
                         items.append(item)
             return _FakeLocator(items)
+        if selector == "button, [role='button']":
+            return _FakeLocator(self.selectors.get(selector, []))
         return _FakeLocator(self.selectors.get(selector, []))
 
     def evaluate_handle(self, expression, *args):
@@ -1201,7 +1203,7 @@ def test_open_create_view_activates_unique_post_card_spa_entry(monkeypatch) -> N
     main = _FakeFrame("https://channels.weixin.qq.com/platform")
     card = _FakeFrame(
         "https://channels.weixin.qq.com/micro/content/iframe/post-card.html",
-        roles={("button", "发表视频", True): [entry]},
+        selectors={"button, [role='button']": [entry]},
     )
     page = _FakePage([main, create_frame, card])
     identity_checks = []
@@ -1241,7 +1243,7 @@ def test_open_create_view_rejects_ambiguous_creator_entry_without_clicking(
     main = _FakeFrame("https://channels.weixin.qq.com/platform")
     card = _FakeFrame(
         "https://channels.weixin.qq.com/micro/content/iframe/post-card.html",
-        roles={("button", "发表视频", True): [first, second]},
+        selectors={"button, [role='button']": [first, second]},
     )
     page = _FakePage([main, card])
     monkeypatch.setattr(
@@ -1275,7 +1277,7 @@ def test_open_create_view_does_not_click_same_text_in_unconfigured_frame(
     main = _FakeFrame("https://channels.weixin.qq.com/platform")
     wrong_frame = _FakeFrame(
         "https://channels.weixin.qq.com/micro/content/post/create",
-        roles={("button", "发表视频", True): [entry]},
+        selectors={"button, [role='button']": [entry]},
     )
     page = _FakePage([main, wrong_frame])
     monkeypatch.setattr(
