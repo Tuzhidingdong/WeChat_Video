@@ -47,9 +47,24 @@ Job records are stored under ignored runtime/upload_jobs/. Relevant states inclu
 
 For an uncertain outcome, run the read-only command:
 
-.venv\Scripts\python.exe -X utf8 -m wechat_video.cli channels-reconcile --job-id <output-folder-name>
+.venv\Scripts\python.exe -X utf8 -m wechat_video.cli channels-reconcile --job-id <job-id>
 
-Reconciliation never uploads, never clicks save and never retries. The same job ID cannot be uploaded twice.
+Reconciliation never uploads, never clicks save and never retries. An upload-attempt ID is never reused.
+
+The output directory is the **source run**; upload jobs are separate attempts against
+that already-generated media. The first attempt keeps the historical job ID equal
+to the output-folder name. If and only if an earlier job is `FAILED_BEFORE_SAVE`,
+has no `upload_started_at`, has `save_click_count == 0`, and has no verified draft,
+a later, separately user-authorized run of `Save_To_Channels_Draft.bat` creates
+a new audit job ID such as `<output-folder>.upload_attempt_02` and reuses the
+same QA-passed `final.mp4`. It does not regenerate or copy the video.
+
+This exception does **not** apply merely because a job says
+`FAILED_BEFORE_SAVE`: once `upload_started_at` exists, the file-input operation
+may have begun, so another attempt is blocked. `UPLOADING`, `PREPARED`,
+`SAVE_REQUESTED`, `UPLOAD_UNKNOWN`, confirmed-draft and manual-review states
+are never bypassed by allocating a new attempt ID. Resolve uncertain states
+through read-only reconciliation/manual review instead.
 
 For a job that remains `UPLOAD_UNKNOWN`, inspect the target account's **草稿箱**
 manually. The manual-review command only appends the user's attestation to the
