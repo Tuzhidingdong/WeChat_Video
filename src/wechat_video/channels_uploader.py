@@ -727,7 +727,7 @@ def _frame_contexts(page: Any) -> list[Any]:
 
 _DOM_VISIBLE_ELEMENT_SCAN = r"""(payload) => {
     /* __CHANNELS_VISIBLE_ELEMENT_SCAN__ */
-    const normalize = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
     const isVisible = (element) => {
         if (!element || element.hidden) return false;
         const rect = element.getBoundingClientRect();
@@ -767,7 +767,7 @@ _DOM_VISIBLE_ELEMENT_SCAN = r"""(payload) => {
 
 _DOM_VISIBLE_ELEMENT_HANDLE = r"""(payload) => {
     /* __CHANNELS_VISIBLE_ELEMENT_HANDLE__ */
-    const normalize = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
     const isVisible = (element) => {
         if (!element || element.hidden) return false;
         const rect = element.getBoundingClientRect();
@@ -1534,9 +1534,13 @@ def _click_draft_list_nav_entry(
             "Draft-list navigation selectors are missing from config/selectors.yaml."
         )
 
+    entry_text = str(selectors.get("draft_list_nav_entry_text") or "草稿箱").strip()
+
     def visible_entry():
         for selector in entry_selectors:
-            matches = _visible_locators(page, selector, limit=12)
+            matches = _visible_locators(
+                page, selector, limit=12, contains_text=entry_text
+            )
             if len(matches) > 1:
                 raise UploadBlockedError(
                     "More than one visible DraftListManager navigation entry exists; "
