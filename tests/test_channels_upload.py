@@ -385,6 +385,17 @@ class _FakeFrame:
     def locator(self, selector):
         if self.locator_unsupported:
             return _FakeLocator([])
+        if selector == "input[type='file']":
+            items = []
+            seen = set()
+            for key, values in self.selectors.items():
+                if "input[type='file']" not in key:
+                    continue
+                for item in values:
+                    if id(item) not in seen:
+                        seen.add(id(item))
+                        items.append(item)
+            return _FakeLocator(items)
         return _FakeLocator(self.selectors.get(selector, []))
 
     def evaluate(self, expression, *args):
@@ -392,6 +403,38 @@ class _FakeFrame:
         self.last_evaluate_args = args
         if "__CHANNELS_ACCOUNT_IDENTITY_SCAN__" in expression:
             return self.identity_matches
+        if "__CHANNELS_VIDEO_FILE_INPUT_SCAN__" in expression:
+            inputs = []
+            seen = set()
+            for selector, values in self.selectors.items():
+                if "input[type='file']" not in selector:
+                    continue
+                for item in values:
+                    if id(item) in seen:
+                        continue
+                    seen.add(id(item))
+                    attrs = item.attrs
+                    context = attrs.get("context_text", [])
+                    if isinstance(context, str):
+                        context = [context]
+                    labels = attrs.get("labels", [])
+                    if isinstance(labels, str):
+                        labels = [labels]
+                    inputs.append({
+                        "index": len(inputs),
+                        "accept": attrs.get("accept", ""),
+                        "name": attrs.get("name", ""),
+                        "id": attrs.get("id", ""),
+                        "class_name": attrs.get("class", ""),
+                        "aria_label": attrs.get("aria-label", ""),
+                        "title": attrs.get("title", ""),
+                        "data_testid": attrs.get("data-testid", ""),
+                        "labels": labels,
+                        "context_text": context,
+                        "visible": item.is_visible(),
+                        "matched_selectors": [],
+                    })
+            return inputs
         if "__CHANNELS_DRAFT_LIST_DOM_SCAN__" in expression:
             config = args[0]
 
@@ -1112,15 +1155,99 @@ def test_video_file_input_is_found_in_main_frame_when_form_fields_are_in_iframe(
     )
     main = _FakeFrame(
         "https://channels.weixin.qq.com/platform/post/create",
-        selectors={"input[type='file'][accept*='video']": [upload]},
+        selectors={
+            "input[type='file'][accept*='video']": [upload],
+            "input[type='file']": [upload],
+        },
     )
     child = _FakeFrame("https://channels.weixin.qq.com/micro/content/post/create")
     page = _FakePage([main, child])
 
     assert _video_file_input(
         page,
-        {"video_file_input": ["input[type='file'][accept*='video']"]},
+        {"video_file_input": ["input[type='file'][accept*='video']"], "video_file_input_timeout_seconds": 0},
     ) is upload
+
+
+def test_video_file_input_ignores_image_control_and_allows_hidden_video_input() -> None:
+    video = _FakeElement(
+        attrs={"accept": "video/mp4,video/*", "aria-label": "上传视频"},
+        tag="input",
+        visible=False,
+    )
+    cover = _FakeElement(
+        attrs={"accept": "image/png,image/jpeg", "aria-label": "上传封面"},
+        tag="input",
+        visible=True,
+    )
+    main = _FakeFrame(
+        "https://channels.weixin.qq.com/platform/post/create",
+        selectors={"input[type='file']": [video, cover]},
+    )
+    page = _FakePage([main])
+
+    assert _video_file_input(
+        page,
+        {"video_file_input": ["input[type='file']"], "video_file_input_timeout_seconds": 0},
+    ) is video
+
+
+def test_video_file_input_uses_video_label_when_accept_is_missing() -> None:
+    cover = _FakeElement(
+        attrs={"labels": ["上传封面"], "context_text": ["封面图片"]},
+        tag="input",
+    )
+    video = _FakeElement(
+        attrs={"labels": ["上传视频"], "context_text": ["选择视频文件"]},
+        tag="input",
+    )
+    main = _FakeFrame(
+        "https://channels.weixin.qq.com/platform/post/create",
+        selectors={"input[type='file']": [cover, video]},
+    )
+    page = _FakePage([main])
+
+    assert _video_file_input(
+        page,
+        {"video_file_input": ["input[type='file']"], "video_file_input_timeout_seconds": 0},
+    ) is video
+
+
+def test_video_file_input_waits_for_delayed_frame_mount() -> None:
+    upload = _FakeElement(
+        attrs={"accept": "video/mp4"},
+        tag="input",
+        visible=False,
+    )
+    main = _FakeFrame("https://channels.weixin.qq.com/platform/post/create")
+    page = _FakePage(
+        [main],
+        on_wait=lambda _milliseconds: main.selectors.update(
+            {"input[type='file']": [upload]}
+        ),
+    )
+
+    assert _video_file_input(
+        page,
+        {"video_file_input": ["input[type='file']"], "video_file_input_timeout_seconds": 1},
+    ) is upload
+    assert page.wait_calls == [500]
+
+
+def test_video_file_input_rejects_multiple_equally_valid_video_controls() -> None:
+    first = _FakeElement(attrs={"accept": "video/mp4"}, tag="input")
+    second = _FakeElement(attrs={"accept": "video/*"}, tag="input")
+    main = _FakeFrame(
+        "https://channels.weixin.qq.com/platform/post/create",
+        selectors={"input[type='file']": [first, second]},
+    )
+    page = _FakePage([main])
+
+    with pytest.raises(UploadBlockedError, match="Candidate summary"):
+        _video_file_input(
+            page,
+            {"video_file_input": ["input[type='file']"], "video_file_input_timeout_seconds": 0},
+        )
 
 
 def test_account_identity_waits_and_checks_child_frames() -> None:
