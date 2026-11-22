@@ -780,8 +780,8 @@ def test_open_draft_list_view_uses_platform_navigation_to_mount_spa_frame() -> N
         selectors={
             ".finder-ui-desktop-menu__sub__wrp": [nav_parent],
             ".finder-ui-desktop-sub-menu__item": [nav_entry],
+            "body *": [identity],
         },
-        texts={("成核生长", True): [identity]},
     )
     page = _FakePage([main, child])
     selectors = _draft_list_test_selectors()
