@@ -51,8 +51,8 @@ draft_list_frame_path: "/micro/content/post/draftListManager"
 draft_list_nav_parent_selectors:
   - ".finder-ui-desktop-menu__sub__wrp"
 draft_list_nav_entry_selectors:
-  - ".finder-ui-desktop-sub-menu__item:text-is('草稿箱')"
-  - ".finder-ui-desktop-sub-menu__item:has-text('草稿箱')"
+  - ".finder-ui-desktop-sub-menu__item"
+draft_list_nav_entry_text: "草稿箱"
 draft_list_nav_timeout_seconds: 20
 draft_list_root_selector: "div.finder-page.DraftListManager"
 draft_list_active_tab_selector: "li.weui-desktop-tab__nav_current"
