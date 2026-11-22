@@ -1818,27 +1818,26 @@ def test_open_create_view_waits_for_creator_form_frame_after_click(monkeypatch) 
     create_frame = _FakeFrame(
         "https://channels.weixin.qq.com/micro/content/post/create"
     )
+    def mount_form():
+        if create_frame not in page.frames:
+            page.frames.append(create_frame)
+
     entry = _FakeElement(
-        text="发表视频", tag="button", attrs={"href": "/platform/post/create"}
+        text="发表视频", tag="button", attrs={"href": "/platform/post/create"},
+        on_click=mount_form,
     )
     page = _FakePage([
         _FakeFrame("https://channels.weixin.qq.com/platform"),
         _post_card_frame(entry),
     ])
     assert create_frame not in page.frames
-
-    def mount_form(_milliseconds):
-        if create_frame not in page.frames:
-            page.frames.append(create_frame)
-
-    page.on_wait = mount_form
     monkeypatch.setattr(uploader, "_ensure_account_identity", lambda *_a, **_k: None)
 
     _open_create_view(page, _create_view_config(), _create_view_selectors())
 
     assert entry.clicked is True
     assert create_frame in page.frames
-    assert 400 in page.wait_calls
+    assert page.wait_calls == [750]
 
 
 def test_open_create_view_fails_closed_when_form_frame_never_mounts(monkeypatch) -> None:
