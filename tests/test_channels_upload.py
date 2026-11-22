@@ -22,6 +22,9 @@ from wechat_video.channels_uploader import (
     _visible_element_handles,
     _fill_field,
     _draft_save_button,
+    _draft_save_button_with_info,
+    _click_draft_save_once,
+    _finalize_draft_verification,
     _draft_snapshot,
     _open_draft_list_view,
     _open_create_view,
@@ -482,6 +485,8 @@ class _FakeElement:
         if self.click_error is not None:
             error = self.click_error
             self.click_error = None  # only the first native attempt fails
+            if isinstance(error, BaseException):
+                raise error
             raise RuntimeError(error)
         self._activate()
 
@@ -1453,6 +1458,177 @@ def test_draft_save_button_is_found_inside_child_iframe() -> None:
     assert _draft_save_button(
         page, {"draft_save_button_text": ["保存草稿"]}
     ) is save
+
+
+def _save_button_page(*buttons):
+    child = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create",
+        roles={("button", "保存草稿", True): list(buttons)},
+        locator_unsupported=True,
+    )
+    main = _FakeFrame("https://channels.weixin.qq.com/platform/post/create")
+    return _FakePage([main, child]), child
+
+
+_SAVE_SELECTORS = {"draft_save_button_text": ["保存草稿"]}
+
+
+def test_finalize_draft_verification_requires_unique_new_row(tmp_path, monkeypatch) -> None:
+    """Only one matching DraftListManager row may produce DRAFT_SAVED."""
+    import wechat_video.channels_uploader as uploader
+
+    monkeypatch.setattr(uploader, "_save_job", lambda *_a, **_k: None)
+    after = {"url": "https://channels.weixin.qq.com/platform/post/draftListManager"}
+    row = "临界半径如何决定成核 草稿 2026-11-22 20:30"
+    job = {"save_click_count": 1, "save_click_returned": True}
+
+    uploader._finalize_draft_verification(
+        job,
+        tmp_path / "job.json",
+        after=after,
+        verified=[row],
+        verification_history=[{"match_count": 1}],
+        title="临界半径如何决定成核",
+    )
+
+    assert job["state"] == "DRAFT_SAVED"
+    assert job["verified_draft"]["row_text"] == row
+    assert job["verified_draft"]["title"] == "临界半径如何决定成核"
+    assert job["post_upload_snapshot"] == after
+    assert job["automatic_publication"] is False
+    assert job["save_action"]["click_count"] == 1
+
+
+@pytest.mark.parametrize("rows", [[], ["row one", "row two"]])
+def test_finalize_draft_verification_rejects_non_unique_rows(
+    tmp_path, monkeypatch, rows
+) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    monkeypatch.setattr(uploader, "_save_job", lambda *_a, **_k: None)
+    job = {"save_click_count": 1, "save_click_returned": True}
+
+    with pytest.raises(UploadUnknownError):
+        uploader._finalize_draft_verification(
+            job,
+            tmp_path / "job.json",
+            after={"url": "https://channels.weixin.qq.com/platform/post/draftListManager"},
+            verified=rows,
+            verification_history=[{"match_count": len(rows)}],
+            title="临界半径如何决定成核",
+        )
+
+    assert job["state"] == "UPLOAD_UNKNOWN"
+    assert "verified_draft" not in job
+    assert job["verification_matches"] == len(rows)
+
+
+def test_click_draft_save_once_rebinds_after_spa_rerender(tmp_path, monkeypatch) -> None:
+    """A handle cached before an SPA re-render is not the one that gets clicked."""
+    import wechat_video.channels_uploader as uploader
+
+    old = _FakeElement(text="保存草稿", tag="button")
+    fresh = _FakeElement(text="保存草稿", tag="button")
+    page, child = _save_button_page(old)
+    assert _draft_save_button(page, _SAVE_SELECTORS) is old
+    # SPA re-render swaps the live node.
+    child.roles[("button", "保存草稿", True)] = [fresh]
+    saved = []
+    monkeypatch.setattr(uploader, "_save_job", lambda _p, j: saved.append(dict(j)))
+    job = {"state": "PREPARED"}
+
+    _click_draft_save_once(page, _SAVE_SELECTORS, job, tmp_path / "job.json")
+
+    assert fresh.clicked is True
+    assert old.clicked is False
+    assert fresh.native_click_count == 1
+    assert job["state"] == "SAVE_REQUESTED"
+    assert job["save_click_attempted"] is True
+    assert job["save_click_returned"] is True
+    assert job["save_click_count"] == 1
+    diag = job["save_button_diagnostics"]
+    assert diag["frame_url"] == "https://channels.weixin.qq.com/micro/content/post/create"
+    assert diag["visible"] is True and diag["enabled"] is True
+    assert diag["binding"] == "fresh_same_frame_element_handle"
+    assert saved[-1]["state"] == "SAVE_REQUESTED"
+
+
+def test_click_draft_save_once_fails_closed_on_multiple_buttons(tmp_path, monkeypatch) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    first = _FakeElement(text="保存草稿", tag="button")
+    second = _FakeElement(text="保存草稿", tag="button")
+    page, _ = _save_button_page(first, second)
+    monkeypatch.setattr(uploader, "_save_job", lambda _p, _j: None)
+    job = {"state": "PREPARED"}
+
+    with pytest.raises(UploadBlockedError, match="More than one visible exact"):
+        _click_draft_save_once(page, _SAVE_SELECTORS, job, tmp_path / "job.json")
+
+    assert first.clicked is False and second.clicked is False
+    assert job["state"] == "PREPARED"
+
+
+@pytest.mark.parametrize("visible,enabled", [(False, True), (True, False)])
+def test_click_draft_save_once_skips_hidden_or_disabled_button(
+    tmp_path, monkeypatch, visible, enabled
+) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    button = _FakeElement(text="保存草稿", tag="button", visible=visible, enabled=enabled)
+    page, _ = _save_button_page(button)
+    monkeypatch.setattr(uploader, "_save_job", lambda _p, _j: None)
+    job = {"state": "PREPARED"}
+
+    with pytest.raises(UploadBlockedError):
+        _click_draft_save_once(page, _SAVE_SELECTORS, job, tmp_path / "job.json")
+
+    assert button.clicked is False
+    assert job["state"] == "PREPARED"
+
+
+def test_click_draft_save_once_records_full_timeout_error(tmp_path, monkeypatch) -> None:
+    """A raised click records message and traceback and leaves state uncertain."""
+    import wechat_video.channels_uploader as uploader
+
+    error = TimeoutError("Element is not attached to the DOM after 10000ms")
+    button = _FakeElement(text="保存草稿", tag="button", click_error=error)
+    page, _ = _save_button_page(button)
+    monkeypatch.setattr(uploader, "_save_job", lambda _p, _j: None)
+    job = {"state": "PREPARED"}
+
+    with pytest.raises(UploadUnknownError):
+        _click_draft_save_once(page, _SAVE_SELECTORS, job, tmp_path / "job.json")
+
+    assert button.native_click_count == 1
+    assert button.dom_click_count == 0
+    assert job["state"] == "UPLOAD_UNKNOWN"
+    assert job["save_click_attempted"] is True
+    assert job["save_click_returned"] is False
+    assert job["save_click_error_type"] == "TimeoutError"
+    assert "not attached to the DOM" in job["save_click_error_message"]
+    assert "Traceback" in job["save_click_traceback"]
+    assert job["save_click_count"] == 1
+    assert "save_failed_at" in job
+
+
+def test_click_draft_save_once_never_uses_dom_click_fallback(tmp_path, monkeypatch) -> None:
+    """Detached/frame errors must not trigger a second form of activation."""
+    import wechat_video.channels_uploader as uploader
+
+    error = RuntimeError("Element is not attached to the DOM")
+    button = _FakeElement(text="保存草稿", tag="button", click_error=error)
+    page, _ = _save_button_page(button)
+    monkeypatch.setattr(uploader, "_save_job", lambda _p, _j: None)
+    job = {"state": "PREPARED"}
+
+    with pytest.raises(UploadUnknownError):
+        _click_draft_save_once(page, _SAVE_SELECTORS, job, tmp_path / "job.json")
+
+    assert button.native_click_count == 1
+    assert button.dom_click_count == 0
+    assert job["state"] == "UPLOAD_UNKNOWN"
+    assert job["save_click_error_message"] == "Element is not attached to the DOM"
 
 
 def test_open_create_view_activates_unique_post_card_spa_entry(monkeypatch) -> None:

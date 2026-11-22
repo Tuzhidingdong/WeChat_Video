@@ -15,6 +15,7 @@ import shutil
 import socket
 import subprocess
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -2029,22 +2030,155 @@ def _fill_field(page: Any, selectors: dict[str, Any], key: str, value: str) -> N
     if str(actual).strip() != value.strip():
         raise UploadBlockedError(f"The {key} field did not retain the exact supplied text.")
 
-def _draft_save_button(page: Any, selectors: dict[str, Any]):
-    """Find one semantic draft-save button using same-frame DOM inspection."""
-    for name in selectors.get("draft_save_button_text", ["存草稿", "保存草稿"]):
-        matches = _visible_element_handles(
-            page,
-            "button, [role='button']",
-            limit=32,
-            exact_text=str(name),
-        )
-        if len(matches) == 1:
-            return matches[0]
+def _draft_save_button_with_info(page: Any, selectors: dict[str, Any]) -> dict[str, Any] | None:
+    """Locate ONE draft-save button and return it with full DOM diagnostics.
+
+    The same-frame DOM scan is used deliberately: this project has observed
+    cross-origin CDP Locator queries returning zero nodes while querySelectorAll
+    in that frame sees the live controls. The returned handle is freshly bound
+    at call time, so callers must invoke this immediately before acting - do not
+    cache the handle across file writes or long waits, because the creator SPA
+    re-renders and invalidates previously bound nodes.
+    """
+    names = selectors.get("draft_save_button_text", ["存草稿", "保存草稿"])
+    if not isinstance(names, list):
+        names = [str(names)] if names else []
+    names = [str(item).strip() for item in names if str(item).strip()]
+    for name in names:
+        matches: list[dict[str, Any]] = []
+        for frame in _frame_contexts(page):
+            frame_url = str(getattr(frame, "url", ""))[:240]
+            payload = {
+                "selector": "button, [role='button']",
+                "exact_text": name,
+                "contains_text": None,
+                "limit": 32,
+            }
+            try:
+                inventory = frame.evaluate(_DOM_VISIBLE_ELEMENT_SCAN, payload)
+            except Exception:
+                continue
+            if not isinstance(inventory, dict) or not isinstance(inventory.get("items"), list):
+                continue
+            for item in inventory["items"]:
+                if not isinstance(item, dict):
+                    continue
+                handle_payload = dict(payload)
+                handle_payload["visible_index"] = int(item.get("visible_index", -1))
+                try:
+                    handle = frame.evaluate_handle(
+                        _DOM_VISIBLE_ELEMENT_HANDLE, handle_payload
+                    )
+                    element = handle.as_element()
+                    if element is None or not element.is_visible():
+                        continue
+                except Exception:
+                    continue
+                matches.append({
+                    "handle": element,
+                    "frame_url": frame_url,
+                    "text": str(item.get("text") or ""),
+                    "attributes": item.get("attributes") or {},
+                    "outer_html": str(item.get("outer_html") or "")[:400],
+                    "rect": item.get("rect") or {},
+                    "disabled": bool(item.get("disabled")),
+                    "enabled": bool(element.is_enabled()),
+                })
         if len(matches) > 1:
             raise UploadBlockedError(
-                f"More than one visible exact '{name}' draft-save button exists across the page frames."
+                f"More than one visible exact '{name}' draft-save button exists across "
+                "the page frames; refusing an ambiguous save."
             )
+        if len(matches) == 1:
+            return matches[0]
     return None
+
+
+def _draft_save_button(page: Any, selectors: dict[str, Any]):
+    """Find one semantic draft-save button using same-frame DOM inspection."""
+    target = _draft_save_button_with_info(page, selectors)
+    return target["handle"] if target is not None else None
+
+
+def _click_draft_save_once(
+    page: Any,
+    selectors: dict[str, Any],
+    job: dict[str, Any],
+    job_path: Path,
+) -> None:
+    """Rebind and click the save control exactly once, recording full evidence.
+
+    There is deliberately NO secondary activation on failure (no second
+    Playwright click, no DOM element.click(), no dispatchEvent, no coordinate
+    click): a failed call may already have submitted the save, so any retry
+    risks a duplicate request. A raised exception always leaves the job in
+    UPLOAD_UNKNOWN for a single read-only reconciliation.
+    """
+    target = _draft_save_button_with_info(page, selectors)
+    if target is None:
+        raise UploadBlockedError(
+            "No visible draft-save button was found; no save was attempted."
+        )
+    button = target["handle"]
+    if not target["enabled"] or not button.is_enabled():
+        raise UploadBlockedError(
+            "The draft-save button is disabled; no save was attempted."
+        )
+
+    diagnostics: dict[str, Any] = {
+        "control": "draft_save",
+        "frame_url": target["frame_url"],
+        "tag": "button",
+        "text": target["text"],
+        "class": str(target["attributes"].get("class") or ""),
+        "attributes": target["attributes"],
+        "outer_html_excerpt": target["outer_html"],
+        "rect": target["rect"],
+        "visible": True,
+        "enabled": True,
+        "page_url_before": str(getattr(page, "url", "")),
+        "frame_urls_before": [
+            str(getattr(frame, "url", "")) for frame in _frame_contexts(page)
+        ],
+        "binding": "fresh_same_frame_element_handle",
+    }
+    job["save_button_diagnostics"] = diagnostics
+    job["state"] = "SAVE_REQUESTED"
+    job["save_requested_at"] = _now()
+    job["save_click_attempted"] = True
+    job["save_click_attempted_at"] = _now()
+    # Kept for schema compatibility: number of recorded click ATTEMPTS, not a
+    # server-side confirmation that the save request was received.
+    job["save_click_count"] = 1
+    _save_job(job_path, job)
+
+    try:
+        button.click(timeout=10_000)
+    except Exception as exc:
+        job["state"] = "UPLOAD_UNKNOWN"
+        job["save_click_returned"] = False
+        job["save_click_error_type"] = type(exc).__name__
+        job["save_click_error_message"] = str(exc)[:1200]
+        job["save_click_traceback"] = traceback.format_exc()[-6000:]
+        job["save_page_url_after"] = str(getattr(page, "url", ""))
+        job["save_frame_urls_after"] = [
+            str(getattr(frame, "url", "")) for frame in _frame_contexts(page)
+        ]
+        job["save_failed_at"] = _now()
+        _save_job(job_path, job)
+        raise UploadUnknownError(
+            "The save-draft click raised an exception. The save may or may not have "
+            "been submitted; exactly one read-only reconciliation is allowed. No "
+            "secondary click, upload or save was performed."
+        ) from exc
+
+    job["save_click_returned"] = True
+    job["save_click_returned_at"] = _now()
+    job["save_page_url_after"] = str(getattr(page, "url", ""))
+    job["save_frame_urls_after"] = [
+        str(getattr(frame, "url", "")) for frame in _frame_contexts(page)
+    ]
+    _save_job(job_path, job)
 
 def _preview_ready(page: Any, selectors: dict[str, Any]) -> bool:
     """Check preview readiness inside each frame without Locator queries."""
@@ -2922,6 +3056,51 @@ def _existing_session_only(project_root: Path) -> tuple[dict[str, Any], str]:
     )
 
 
+def _finalize_draft_verification(
+    job: dict[str, Any],
+    job_path: Path,
+    *,
+    after: dict[str, Any] | None,
+    verified: list[str],
+    verification_history: list[Any],
+    title: str,
+) -> None:
+    """Commit DRAFT_SAVED only for exactly one unique new DraftListManager row."""
+    if len(verified) != 1:
+        job["state"] = "UPLOAD_UNKNOWN"
+        job["post_upload_snapshot"] = after
+        observed_counts = [
+            int(item["match_count"])
+            for item in verification_history
+            if isinstance(item, dict) and "match_count" in item
+        ]
+        job["verification_matches"] = observed_counts[-1] if observed_counts else 0
+        job["verification_max_matches"] = max(observed_counts, default=0)
+        _save_job(job_path, job)
+        raise UploadUnknownError(
+            "The draft save was clicked once, but the new unpublished draft could not be uniquely "
+            "verified before the read-back timeout. No upload or save retry was attempted. "
+            "Inspect the target account's 草稿箱 and use the manual-review command to record the result."
+        )
+
+    job["state"] = "DRAFT_SAVED"
+    job["post_upload_snapshot"] = after
+    job["verified_draft"] = {
+        "title": title,
+        "row_text": verified[0],
+        "verified_at": _now(),
+        "draft_list_url": after["url"] if after else None,
+    }
+    job["save_action"] = {
+        "control": "draft_save",
+        "click_count": int(job.get("save_click_count", 0)),
+        "persistence_confirmation": "unique title match in DraftListManager",
+        "mobile_app_visibility": "not_verified_by_desktop_browser",
+    }
+    job["automatic_publication"] = False
+    _save_job(job_path, job)
+
+
 def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
     """Upload one strict-QA-passed video as an unpublished draft under standing user authorization."""
     project_root = project_root.resolve()
@@ -3004,24 +3183,10 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
         _fill_field(create_page, selectors, "title_input", str(metadata["title"]))
         _fill_field(create_page, selectors, "description_input", str(metadata["description"]))
 
-        button = _draft_save_button(create_page, selectors)
-        if button is None or not button.is_enabled():
-            raise UploadBlockedError("The draft-save control is not visible and enabled.")
-        # Record intent before the single click. A crash from this point onward
-        # is treated as uncertain and can only be reconciled from the draft list.
-        job["state"] = "SAVE_REQUESTED"
-        job["save_requested_at"] = _now()
-        job["save_click_count"] = 1
-        _save_job(job_path, job)
-        try:
-            button.click(timeout=10_000)
-        except Exception as exc:
-            job["state"] = "UPLOAD_UNKNOWN"
-            job["save_click_error"] = type(exc).__name__
-            _save_job(job_path, job)
-            raise UploadUnknownError(
-                "The save-draft action may have been submitted. Reconcile the draft list; do not click save again."
-            ) from exc
+        # Re-locate and bind the button immediately before the single click;
+        # the creator SPA re-renders and invalidates handles cached earlier.
+        # All state transitions and click evidence are recorded by this helper.
+        _click_draft_save_once(create_page, selectors, job, job_path)
 
         job["draft_verification_started_at"] = _now()
         after, verified, verification_history, verification_elapsed = (
@@ -3045,39 +3210,14 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
             "samples": verification_history,
         }
 
-        if len(verified) != 1:
-            job["state"] = "UPLOAD_UNKNOWN"
-            job["post_upload_snapshot"] = after
-            observed_counts = [
-                int(item["match_count"])
-                for item in verification_history
-                if isinstance(item, dict) and "match_count" in item
-            ]
-            job["verification_matches"] = observed_counts[-1] if observed_counts else 0
-            job["verification_max_matches"] = max(observed_counts, default=0)
-            _save_job(job_path, job)
-            raise UploadUnknownError(
-                "The draft save was clicked once, but the new unpublished draft could not be uniquely "
-                "verified before the read-back timeout. No upload or save retry was attempted. "
-                "Inspect the target account's 草稿箱 and use the manual-review command to record the result."
-            )
-
-        job["state"] = "DRAFT_SAVED"
-        job["post_upload_snapshot"] = after
-        job["verified_draft"] = {
-            "title": metadata["title"],
-            "row_text": verified[0],
-            "verified_at": _now(),
-            "draft_list_url": after["url"] if after else None,
-        }
-        job["save_action"] = {
-            "control": "draft_save",
-            "click_count": int(job.get("save_click_count", 0)),
-            "persistence_confirmation": "unique title match in DraftListManager",
-            "mobile_app_visibility": "not_verified_by_desktop_browser",
-        }
-        job["automatic_publication"] = False
-        _save_job(job_path, job)
+        _finalize_draft_verification(
+            job,
+            job_path,
+            after=after,
+            verified=verified,
+            verification_history=verification_history,
+            title=str(metadata["title"]),
+        )
         return {
             "state": job["state"],
             "job_id": job_id,
