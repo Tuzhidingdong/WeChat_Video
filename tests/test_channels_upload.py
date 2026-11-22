@@ -521,6 +521,8 @@ class _FakeElement:
             return False
         if "Array.from(element.children)" in expression:
             return list(self.child_texts)
+        if "scrollIntoView" in expression:
+            return None
         if "element.click()" in expression:
             self.dom_click_count += 1
             self._activate()

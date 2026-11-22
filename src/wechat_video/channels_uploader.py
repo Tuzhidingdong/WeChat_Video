@@ -2339,6 +2339,24 @@ def _click_draft_save_by_browser_mouse_once(
     phase, which is exactly what invalidated ``ElementHandle.click``. There is
     no fallback of any kind after this single call.
     """
+    # Bring the button into view with a read-only DOM scroll. This is NOT a
+    # click and cannot submit the form. The auto-scroll previously performed
+    # inside ElementHandle.click was the window in which the SPA replaced the
+    # node; doing it explicitly first lets the following quiet-window re-scan
+    # bind the final, stable node.
+    initial = _draft_save_button_with_info(page, selectors)
+    if initial is None:
+        raise UploadBlockedError("No visible draft-save button was found; no save was attempted.")
+    try:
+        initial["handle"].evaluate(
+            "(element) => element.scrollIntoView({block: 'center', inline: 'center'})"
+        )
+    except Exception as exc:
+        raise UploadBlockedError(
+            f"The save button could not be scrolled into view ({type(exc).__name__}); no click was attempted."
+        ) from exc
+    page.wait_for_timeout(400)
+
     target, state = _wait_for_stable_save_button(page, selectors)
     if not target["enabled"] or not target["handle"].is_enabled():
         raise UploadBlockedError("The draft-save button is not enabled; no click was attempted.")
