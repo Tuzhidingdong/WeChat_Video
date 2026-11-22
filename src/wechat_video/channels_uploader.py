@@ -657,12 +657,12 @@ def _wait_for_account_identity(
                 if _account_identity_evidence(frame, expected_name):
                     return True
                 if selector:
-                    candidates = _visible_locators(frame, str(selector), limit=8)
+                    candidates = _visible_element_handles(frame, str(selector), limit=8)
                     for candidate in candidates:
                         actual = candidate.inner_text().strip()
                         if actual == expected_name or expected_name in actual:
                             return True
-                exact_matches = _visible_locators(
+                exact_matches = _visible_element_handles(
                     frame, "body *", limit=8, exact_text=exact_text
                 )
                 if exact_matches:
@@ -796,7 +796,7 @@ _DOM_VISIBLE_ELEMENT_HANDLE = r"""(payload) => {
 }""";
 
 
-def _visible_locators(
+def _visible_element_handles(
     page: Any,
     selector: str,
     *,
@@ -859,12 +859,12 @@ def _visible_locators(
     return found
 
 
-def _visible_locator(page: Any, selector_list: Any):
+def _visible_element_handle(page: Any, selector_list: Any):
     """Return one visible ElementHandle from configured selectors, if unique."""
     if not isinstance(selector_list, list):
         selector_list = [selector_list] if selector_list else []
     for selector in selector_list:
-        candidates = _visible_locators(page, str(selector), limit=16)
+        candidates = _visible_element_handles(page, str(selector), limit=16)
         if len(candidates) > 1:
             raise UploadBlockedError(
                 f"More than one visible element matched the configured field selector {selector!r}."
@@ -936,7 +936,7 @@ def _open_create_view(
                 # Use the exact same direct-DOM visibility/text semantics as
                 # channels-inspect: button/[role=button], innerText || textContent,
                 # normalized whitespace, and the target iframe's own context.
-                matches = _visible_locators(
+                matches = _visible_element_handles(
                     frame,
                     "button, [role='button']",
                     limit=32,
@@ -1211,7 +1211,7 @@ def _video_file_input(page: Any, selectors: dict[str, Any]):
 
 
 def _fill_field(page: Any, selectors: dict[str, Any], key: str, value: str) -> None:
-    handle = _visible_locator(page, selectors.get(key, []))
+    handle = _visible_element_handle(page, selectors.get(key, []))
     if handle is None:
         raise UploadBlockedError(
             f"Could not locate the {key} field in any page frame using config/selectors.yaml; "
@@ -1234,7 +1234,7 @@ def _fill_field(page: Any, selectors: dict[str, Any], key: str, value: str) -> N
 def _draft_save_button(page: Any, selectors: dict[str, Any]):
     """Find one semantic draft-save button using same-frame DOM inspection."""
     for name in selectors.get("draft_save_button_text", ["存草稿", "保存草稿"]):
-        matches = _visible_locators(
+        matches = _visible_element_handles(
             page,
             "button, [role='button']",
             limit=32,
@@ -1538,7 +1538,7 @@ def _click_draft_list_nav_entry(
 
     def visible_entry():
         for selector in entry_selectors:
-            matches = _visible_locators(
+            matches = _visible_element_handles(
                 page, selector, limit=12, contains_text=entry_text
             )
             if len(matches) > 1:
@@ -1571,7 +1571,7 @@ def _click_draft_list_nav_entry(
     while True:
         found_parent = False
         for selector in parent_selectors:
-            for parent in _visible_locators(page, selector, limit=12):
+            for parent in _visible_element_handles(page, selector, limit=12):
                 found_parent = True
                 try:
                     parent.hover(timeout=2_000)
