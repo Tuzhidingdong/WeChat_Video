@@ -341,6 +341,14 @@ class _FakeElement:
         raise NotImplementedError(expression)
 
 
+class _FakeJSHandle:
+    def __init__(self, element):
+        self.element = element
+
+    def as_element(self):
+        return self.element
+
+
 class _FakeLocator:
     def __init__(self, items=None):
         self.items = list(items or [])
@@ -397,6 +405,21 @@ class _FakeFrame:
                         items.append(item)
             return _FakeLocator(items)
         return _FakeLocator(self.selectors.get(selector, []))
+
+    def evaluate_handle(self, expression, *args):
+        if "document.querySelectorAll" not in expression:
+            raise NotImplementedError(expression)
+        inputs = []
+        seen = set()
+        for selector, values in self.selectors.items():
+            if "input[type='file']" not in selector:
+                continue
+            for item in values:
+                if id(item) not in seen:
+                    seen.add(id(item))
+                    inputs.append(item)
+        index = int(args[0])
+        return _FakeJSHandle(inputs[index] if 0 <= index < len(inputs) else None)
 
     def evaluate(self, expression, *args):
         self.last_evaluate_expression = expression
@@ -1166,6 +1189,26 @@ def test_video_file_input_is_found_in_main_frame_when_form_fields_are_in_iframe(
     assert _video_file_input(
         page,
         {"video_file_input": ["input[type='file'][accept*='video']"], "video_file_input_timeout_seconds": 0},
+    ) is upload
+
+
+def test_video_file_input_binds_node_inside_child_frame_without_locator_count() -> None:
+    upload = _FakeElement(
+        attrs={"accept": "video/mp4"},
+        tag="input",
+        visible=False,
+    )
+    child = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create",
+        selectors={"input[type='file']": [upload]},
+        locator_unsupported=True,
+    )
+    main = _FakeFrame("https://channels.weixin.qq.com/platform/post/create")
+    page = _FakePage([main, child])
+
+    assert _video_file_input(
+        page,
+        {"video_file_input": ["input[type='file']"], "video_file_input_timeout_seconds": 0},
     ) is upload
 
 
