@@ -123,7 +123,7 @@ def _make_manual_review_job(root: Path, *, state: str = "UPLOAD_UNKNOWN") -> str
         },
     )
     (config_dir / "selectors.yaml").write_text(
-        "account_identity:\\n  exact_text: 成核生长\\n", encoding="utf-8"
+        "account_identity:\n  exact_text: 成核生长\n", encoding="utf-8"
     )
     job_id = "20261121_224049_critical_nucleus"
     _write(
