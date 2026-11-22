@@ -1703,6 +1703,75 @@ def _matching_draft_entries(
             matches.append(text)
     return matches
 
+def _safe_failed_before_upload(job: dict[str, Any]) -> bool:
+    """A failed job is retryable only when set_input_files was never entered."""
+    return (
+        str(job.get("state") or "") == "FAILED_BEFORE_SAVE"
+        and not job.get("upload_started_at")
+        and int(job.get("save_click_count") or 0) == 0
+        and job.get("verified_draft") is None
+    )
+
+
+def _resolve_upload_job_identity(
+    project_root: Path,
+    config: dict[str, Any],
+    source_run_id: str,
+) -> tuple[str, int]:
+    """Allocate an auditable upload-attempt ID without bypassing uncertain jobs.
+
+    The first attempt keeps the historical job ID equal to the output directory.
+    A later attempt may reuse the same QA-passed media only when every earlier
+    attempt for that source run is explicitly FAILED_BEFORE_SAVE and proves that
+    set_input_files was never entered and the save control was never clicked.
+    Any UPLOADING/SAVE_REQUESTED/UPLOAD_UNKNOWN or other non-retryable state
+    blocks the whole source run.
+    """
+    original_path = _job_path(project_root, config, source_run_id)
+    if not original_path.exists():
+        return source_run_id, 1
+
+    original = _read_json(original_path)
+    if not _safe_failed_before_upload(original):
+        state = str(original.get("state") or "")
+        if state in {"SAVE_REQUESTED", "UPLOAD_UNKNOWN", "UPLOADING", "PREPARED"}:
+            raise UploadUnknownError(
+                f"Source run {source_run_id} has an existing {state} job; "
+                "reconcile it before any further upload attempt."
+            )
+        raise UploadBlockedError(
+            f"Source run {source_run_id} already has a non-retryable upload job "
+            f"({state}); refusing another attempt."
+        )
+
+    for attempt in range(2, 100):
+        suffix = f".upload_attempt_{attempt:02d}"
+        prefix = source_run_id[: max(1, 120 - len(suffix))]
+        candidate_id = f"{prefix}{suffix}"
+        candidate_path = _job_path(project_root, config, candidate_id)
+        if not candidate_path.exists():
+            return candidate_id, attempt
+
+        previous = _read_json(candidate_path)
+        if _safe_failed_before_upload(previous):
+            continue
+
+        state = str(previous.get("state") or "")
+        if state in {"SAVE_REQUESTED", "UPLOAD_UNKNOWN", "UPLOADING", "PREPARED"}:
+            raise UploadUnknownError(
+                f"Upload attempt {candidate_id} is in state {state}; "
+                "reconcile it before any further upload attempt."
+            )
+        raise UploadBlockedError(
+            f"Upload attempt {candidate_id} is non-retryable ({state}); "
+            "refusing to bypass its recorded state."
+        )
+
+    raise UploadBlockedError(
+        f"Source run {source_run_id} has reached the maximum number of recorded upload attempts."
+    )
+
+
 def _job_path(project_root: Path, config: dict[str, Any], job_id: str) -> Path:
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", job_id):
         raise UploadBlockedError("Invalid job_id; only letters, digits, dot, underscore and hyphen are allowed.")
@@ -1960,28 +2029,17 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
     run_dir = run_dir.resolve()
     config, selectors = _load_config(project_root)
     metadata, qa, approval = _validate_run_for_upload(project_root, run_dir, config)
-    job_id = run_dir.name
+    source_run_id = run_dir.name
+    job_id, upload_attempt = _resolve_upload_job_identity(
+        project_root, config, source_run_id
+    )
     job_path = _job_path(project_root, config, job_id)
-    if job_path.exists():
-        existing = _read_json(job_path)
-        state = str(existing.get("state", ""))
-        if state in {"DRAFT_SAVED", "MANUALLY_CONFIRMED_DRAFT"}:
-            raise UploadBlockedError("This job already has a confirmed draft; duplicate upload is blocked.")
-        if state == "MANUAL_REVIEW_NOT_FOUND":
-            raise UploadBlockedError(
-                "This job has a time-scoped manual not-found review. It remains blocked; inspect the account again and record a new manual review, never retry this job."
-            )
-        if state in {"SAVE_REQUESTED", "UPLOAD_UNKNOWN", "UPLOADING", "PREPARED"}:
-            raise UploadUnknownError(
-                f"This job is already in state {state}. Reconcile it with channels-reconcile; do not upload again."
-            )
-        raise UploadBlockedError(
-            f"This job already has an upload state ({state}); manual reconciliation is required before another attempt."
-        )
 
     job: dict[str, Any] = {
         "schema_version": 1,
         "job_id": job_id,
+        "source_run_id": source_run_id,
+        "upload_attempt": upload_attempt,
         "state": "CREATED",
         "title": metadata["title"],
         "video_path": str((run_dir / "final.mp4").resolve()),
