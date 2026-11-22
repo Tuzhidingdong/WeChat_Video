@@ -897,7 +897,11 @@ def _video_file_input(page: Any, selectors: dict[str, Any]):
                 })
 
         last_diagnostics = diagnostics
-        if candidates:
+        # A single visible candidate is not sufficient evidence if another
+        # frame could not be inspected: that frame may contain a competing
+        # file control. Retry while the creator UI settles, then fail closed.
+        all_frames_scanned = all(item.get("scan_error") is None for item in diagnostics)
+        if candidates and all_frames_scanned:
             highest = max(item["score"] for item in candidates)
             best = [item for item in candidates if item["score"] == highest]
             if len(best) == 1:
