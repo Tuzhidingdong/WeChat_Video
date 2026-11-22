@@ -769,6 +769,7 @@ def _video_file_input(page: Any, selectors: dict[str, Any]):
     last_diagnostics: list[dict[str, Any]] = []
 
     scan_expression = r"""(preferredSelectors) => {
+        /* __CHANNELS_VIDEO_FILE_INPUT_SCAN__ */
         const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
         const isVisible = (element) => {
             const rect = element.getBoundingClientRect();
@@ -824,7 +825,10 @@ def _video_file_input(page: Any, selectors: dict[str, Any]):
         labels = " ".join(str(value) for value in item.get("labels", [])).casefold()
         contexts = [str(value) for value in item.get("context_text", [])]
         context = " ".join(contexts[:2]).casefold()
-        video_terms = ("video", "mp4", "quicktime", "m4v", "webm", "mpeg", "avi")
+        video_terms = (
+            "视频", "video", "mp4", "quicktime", "m4v", "webm", "mpeg",
+            "avi", ".mov", ".mkv", ".wmv", ".flv", ".3gp",
+        )
         image_terms = ("image/", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
         accept_is_video = any(term in accept for term in video_terms)
         accept_is_image_only = (
@@ -834,6 +838,12 @@ def _video_file_input(page: Any, selectors: dict[str, Any]):
             return None
         if accept_is_video:
             return 100, "video_accept"
+        configured_specific_match = any(
+            str(selector).strip() not in {"input[type='file']", "input[type='file'][accept*='video']"}
+            for selector in item.get("matched_selectors", [])
+        )
+        if configured_specific_match:
+            return 95, "configured_specific_selector"
         if any(term in identity for term in video_terms):
             return 90, "video_identity_attribute"
         if any(term in labels for term in ("视频", "video")):
@@ -848,7 +858,13 @@ def _video_file_input(page: Any, selectors: dict[str, Any]):
         candidates: list[dict[str, Any]] = []
         diagnostics: list[dict[str, Any]] = []
         for frame in _frame_contexts(page):
-            frame_url = str(getattr(frame, "url", ""))
+            raw_frame_url = str(getattr(frame, "url", ""))
+            parsed_frame_url = urlparse(raw_frame_url)
+            frame_url = (
+                f"{parsed_frame_url.scheme}://{parsed_frame_url.netloc}{parsed_frame_url.path}"
+                if parsed_frame_url.scheme and parsed_frame_url.netloc
+                else raw_frame_url[:240]
+            )
             try:
                 raw_items = frame.evaluate(scan_expression, selectors_list)
                 if not isinstance(raw_items, list):
