@@ -51,6 +51,15 @@ For an uncertain outcome, run the read-only command:
 
 Reconciliation never uploads, never clicks save and never retries. An upload-attempt ID is never reused.
 
+## 5b. Human-takeover save checkpoint (observed safe path)
+
+A real 2026-11-22 session in the dedicated **visible** Edge profile established why automated `ElementHandle.click()` failed while a human click succeeded:
+
+- The save button in `/micro/content/post/create` is initially rendered ~1200 px below the frame viewport with a transient `weui-desktop-btn_disabled` class. Playwright's actionability path (`waiting for stable` + `scrolling into view`) takes long enough for the SPA to re-render and replace the node, producing `ElementHandle.click: Element is not attached to the DOM` **before the click is dispatched**.
+- A human mouse click produced five `isTrusted=true` events (`pointerdown`/`mousedown`/`pointerup`/`mouseup`/`click`) on the same `保存草稿` button at the same coordinates, with **zero** related DOM mutations during the click, followed by `POST /micro/content/cgi-bin/mmfinderassistant-bin/post/post_draft` → **201** and a unique new row in 草稿箱.
+
+`install_manual_save_monitor()` / `read_manual_save_monitor()` / `summarize_manual_save_click()` implement the reusable, strictly read-only checkpoint: the automation performs upload and metadata fill, then pauses; the operator clicks once in the visible window; the helpers capture and summarize the trusted event chain and any SPA mutations; verification then reads DraftListManager without touching the save control again. The monitor never calls `preventDefault`, `stopPropagation`, `dispatchEvent`, `.click()` or form submission. Do not convert this into an unattended synthetic click without fresh evidence; `isTrusted` cannot be forged and the draft-list row must be the success criterion.
+
 The output directory is the **source run**; upload jobs are separate attempts against
 that already-generated media. The first attempt keeps the historical job ID equal
 to the output-folder name. If and only if an earlier job is `FAILED_BEFORE_SAVE`,

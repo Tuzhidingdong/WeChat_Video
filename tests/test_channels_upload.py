@@ -24,6 +24,10 @@ from wechat_video.channels_uploader import (
     _draft_save_button,
     _draft_save_button_with_info,
     _click_draft_save_once,
+    MANUAL_SAVE_MONITOR_JS,
+    install_manual_save_monitor,
+    read_manual_save_monitor,
+    summarize_manual_save_click,
     _finalize_draft_verification,
     _draft_snapshot,
     _open_draft_list_view,
@@ -1471,6 +1475,92 @@ def _save_button_page(*buttons):
 
 
 _SAVE_SELECTORS = {"draft_save_button_text": ["保存草稿"]}
+
+
+def test_manual_save_monitor_script_is_read_only() -> None:
+    """The installed monitor must observe only - never act on the page."""
+    lowered = MANUAL_SAVE_MONITOR_JS.lower()
+    for forbidden in (
+        "preventdefault",
+        "stoppropagation",
+        "stopimmediatepropagation",
+        "dispatchevent",
+        ".click(",
+        ".submit(",
+    ):
+        assert forbidden not in lowered
+    for required in ("pointerdown", "pointerup", "mousedown", "mouseup", "click", "mutationobserver"):
+        assert required in lowered
+
+
+class _MonitorFrame(_FakeFrame):
+    def __init__(self, url, events, mutations):
+        super().__init__(url)
+        self.events = events
+        self.mutations = mutations
+
+    def evaluate(self, expression, *args):
+        if "__CHANNELS_MANUAL_SAVE_EVENTS__" in expression:
+            return self.events
+        if "__CHANNELS_MANUAL_SAVE_MUTATIONS__" in expression:
+            return self.mutations
+        if "MutationObserver" in expression:
+            return "installed"
+        return super().evaluate(expression, *args)
+
+
+def _manual_save_page(events, mutations):
+    frame = _MonitorFrame(
+        "https://channels.weixin.qq.com/micro/content/post/create", events, mutations
+    )
+    return _FakePage([_FakeFrame("https://channels.weixin.qq.com/platform/post/create"), frame])
+
+
+def test_manual_save_monitor_install_and_read() -> None:
+    events = [{"type": "click", "isTrusted": True, "nearestButton": {"innerText": "保存草稿"}}]
+    page = _manual_save_page(events, [])
+    selectors = {"creator_form_frame_path": "/micro/content/post/create"}
+
+    installed = install_manual_save_monitor(page, selectors)
+    assert installed["installed"] is True
+    assert installed["frame_url"].endswith("/micro/content/post/create")
+
+    trace = read_manual_save_monitor(page, selectors)
+    assert trace["events"] == events
+    assert trace["mutations"] == []
+
+
+def test_summarize_manual_save_click_from_real_capture() -> None:
+    def event(kind):
+        return {
+            "type": kind,
+            "isTrusted": True,
+            "nearestButton": {
+                "innerText": "保存草稿",
+                "className": "weui-desktop-btn weui-desktop-btn_default",
+            },
+            "target": {"innerText": "保存草稿"},
+            "hitElement": {"innerText": "保存草稿"},
+        }
+
+    events = [event(kind) for kind in ("pointerdown", "mousedown", "pointerup", "mouseup", "click")]
+
+    summary = summarize_manual_save_click(events, [])
+
+    assert summary["trusted_click_count"] == 1
+    assert summary["save_button_clicked"] is True
+    assert summary["target_buttons"] == ["保存草稿"]
+    assert summary["hit_elements"] == ["保存草稿"]
+    assert summary["same_node_across_pointer_phases"] is True
+    assert summary["mutation_count"] == 0
+
+
+def test_summarize_manual_save_click_records_replacement() -> None:
+    mutations = [{"type": "childList", "target": {"innerText": "保存草稿"}}]
+    summary = summarize_manual_save_click([], mutations)
+    assert summary["trusted_click_count"] == 0
+    assert summary["save_button_clicked"] is False
+    assert summary["mutation_count"] == 1
 
 
 def test_finalize_draft_verification_requires_unique_new_row(tmp_path, monkeypatch) -> None:

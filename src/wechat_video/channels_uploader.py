@@ -2180,6 +2180,181 @@ def _click_draft_save_once(
     ]
     _save_job(job_path, job)
 
+# Read-only monitor used by the human-takeover save checkpoint. The listeners
+# only record; they never preventDefault/stopPropagation, never dispatch events,
+# never click and never submit a form. This is derived from the real 2026-11-22
+# session where a human mouse click produced five isTrusted events on the exact
+# "保存草稿" button and a POST .../post/post_draft returned 201.
+MANUAL_SAVE_MONITOR_JS = r"""() => {
+  if (window.__CHANNELS_MANUAL_SAVE_MONITOR__) return 'already_installed';
+  window.__CHANNELS_MANUAL_SAVE_EVENTS__ = [];
+  window.__CHANNELS_MANUAL_SAVE_MUTATIONS__ = [];
+  const summary = (el) => {
+    if (!el || el.nodeType !== 1) return null;
+    const r = el.getBoundingClientRect();
+    return {
+      tag: el.tagName.toLowerCase(),
+      id: el.id || '',
+      className: String(el.className || '').slice(0, 240),
+      innerText: String(el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+      disabled: el.getAttribute('disabled'),
+      ariaDisabled: el.getAttribute('aria-disabled'),
+      rect: {x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)},
+      connected: el.isConnected
+    };
+  };
+  const record = (e) => {
+    const target = e.target;
+    const nearest = target && target.closest ? target.closest('button, [role=button]') : null;
+    let hit = null;
+    try { hit = document.elementFromPoint(e.clientX, e.clientY); } catch (_) {}
+    window.__CHANNELS_MANUAL_SAVE_EVENTS__.push({
+      ts: new Date().toISOString(),
+      type: e.type,
+      isTrusted: e.isTrusted,
+      target: summary(target),
+      composedPath: (e.composedPath ? e.composedPath() : []).slice(0, 8).map(summary),
+      nearestButton: summary(nearest),
+      clientX: e.clientX,
+      clientY: e.clientY,
+      hitElement: summary(hit),
+      href: location.href
+    });
+    if (window.__CHANNELS_MANUAL_SAVE_EVENTS__.length > 300) {
+      window.__CHANNELS_MANUAL_SAVE_EVENTS__.shift();
+    }
+  };
+  ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click'].forEach((type) => {
+    document.addEventListener(type, record, true);
+  });
+  const observer = new MutationObserver((records) => {
+    for (const change of records) {
+      const nodes = [].concat(
+        Array.from(change.addedNodes || []),
+        Array.from(change.removedNodes || [])
+      );
+      const relevant = nodes.some((node) =>
+        node.nodeType === 1 && String(node.innerText || '').indexOf('保存草稿') !== -1
+      ) || (change.type === 'attributes' && change.target &&
+            String(change.target.innerText || '').indexOf('保存草稿') !== -1);
+      if (!relevant) continue;
+      window.__CHANNELS_MANUAL_SAVE_MUTATIONS__.push({
+        ts: new Date().toISOString(),
+        type: change.type,
+        attributeName: change.attributeName || null,
+        target: summary(change.target),
+        added: nodes.filter((node) => node.nodeType === 1).slice(0, 3).map(summary),
+        removed: Array.from(change.removedNodes || [])
+          .filter((node) => node.nodeType === 1).slice(0, 3).map(summary)
+      });
+      if (window.__CHANNELS_MANUAL_SAVE_MUTATIONS__.length > 300) {
+        window.__CHANNELS_MANUAL_SAVE_MUTATIONS__.shift();
+      }
+    }
+  });
+  observer.observe(document, {
+    subtree: true, childList: true, attributes: true, attributeOldValue: true
+  });
+  window.__CHANNELS_MANUAL_SAVE_OBSERVER__ = observer;
+  window.__CHANNELS_MANUAL_SAVE_MONITOR__ = true;
+  return 'installed';
+}"""
+
+
+def install_manual_save_monitor(page: Any, selectors: dict[str, Any]) -> dict[str, Any]:
+    """Install read-only mouse/DOM monitors in the real creator frame.
+
+    No click is performed here. The human operator is expected to click the
+    save button in the visible browser while this monitor records the trusted
+    event chain.
+    """
+    form_path = str(
+        selectors.get("creator_form_frame_path") or _DEFAULT_CREATE_FORM_PATH
+    )
+    for frame in _frame_contexts(page):
+        parsed = urlparse(str(getattr(frame, "url", "")))
+        if (
+            parsed.hostname != _CHANNELS_HOST
+            or parsed.path.rstrip("/") != form_path.rstrip("/")
+        ):
+            continue
+        result = frame.evaluate(MANUAL_SAVE_MONITOR_JS)
+        return {
+            "installed": True,
+            "frame_url": str(getattr(frame, "url", "")),
+            "result": str(result),
+        }
+    raise UploadBlockedError(
+        f"The creator form frame {form_path} is not mounted; no monitor was installed."
+    )
+
+
+def read_manual_save_monitor(page: Any, selectors: dict[str, Any]) -> dict[str, Any]:
+    """Read the bounded, read-only traces recorded by the manual-save monitor."""
+    form_path = str(
+        selectors.get("creator_form_frame_path") or _DEFAULT_CREATE_FORM_PATH
+    )
+    for frame in _frame_contexts(page):
+        parsed = urlparse(str(getattr(frame, "url", "")))
+        if (
+            parsed.hostname != _CHANNELS_HOST
+            or parsed.path.rstrip("/") != form_path.rstrip("/")
+        ):
+            continue
+        events = frame.evaluate("() => window.__CHANNELS_MANUAL_SAVE_EVENTS__ || []")
+        mutations = frame.evaluate(
+            "() => window.__CHANNELS_MANUAL_SAVE_MUTATIONS__ || []"
+        )
+        return {
+            "frame_url": str(getattr(frame, "url", "")),
+            "events": events if isinstance(events, list) else [],
+            "mutations": mutations if isinstance(mutations, list) else [],
+        }
+    raise UploadBlockedError(
+        f"The creator form frame {form_path} is not mounted; no trace could be read."
+    )
+
+
+def summarize_manual_save_click(
+    events: list[dict[str, Any]], mutations: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Summarize a human click from captured traces without inventing events."""
+    trusted_clicks = [
+        item for item in events
+        if isinstance(item, dict)
+        and item.get("type") == "click"
+        and item.get("isTrusted") is True
+    ]
+    button_of = lambda item: (item or {}).get("nearestButton") or (item or {}).get("target") or {}
+    target_texts = [str(button_of(item).get("innerText") or "") for item in trusted_clicks]
+    hit_texts = [
+        str(((item or {}).get("hitElement") or {}).get("innerText") or "")
+        for item in trusted_clicks
+    ]
+    phases = ("pointerdown", "pointerup", "click")
+    phase_nodes = {
+        phase: [
+            str(button_of(item).get("className") or "")
+            for item in events
+            if isinstance(item, dict) and item.get("type") == phase
+        ]
+        for phase in phases
+    }
+    same_node_across_phases = all(
+        len(phase_nodes[phase]) == len(trusted_clicks)
+        and (not trusted_clicks or phase_nodes[phase] == phase_nodes["click"])
+        for phase in phases
+    )
+    return {
+        "trusted_click_count": len(trusted_clicks),
+        "target_buttons": target_texts,
+        "hit_elements": hit_texts,
+        "same_node_across_pointer_phases": same_node_across_phases,
+        "mutation_count": len(mutations),
+        "save_button_clicked": any("保存草稿" in text for text in target_texts),
+    }
+
+
 def _preview_ready(page: Any, selectors: dict[str, Any]) -> bool:
     """Check preview readiness inside each frame without Locator queries."""
     selector_list = selectors.get("preview_selectors", ["video"])
