@@ -12,7 +12,9 @@ from wechat_video.channels_metadata import (
 )
 from wechat_video.channels_uploader import (
     UploadBlockedError,
+    UploadUnknownError,
     _approval_record,
+    _resolve_upload_job_identity,
     _matching_draft_entries,
     _validate_run_for_upload,
     _visible_element_handle,
@@ -40,6 +42,102 @@ from wechat_video.topic_approval import (
 
 
 
+
+
+def test_new_source_run_gets_first_upload_attempt_id(tmp_path: Path) -> None:
+    job_id, attempt = _resolve_upload_job_identity(
+        tmp_path, {"jobs_dir": "runtime/upload_jobs"}, "run-123"
+    )
+    assert job_id == "run-123"
+    assert attempt == 1
+
+
+def test_failed_before_upload_allocates_new_attempt_without_copying_video(
+    tmp_path: Path,
+) -> None:
+    jobs_dir = tmp_path / "runtime" / "upload_jobs"
+    jobs_dir.mkdir(parents=True)
+    (jobs_dir / "run-123.json").write_text(
+        json.dumps({
+            "job_id": "run-123",
+            "state": "FAILED_BEFORE_SAVE",
+            "save_click_count": 0,
+            "verified_draft": None,
+        }),
+        encoding="utf-8",
+    )
+
+    job_id, attempt = _resolve_upload_job_identity(
+        tmp_path, {"jobs_dir": "runtime/upload_jobs"}, "run-123"
+    )
+    assert job_id == "run-123.upload_attempt_02"
+    assert attempt == 2
+
+
+def test_multiple_proven_pre_upload_failures_keep_separate_attempt_records(
+    tmp_path: Path,
+) -> None:
+    jobs_dir = tmp_path / "runtime" / "upload_jobs"
+    jobs_dir.mkdir(parents=True)
+    safe_failure = {
+        "state": "FAILED_BEFORE_SAVE",
+        "save_click_count": 0,
+        "verified_draft": None,
+    }
+    (jobs_dir / "run-123.json").write_text(
+        json.dumps({"job_id": "run-123", **safe_failure}), encoding="utf-8"
+    )
+    (jobs_dir / "run-123.upload_attempt_02.json").write_text(
+        json.dumps({
+            "job_id": "run-123.upload_attempt_02",
+            "source_run_id": "run-123",
+            **safe_failure,
+        }),
+        encoding="utf-8",
+    )
+
+    job_id, attempt = _resolve_upload_job_identity(
+        tmp_path, {"jobs_dir": "runtime/upload_jobs"}, "run-123"
+    )
+    assert job_id == "run-123.upload_attempt_03"
+    assert attempt == 3
+
+
+def test_unknown_or_started_upload_attempt_cannot_be_bypassed(
+    tmp_path: Path,
+) -> None:
+    jobs_dir = tmp_path / "runtime" / "upload_jobs"
+    jobs_dir.mkdir(parents=True)
+    path = jobs_dir / "run-123.json"
+    path.write_text(
+        json.dumps({
+            "job_id": "run-123",
+            "state": "UPLOAD_UNKNOWN",
+            "save_click_count": 1,
+            "upload_started_at": "2026-11-22T14:00:00",
+            "verified_draft": None,
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(UploadUnknownError):
+        _resolve_upload_job_identity(
+            tmp_path, {"jobs_dir": "runtime/upload_jobs"}, "run-123"
+        )
+
+    path.write_text(
+        json.dumps({
+            "job_id": "run-123",
+            "state": "FAILED_BEFORE_SAVE",
+            "save_click_count": 0,
+            "upload_started_at": "2026-11-22T14:00:00",
+            "verified_draft": None,
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(UploadBlockedError, match="non-retryable"):
+        _resolve_upload_job_identity(
+            tmp_path, {"jobs_dir": "runtime/upload_jobs"}, "run-123"
+        )
 
 def test_edge_headless_mode_is_detected_without_accepting_unrelated_flags() -> None:
     assert _is_headless_command(["msedge.exe", "--user-data-dir=C:/profile", "--headless=new"])
