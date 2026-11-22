@@ -570,29 +570,47 @@ class _FakeFrame:
                 raise RuntimeError("simulated same-frame DOM scan failure")
             payload = args[0]
             candidates = self._dom_candidates(payload)
+            observed_payload = dict(payload)
+            observed_payload["exact_text"] = None
+            observed_payload["contains_text"] = None
+            observed = self._dom_candidates(observed_payload)
             limit = int(payload.get("limit", 8))
+
+            def describe(item, index):
+                visible_text = " ".join(str(item.inner_text() or "").split())
+                aria_label = " ".join(
+                    str(item.get_attribute("aria-label") or "").split()
+                )
+                return {
+                    "visible_index": index,
+                    "tag": item.tag,
+                    "text": visible_text[:160],
+                    "aria_label": aria_label[:160],
+                    "matched_label": (visible_text or aria_label)[:160],
+                    "label_source": (
+                        "visible_text" if visible_text
+                        else "aria_label" if aria_label
+                        else "none"
+                    ),
+                    "disabled": not item.is_enabled(),
+                }
+
             return {
                 "match_count": len(candidates),
                 "items": [
-                    {
-                        "visible_index": index,
-                        "tag": item.tag,
-                        "text": " ".join(str(item.inner_text() or "").split())[:160],
-                        "aria_label": str(item.get_attribute("aria-label") or "")[:160],
-                        "matched_label": (
-                            " ".join(str(item.inner_text() or "").split())
-                            or str(item.get_attribute("aria-label") or "").strip()
-                        )[:160],
-                        "label_source": (
-                            "visible_text" if str(item.inner_text() or "").strip()
-                            else "aria_label" if str(item.get_attribute("aria-label") or "").strip()
-                            else "none"
-                        ),
-                        "disabled": not item.is_enabled(),
-                    }
+                    describe(item, index)
                     for index, item in enumerate(candidates[:limit])
                 ],
+                "observed_items": (
+                    [
+                        describe(item, index)
+                        for index, item in enumerate(observed[:limit])
+                    ]
+                    if payload.get("include_observed") is True else []
+                ),
             }
+        if "document.readyState" in expression:
+            return "complete"
         if "__CHANNELS_ACCOUNT_IDENTITY_SCAN__" in expression:
             return self.identity_matches
         if "__CHANNELS_VIDEO_FILE_INPUT_SCAN__" in expression:
@@ -1443,6 +1461,51 @@ def test_open_create_view_matches_aria_label_when_button_has_no_rendered_text(
     assert "getAttribute(\"aria-label\")" in card.last_evaluate_expression
 
 
+def test_open_create_view_failure_captures_target_frame_button_diagnostics(
+    monkeypatch,
+) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    unrelated = _FakeElement(
+        text="管理内容",
+        attrs={"aria-label": "管理内容"},
+        tag="button",
+    )
+    main = _FakeFrame("https://channels.weixin.qq.com/platform")
+    card = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/iframe/post-card.html",
+        selectors={"button, [role='button']": [unrelated]},
+        locator_unsupported=True,
+    )
+    page = _FakePage([main, card])
+    monkeypatch.setattr(
+        uploader, "_ensure_account_identity", lambda *_args, **_kwargs: None
+    )
+
+    with pytest.raises(UploadBlockedError, match="Sanitized target-frame button diagnostics") as caught:
+        _open_create_view(
+            page,
+            {
+                "platform_url": "https://channels.weixin.qq.com/platform",
+                "account_name": "成核生长",
+            },
+            {
+                "create_nav_frame_path": "/micro/content/iframe/post-card.html",
+                "create_nav_button_text": "发表视频",
+                "create_nav_timeout_seconds": 0,
+            },
+        )
+
+    diagnostics = caught.value.diagnostics
+    assert diagnostics["expected_button_label"] == "发表视频"
+    assert diagnostics["matching_frame_count"] == 1
+    assert diagnostics["frame_observations"][0]["frame_url"] == card.url
+    assert diagnostics["frame_observations"][0]["ready_state"] == "complete"
+    assert diagnostics["frame_observations"][0]["visible_buttons"][0]["matched_label"] == "管理内容"
+    assert diagnostics["frame_observations"][0]["visible_buttons"][0]["label_source"] == "visible_text"
+    assert unrelated.clicked is False
+
+
 def test_open_create_view_rejects_ambiguous_creator_entry_without_clicking(
     monkeypatch,
 ) -> None:
@@ -1792,6 +1855,42 @@ def test_live_description_selector_matches_empty_contenteditable_and_spa_wait_is
     assert selectors["draft_list_rows_timeout_seconds"] == 15
     assert "draft_row_selectors" not in selectors
 
+
+
+def test_inspector_reports_button_label_source_for_aria_only_label() -> None:
+    from wechat_video.channels_uploader import _inspect_frame_controls
+
+    frame = _FakeFrame(
+        "https://channels.weixin.qq.com/micro/content/iframe/post-card.html",
+        inspection={
+            "ready_state": "complete",
+            "counts": {
+                "buttons_total": 1,
+                "buttons_visible": 1,
+                "textboxes_total": 0,
+                "textboxes_visible": 0,
+                "file_inputs_total": 0,
+                "file_inputs_visible": 0,
+            },
+            "buttons": [{
+                "tag": "button",
+                "text": "",
+                "aria_label": "发表视频",
+            }],
+            "textboxes": [],
+            "file_inputs": [],
+        },
+    )
+
+    inventory = _inspect_frame_controls(frame, frame.url)
+
+    assert inventory["visible_buttons"] == [{
+        "tag": "button",
+        "text": "发表视频",
+        "aria_label": "发表视频",
+        "label_source": "aria_label",
+        "frame_url": frame.url,
+    }]
 
 
 def test_read_only_inspector_collects_controls_from_direct_frame_dom_inventory() -> None:
