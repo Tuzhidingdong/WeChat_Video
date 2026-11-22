@@ -27,6 +27,8 @@ from wechat_video.channels_uploader import (
     _login_required_hint,
     _collect_ui_inventory,
     _is_headless_command,
+    _verify_new_draft_after_save,
+    record_manual_review,
     approve_run,
 )
 from wechat_video.topic_approval import (
@@ -43,6 +45,182 @@ def test_edge_headless_mode_is_detected_without_accepting_unrelated_flags() -> N
     assert _is_headless_command(["msedge.exe", "--headless"])
     assert not _is_headless_command(["msedge.exe", "--new-window", "--disable-gpu"])
     assert not _is_headless_command(["msedge.exe", "--disable-headless-mode"])
+
+
+def test_post_save_draft_verification_mounts_spa_once_then_polls_existing_view(
+    monkeypatch,
+) -> None:
+    import wechat_video.channels_uploader as uploader
+
+    page = _FakePage([_FakeFrame("https://channels.weixin.qq.com/platform")])
+    calls = {"navigation": 0, "snapshot": 0}
+    snapshots = [
+        {
+            "view_type": "draft_list",
+            "view_verified": True,
+            "draft_count": 0,
+            "entries": [],
+            "view_evidence": {"page_path": "/platform"},
+        },
+        {
+            "view_type": "draft_list",
+            "view_verified": True,
+            "draft_count": 1,
+            "entries": ["临界半径如何决定成核 2026-11-22 10:30"],
+            "url": "https://channels.weixin.qq.com/platform",
+            "view_evidence": {"page_path": "/platform"},
+        },
+    ]
+
+    def open_view(_page, _config, _selectors):
+        calls["navigation"] += 1
+
+    def read_snapshot(_page, _selectors):
+        calls["snapshot"] += 1
+        return snapshots[min(calls["snapshot"] - 1, len(snapshots) - 1)]
+
+    monkeypatch.setattr(uploader, "_open_draft_list_view", open_view)
+    monkeypatch.setattr(uploader, "_draft_snapshot", read_snapshot)
+
+    after, matches, history, elapsed = _verify_new_draft_after_save(
+        page,
+        {
+            "draft_verify_timeout_seconds": 5,
+            "draft_verify_poll_interval_seconds": 0.5,
+            "draft_verify_initial_settle_seconds": 0,
+        },
+        {"draft_status_texts": ["草稿"]},
+        title="临界半径如何决定成核",
+        before_snapshot={"entries": []},
+    )
+
+    assert calls == {"navigation": 1, "snapshot": 2}
+    assert after is snapshots[1]
+    assert matches == ["临界半径如何决定成核 2026-11-22 10:30"]
+    assert len(history) == 2
+    assert history[-1]["new_match_count"] == 1
+    assert elapsed >= 0
+    assert page.wait_calls == [500]
+
+
+def _make_manual_review_job(root: Path, *, state: str = "UPLOAD_UNKNOWN") -> str:
+    config_dir = root / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    _write(
+        config_dir / "channels_upload.json",
+        {
+            "schema_version": 1,
+            "account_name": "成核生长",
+            "jobs_dir": "runtime/upload_jobs",
+            "selectors_file": "config/selectors.yaml",
+            "safety": {
+                "allow_publish": False,
+                "allow_schedule": False,
+                "allow_delete": False,
+                "allow_overwrite": False,
+                "cdp_host": "127.0.0.1",
+            },
+        },
+    )
+    (config_dir / "selectors.yaml").write_text(
+        "account_identity:\\n  exact_text: 成核生长\\n", encoding="utf-8"
+    )
+    job_id = "20261121_224049_critical_nucleus"
+    _write(
+        root / "runtime" / "upload_jobs" / f"{job_id}.json",
+        {
+            "schema_version": 1,
+            "job_id": job_id,
+            "state": state,
+            "title": "临界半径如何决定成核",
+            "save_click_count": 1,
+            "verified_draft": None,
+            "automatic_publication": False,
+        },
+    )
+    return job_id
+
+
+def test_manual_review_found_records_user_attestation_without_changing_save_clicks(
+    tmp_path: Path,
+) -> None:
+    job_id = _make_manual_review_job(tmp_path)
+    row = "临界半径如何决定成核 2026-11-22 10:30"
+
+    result = record_manual_review(
+        tmp_path,
+        job_id,
+        result="draft-found",
+        reviewed_by="local reviewer",
+        row_text=row,
+        confirmation=f"CONFIRM CHANNELS DRAFT FOUND {job_id}",
+    )
+
+    job = json.loads(
+        (tmp_path / "runtime" / "upload_jobs" / f"{job_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert result["state"] == "MANUALLY_CONFIRMED_DRAFT"
+    assert result["upload_or_save_retried"] is False
+    assert job["state"] == "MANUALLY_CONFIRMED_DRAFT"
+    assert job["save_click_count"] == 1
+    assert job["verified_draft"]["verification_method"] == "manual_user_attestation"
+    assert job["verified_draft"]["row_text"] == row
+    assert len(job["manual_reviews"]) == 1
+
+
+def test_manual_not_found_is_time_scoped_and_keeps_same_job_blocked(
+    tmp_path: Path,
+) -> None:
+    job_id = _make_manual_review_job(tmp_path)
+
+    result = record_manual_review(
+        tmp_path,
+        job_id,
+        result="not-found",
+        reviewed_by="local reviewer",
+        note="Checked the target account's 草稿箱; no row with the exact title was visible.",
+        confirmation=f"CONFIRM CHANNELS DRAFT NOT FOUND {job_id}",
+    )
+
+    job = json.loads(
+        (tmp_path / "runtime" / "upload_jobs" / f"{job_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert result["state"] == "MANUAL_REVIEW_NOT_FOUND"
+    assert result["same_job_retry_allowed"] is False
+    assert "time-scoped" in result["note"]
+    assert job["state"] == "MANUAL_REVIEW_NOT_FOUND"
+    assert job["save_click_count"] == 1
+    assert job["verified_draft"] is None
+    assert job["manual_review"]["result"] == "not_found_at_review_time"
+
+
+def test_manual_review_requires_exact_confirmation_and_matching_title(
+    tmp_path: Path,
+) -> None:
+    job_id = _make_manual_review_job(tmp_path)
+
+    with pytest.raises(UploadBlockedError, match="confirmation did not match"):
+        record_manual_review(
+            tmp_path,
+            job_id,
+            result="draft-found",
+            reviewed_by="local reviewer",
+            row_text="临界半径如何决定成核 2026-11-22",
+            confirmation="yes",
+        )
+    with pytest.raises(UploadBlockedError, match="must be copied from 草稿箱"):
+        record_manual_review(
+            tmp_path,
+            job_id,
+            result="draft-found",
+            reviewed_by="local reviewer",
+            row_text="different title",
+            confirmation=f"CONFIRM CHANNELS DRAFT FOUND {job_id}",
+        )
 
 
 class _FakeElement:
