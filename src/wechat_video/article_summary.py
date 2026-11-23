@@ -24,7 +24,6 @@ from .render import render_article_summary_scene
 from .subtitles import write_chinese_subtitles
 from .timeline import build_audio_timeline, write_timeline
 from .tooling import legacy_model_root, resolve_command, tool_env
-from .tts import generate_chinese_speech_units
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
@@ -152,7 +151,7 @@ def _build_scene_beats(
         resolved = dict(beat)
         resolved["start_ms"] = int(cue["start_ms"])
         resolved["end_ms"] = int(cue["end_ms"])
-        resolved["footer"] = str(beat.get("source_label") or "公众号原文 · 视频下方查看")
+        resolved["footer"] = str(beat.get("source_label") or "成核生长 · 精读一分钟")
         if beat["kind"] == "image":
             resolved["images"] = [
                 {
@@ -254,6 +253,9 @@ def run_article_summary(
         ],
     })
 
+    # Keep CLI/parser imports lightweight: the offline audio stack is runtime-only.
+    from .tts import generate_chinese_speech_units
+
     tts_results = generate_chinese_speech_units(
         legacy_model_root(project_root),
         units,
@@ -350,7 +352,7 @@ def run_article_summary(
 
     claim_ids = {claim["claim_id"] for claim in summary["claims"]}
     content_qa = {
-        "status": "PASS",
+        "status": qa["overall_status"],
         "source_article_sha256_matched": True,
         "all_claims_have_exact_source_excerpt": True,
         "all_claims_referenced": claim_ids.issubset({
