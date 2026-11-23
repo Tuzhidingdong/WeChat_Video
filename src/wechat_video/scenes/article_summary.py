@@ -12,6 +12,7 @@ from manim import (
     Create,
     FadeIn,
     FadeOut,
+    Group,
     ImageMobject,
     LEFT,
     Line,
@@ -105,7 +106,7 @@ class ArticleSummaryScene(Scene):
 
     def _build_beat(
         self, beat: dict[str, Any], index: int, count: int, font: str
-    ) -> VGroup:
+    ) -> Group:
         kind = str(beat["kind"])
         headline = _fit_box(
             Text(str(beat["headline"]), font=font, font_size=58, color=INK, line_spacing=0.9),
@@ -266,4 +267,4 @@ class ArticleSummaryScene(Scene):
         footer = _fit_width(Text(footer_text, font=font, font_size=22, color=MUTED), 7.2)
         footer.to_edge(DOWN, buff=0.62)
         parts.append(footer)
-        return VGroup(*parts)
+        return Group(*parts)
