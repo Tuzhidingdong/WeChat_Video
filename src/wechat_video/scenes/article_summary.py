@@ -399,7 +399,8 @@ class ArticleSummaryScene(Scene):
                     7.1,
                     0.75,
                 )
-                detail.move_to(DOWN * 2.8)
+                # Keep explanatory text above the dedicated dynamic-subtitle band.
+                detail.move_to(DOWN * 2.25)
                 parts.append(detail)
 
         elif kind == "quote":
