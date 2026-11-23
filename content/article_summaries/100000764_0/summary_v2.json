@@ -252,5 +252,6 @@
     "narration_policy": "plain_chinese_first; preserve_claim_scope; no_unverified_application_claims",
     "subtitles": "spoken_text_per_measured_speech_unit",
     "music": "original_synth_pad_below_narration"
-  }
+  },
+  "cover_duration_ms": 1500
 }
