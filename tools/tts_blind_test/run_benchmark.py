@@ -353,7 +353,9 @@ def main() -> int:
     except Exception as exc:
         failures["edge_tts"] = f"{type(exc).__name__}: {exc}"
 
-    if os.environ.get("VOLCENGINE_TTS_API_KEY", "").strip():
+    seed_key_ready = bool(os.environ.get("VOLCENGINE_TTS_API_KEY", "").strip())
+    seed_cost_approved = os.environ.get("TTS_ALLOW_PAID_TTS_TEST", "") == "1"
+    if seed_key_ready and seed_cost_approved:
         try:
             seed_dir = raw_root / "seed_tts"
             seed_dir.mkdir()
@@ -361,6 +363,10 @@ def main() -> int:
             candidates.append(("seed_tts_3", seed_info))
         except Exception as exc:
             failures["seed_tts_3"] = f"{type(exc).__name__}: {exc}"
+    elif seed_key_ready:
+        failures["seed_tts_3"] = (
+            "skipped: API key is present, but explicit TTS_ALLOW_PAID_TTS_TEST=1 opt-in is absent"
+        )
     else:
         failures["seed_tts_3"] = (
             "skipped: VOLCENGINE_TTS_API_KEY is not configured"
