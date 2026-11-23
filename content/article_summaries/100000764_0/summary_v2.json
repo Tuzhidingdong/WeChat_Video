@@ -54,7 +54,8 @@
       "spoken_text": "反铁磁材料里的磁畴，不容易靠外磁场重构。能不能换个思路，让晶体缺陷来定位？",
       "display_text": "不用磁场，缺陷也能定位磁畴？",
       "claim_ids": [
-        "C07"
+        "C07",
+        "C06"
       ],
       "visual_trigger_ids": [
         "B01"
