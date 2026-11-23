@@ -120,7 +120,7 @@ def download_english_model(project_root: Path, timeout_seconds: int = 900) -> Pa
 
 
 def download_chinese_model(project_root: Path, timeout_seconds: int = 900) -> Path:
-    """Legacy rollback model; kept on disk but no longer the default voice."""
+    """Download the local Chinese MeloTTS model used by article-summary narration."""
     return _download_and_extract(
         legacy_model_root(project_root),
         MODEL_URL,

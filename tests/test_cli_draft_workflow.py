@@ -96,3 +96,18 @@ def test_manual_review_cli_requires_explicit_result_and_confirmation() -> None:
     assert args.result == "draft-found"
     assert args.job_id == "20261121_224049_critical_nucleus"
     assert args.confirmation.startswith("CONFIRM CHANNELS DRAFT FOUND ")
+
+
+def test_article_summary_command_is_local_preview_only() -> None:
+    from wechat_video.cli import build_parser
+
+    args = build_parser().parse_args([
+        "run-article-summary",
+        "--article-dir", "published-article",
+        "--summary", "summary.json",
+    ])
+
+    assert args.command == "run-article-summary"
+    assert args.article_dir.name == "published-article"
+    assert args.summary.name == "summary.json"
+    assert str(args.output_root) == "outputs"

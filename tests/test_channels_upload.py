@@ -3340,3 +3340,16 @@ def test_creator_entry_dom_scan_comment_cannot_terminate_javascript_comment_earl
     assert "data-*/" not in expression
     assert "aria-*/" not in expression
     assert "Class, id, data, aria, href and ancestor attributes" in expression
+
+
+def test_article_summary_run_is_blocked_until_extended_link_is_verified(tmp_path: Path) -> None:
+    project_root = tmp_path
+    run_dir = project_root / "outputs" / "article-summary"
+    run_dir.mkdir(parents=True)
+    (run_dir / "article_summary_manifest.json").write_text(
+        json.dumps({"content_type": "article_summary", "article_id": "article-1"}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(UploadBlockedError, match="extended-link control is verified"):
+        _validate_run_for_upload(project_root, run_dir, {})

@@ -133,3 +133,56 @@ def write_subtitles(
     srt_path.write_text("\n".join(srt_blocks), encoding="utf-8-sig")
     ass_path.write_text(ass, encoding="utf-8-sig")
     return len(cues)
+
+
+def write_chinese_subtitles(
+    timeline: dict[str, Any],
+    srt_path: Path,
+    ass_path: Path,
+    layout: dict[str, Any],
+    cjk_font_family: str,
+) -> int:
+    """Write one centered Chinese-only subtitle cue per measured speech unit."""
+    subtitle_config = layout["subtitle"]
+    limit = int(subtitle_config.get("max_line_chars_zh", 12))
+    canvas_width = int(layout["canvas"]["width"])
+    canvas_height = int(layout["canvas"]["height"])
+    y = round(canvas_height * float(subtitle_config.get("zh_y_percent", 75.0)) / 100)
+    center_x = canvas_width // 2
+    srt_blocks: list[str] = []
+    ass_events: list[str] = []
+    for index, cue in enumerate(timeline["speech_units"], start=1):
+        text = _wrap_text(str(cue["display_text"]), limit)
+        srt_blocks.append(
+            f"{index}\n"
+            f"{_srt_timestamp(cue['start_ms'])} --> {_srt_timestamp(cue['end_ms'])}\n"
+            f"{text}\n"
+        )
+        ass_events.append(
+            f"Dialogue: 0,{_ass_timestamp(cue['start_ms'])},{_ass_timestamp(cue['end_ms'])},ZH,,0,0,0,,"
+            rf"{{\an5\pos({center_x},{y})}}{_ass_escape(text)}"
+        )
+    style = (
+        f"Style: ZH,{cjk_font_family},{int(subtitle_config.get('cjk_font_size', 46))},"
+        "&H000F2332,&H000000FF,&H00FFFFFF,&H90000000,"
+        "0,0,0,0,100,100,0,0,1,"
+        f"{int(subtitle_config['outline'])},{int(subtitle_config['shadow'])},"
+        "2,"
+        f"{int(subtitle_config['margin_left'])},{int(subtitle_config['margin_right'])},0,1"
+    )
+    ass = "\n".join([
+        "[Script Info]", "ScriptType: v4.00+", "WrapStyle: 2",
+        "ScaledBorderAndShadow: yes",
+        f"PlayResX: {canvas_width}", f"PlayResY: {canvas_height}", "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+        "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding",
+        style, "", "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+        *ass_events, "",
+    ])
+    srt_path.write_text("\n".join(srt_blocks), encoding="utf-8-sig")
+    ass_path.write_text(ass, encoding="utf-8-sig")
+    return len(ass_events)

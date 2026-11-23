@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 
+from .article_summary import run_article_summary
 from .channels_uploader import (
     UploadBlockedError,
     approve_latest_run,
@@ -62,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     model = sub.add_parser("download-model", help="Download the default English Piper VITS voice.")
     model.add_argument("--project-root", type=Path, default=root)
-    model_zh = sub.add_parser("download-model-zh", help="Download the legacy MeloTTS zh_en rollback voice.")
+    model_zh = sub.add_parser("download-model-zh", help="Download the local Chinese MeloTTS model for article-summary narration.")
     model_zh.add_argument("--project-root", type=Path, default=root)
 
     sub.add_parser(
@@ -191,6 +192,15 @@ def build_parser() -> argparse.ArgumentParser:
     manual_review.add_argument("--note", default="")
     manual_review.add_argument("--confirmation", required=True)
 
+    article_summary = sub.add_parser(
+        "run-article-summary",
+        help="Create a local-only Chinese one-minute video from an exported published WeChat article.",
+    )
+    article_summary.add_argument("--project-root", type=Path, default=root)
+    article_summary.add_argument("--article-dir", type=Path, required=True)
+    article_summary.add_argument("--summary", type=Path, required=True)
+    article_summary.add_argument("--output-root", type=Path, default=Path("outputs"))
+
     return parser
 
 
@@ -211,13 +221,31 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "download-model-zh":
             model_path = download_chinese_model(args.project_root.resolve())
-            print(f"Local offline legacy zh TTS model ready: {model_path}")
+            print(f"Local offline Chinese MeloTTS model ready: {model_path}")
             return 0
         if args.command == "tool-path":
             print(tool_path_for_bat(root))
             return 0
         if args.command == "tools-status":
             print(json.dumps(describe_tools(root), ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "run-article-summary":
+            run_dir = run_article_summary(
+                args.project_root,
+                article_dir=args.article_dir,
+                summary_path=args.summary,
+                output_root=args.output_root,
+            )
+            print(json.dumps({
+                "run_dir": str(run_dir),
+                "video": str(run_dir / "final.mp4"),
+                "qa_report": str(run_dir / "qa_report.json"),
+                "channels_metadata": str(run_dir / "channels_draft.json"),
+                "upload_eligible": False,
+                "automatic_upload": False,
+                "automatic_publication": False,
+            }, ensure_ascii=False, indent=2))
+            print("Local article-summary preview created. No upload or publication was attempted.")
             return 0
         if args.command == "run-slice-a":
             _validate_editorial_angle(args.fact_card, args.script)

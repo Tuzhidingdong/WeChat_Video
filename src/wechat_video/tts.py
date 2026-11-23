@@ -289,3 +289,62 @@ def generate_speech_units(
         del engine
 
     return results
+
+
+def generate_chinese_speech_units(
+    model_root: Path,
+    units: list[dict[str, Any]],
+    audio_dir: Path,
+) -> list[dict[str, Any]]:
+    """Generate local Chinese narration with the existing offline MeloTTS zh_en model.
+
+    This intentionally does not use the English-trained personal voice profile and
+    never falls back to a cloud provider or a different generic voice.
+    """
+    if not units:
+        raise LocalTtsError("Article-summary TTS received no speech units.")
+    sherpa, engine = _create_engine(model_root)
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    results: list[dict[str, Any]] = []
+    try:
+        for unit in units:
+            unit_id = str(unit.get("unit_id") or "")
+            spoken_text = str(unit.get("spoken_text") or "").strip()
+            if not unit_id or not spoken_text:
+                raise LocalTtsError("Every Chinese speech unit requires unit_id and spoken_text.")
+            if any(char in unit_id for char in ("/", "\\", ":", "..")):
+                raise LocalTtsError(f"Unsafe speech unit id: {unit_id!r}")
+            output = audio_dir / f"{unit_id}.wav"
+            generation = sherpa.GenerationConfig()
+            generation.sid = 0
+            generation.speed = 1.0
+            generation.silence_scale = 0.2
+            audio = engine.generate(spoken_text, generation)
+            if audio.samples is None or len(audio.samples) == 0:
+                raise LocalTtsError(f"{unit_id} produced no valid Chinese audio.")
+            sf.write(
+                str(output),
+                audio.samples,
+                samplerate=int(audio.sample_rate),
+                subtype="PCM_16",
+                format="WAV",
+            )
+            info = sf.info(str(output))
+            if info.frames <= 0 or info.samplerate <= 0 or info.channels != 1:
+                raise LocalTtsError(f"{unit_id} Chinese audio metadata is invalid: {info}")
+            results.append({
+                "unit_id": unit_id,
+                "audio_file": str(output),
+                "sample_rate": int(info.samplerate),
+                "channels": int(info.channels),
+                "frames": int(info.frames),
+                "duration_seconds": float(info.duration),
+                "tts_engine": "sherpa-onnx OfflineTts / VITS MeloTTS zh_en",
+                "tts_engine_version": importlib.metadata.version("sherpa-onnx"),
+                "provider": "cpu",
+                "voice_profile": None,
+                "speed": 1.0,
+            })
+    finally:
+        del engine
+    return results

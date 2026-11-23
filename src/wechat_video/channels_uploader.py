@@ -3427,6 +3427,12 @@ def _validate_run_for_upload(
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     project_root = project_root.resolve()
     run_dir = run_dir.resolve()
+    if (run_dir / "article_summary_manifest.json").is_file():
+        raise UploadBlockedError(
+            "Article-summary uploads are blocked until the actual WeChat Channels "
+            "extended-link control is verified and the saved article link is read back. "
+            "This run is local-preview-only; no upload was attempted."
+        )
     if not run_dir.is_relative_to((project_root / "outputs").resolve()):
         raise UploadBlockedError("Upload source must be a generated run under project outputs/.")
     final_mp4 = run_dir / "final.mp4"

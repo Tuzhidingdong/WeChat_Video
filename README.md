@@ -21,6 +21,8 @@ The current default production script is `content/sample_script.en.json`; narrat
 
 Local-only audio diagnostics (five gain-matched stems, aggressive-denoise A/B, the no-afftdn vs afftdn same-text A/B, and post-AAC noise inspection) live in `wechat_video.audio_diagnostics`; all outputs stay under ignored `outputs/` or `private/` paths. The noise floor was proven to come from the disabled synthetic ambient stem, not the personal voice. A controlled A/B showed afftdn removed ~93% of 4–10 kHz consonant/air detail, so it was disabled in the default profile. No gate, expander, AGC, cloud TTS, source-separation model, or continuous bed is used. The final video applies one single-pass full-programme loudnorm during mux; two-pass linear loudnorm could deadlock this FFmpeg build with a denoise-free voice stem.
 
+A separate 「精读一分钟」 article-summary pipeline has now been added for local-only Chinese previews. It uses a published-article export package, exact source excerpts for each claim, locally cached Chinese MeloTTS, a dedicated editorial Manim scene system, and Chinese-only subtitles. Article-summary outputs are deliberately blocked from the Channels uploader until the actual official-account article extended-link control is verified and the saved link can be read back. See docs/ARTICLE_SUMMARY_WORKFLOW.md for the package contract and local command. The source article URL exporter is not yet production-ready while the local WeChat session is expired.
+
 The local video renderer remains a one-template Slice A implementation; the full Verified Topic Pool, OpenCode authoring, five-template library and daily scheduler are not yet integrated. A separate development branch adds a guarded, local-only Channels draft uploader. It does not make a pending Fact Card or review-only sample eligible for upload.
 
 ## First-time setup (one time)
@@ -36,7 +38,7 @@ Double-click Setup_Slice_A.bat. It reuses .venv and the project-local tools, dow
 
 The daily narration voice is the user's personal OpenVoice V2 profile. Setup creates an isolated `.venv-voice` (Python 3.9 + CPU PyTorch) and downloads the OpenVoice V2 converter and MeloTTS EN-US checkpoints into `tools/openvoice/` and `assets/models/melo-en-us/`. One-time enrollment from `my_voice/voice.m4a` writes `private/voice_profile/target_se.pth`; later runs reuse that embedding and never re-extract it. All voice data and caches stay inside this project and are gitignored.
 
-The earlier `vits-melo-tts-zh_en` and `vits-piper-en_US-lessac-medium` models remain on disk for rollback/diagnostics only.
+The `vits-melo-tts-zh_en` model is used only by the independent Chinese article-summary workflow; Slice A English production continues to use the personal OpenVoice profile. The English Piper model remains available for setup and diagnostics.
 
 ## Generate the first local review sample
 
