@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "default_provider": "edge_tts",
+  "fallback_provider": null,
+  "providers": {
+    "edge_tts": {
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "volume": "+0%",
+      "pitch": "+0Hz",
+      "minimum_version": "7.3.1",
+      "request_timeout_seconds": 120,
+      "conversion_timeout_seconds": 90
+    },
+    "melo_onnx": {
+      "num_threads": 2
+    }
+  },
+  "audio_output": {
+    "sample_rate": 44100,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "subtype": "PCM_16"
+  },
+  "policy": {
+    "automatic_provider_fallback": false,
+    "network_retries": 0,
+    "timeline_authority": "measured_pcm_wav_sample_counts"
+  }
+}
