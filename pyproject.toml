@@ -15,6 +15,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+article-summary-tts = [
+  "edge-tts==7.3.1",
+]
 channels-upload = [
   "playwright>=1.50,<2",
   "psutil>=5.9,<8",
