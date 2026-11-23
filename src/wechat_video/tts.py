@@ -239,6 +239,7 @@ def generate_speech_units(
             "Personal OpenVoice profile is required; generic/Piper fallback is disabled. "
             "Run enrollment before producing a Slice A sample."
         )
+    sf = _soundfile_module()
     return _generate_with_personal_voice(units, audio_dir, pronunciation_text)
     # Legacy sherpa path is intentionally unreachable in the daily production route.
     sherpa, engine = _create_engine(model_root)
