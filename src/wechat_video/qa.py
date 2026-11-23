@@ -220,10 +220,12 @@ def run_qa(
         subtitle_count == len(timeline["speech_units"]),
         f"{subtitle_count} vs {len(timeline['speech_units'])}",
     )
+    expected_cover_ms = int(timeline.get("cover_duration_ms", 1000))
     check(
-        "explicit_one_second_cover",
-        timeline["cover"]["start_ms"] == 0 and timeline["cover"]["end_ms"] == 1000,
-        str(timeline["cover"]),
+        "explicit_cover_duration",
+        timeline["cover"]["start_ms"] == 0
+        and timeline["cover"]["end_ms"] == expected_cover_ms,
+        f"expected={expected_cover_ms} ms; actual={timeline['cover']}",
     )
     check(
         "first_speech_after_cover",
