@@ -101,8 +101,8 @@
   "article_summary_music": {
     "enabled": true,
     "texture": "original_deterministic_harmonic_synth_pad",
-    "target_rms_dbfs": -28,
-    "duck_db": 3.5,
+    "target_rms_dbfs": -25,
+    "duck_db": 4,
     "fade_ms": 700,
     "edge_fade_ms": 120,
     "only_during_speech": true,
