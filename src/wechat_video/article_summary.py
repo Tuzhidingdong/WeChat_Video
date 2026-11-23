@@ -193,6 +193,8 @@ def run_article_summary(
         raise ArticleSourceError("summary.json must contain a JSON object.")
     summary = validate_article_summary(package, summary_doc)
     article = package["article"]
+    # Fail fast on missing TTS/runtime dependencies before creating an output run.
+    environment = _runtime_preflight(project_root, str(article["title"]))
 
     output_base = output_root if output_root.is_absolute() else project_root / output_root
     output_base = output_base.resolve()
@@ -202,8 +204,6 @@ def run_article_summary(
     run_dir = output_base / f"{stamp}_{safe_article_id}_article_summary"
     run_dir.mkdir(parents=True, exist_ok=False)
     (run_dir / "audio").mkdir()
-
-    environment = _runtime_preflight(project_root, str(article["title"]))
     layout = json.loads((project_root / "configs" / "layout.json").read_text(encoding="utf-8"))
     copied_images = _copy_article_package(package, run_dir)
     shutil.copy2(summary_path, run_dir / "summary.json")
