@@ -262,7 +262,7 @@ class ArticleSummaryScene(Scene):
             detail.move_to(DOWN * 0.55)
             parts.append(detail)
 
-        footer_text = str(beat.get("footer") or "公众号原文 · 视频下方查看")
+        footer_text = str(beat.get("footer") or "成核生长 · 精读一分钟")
         footer = _fit_width(Text(footer_text, font=font, font_size=22, color=MUTED), 7.2)
         footer.to_edge(DOWN, buff=0.62)
         parts.append(footer)

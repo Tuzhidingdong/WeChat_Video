@@ -207,6 +207,7 @@ def run_article_summary(
     manifest = {
         "schema_version": 1,
         "content_type": "article_summary",
+        "appmsgid": str(article.get("appmsgid") or ""),
         "article_id": str(article["article_id"]),
         "article_title": str(article["title"]),
         "published_at": str(article["published_at"]),
@@ -229,6 +230,7 @@ def run_article_summary(
     _write_json(run_dir / "layout_profile.json", layout)
     _write_json(run_dir / "source_record.json", {
         "source_type": "published_wechat_article",
+        "appmsgid": article.get("appmsgid"),
         "article_id": article["article_id"],
         "title": article["title"],
         "editorial_slot": article["editorial_slot"],

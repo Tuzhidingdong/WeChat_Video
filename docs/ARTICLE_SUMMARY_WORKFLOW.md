@@ -29,7 +29,8 @@ article.json:
       "article_type": "literature_translation",
       "editorial_pillar_id": "literature_manuscript",
       "publication_status": "PUBLISHED",
-      "article_id": "the published appmsg/article identifier",
+      "appmsgid": "the original WeChat appmsgid",
+      "article_id": "appmsgid plus item index, e.g. appmsgid_0",
       "title": "The exact published article title",
       "published_at": "2026-11-21T21:10:55+08:00",
       "canonical_url": "https://mp.weixin.qq.com/s/the-real-published-link",
@@ -68,7 +69,7 @@ Top-level fields:
 
 - schema_version: 1
 - article_id: exact match with article.json
-- source_article_sha256: SHA-256 of the exact article.md bytes
+- source_article_sha256: SHA-256 of the exact article.md bytes on disk (read the file in binary mode; do not hash an in-memory string with different newline conversion)
 - summary_title: editorial title for the video
 - channels_title: explicit 6–16 character Channels short title
 - core_thesis: one sentence describing the article's central point

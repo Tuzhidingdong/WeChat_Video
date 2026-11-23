@@ -40,15 +40,16 @@ def _make_package(tmp_path: Path) -> tuple[Path, dict]:
         "article_type": "literature_translation",
         "editorial_pillar_id": "literature_manuscript",
         "publication_status": "PUBLISHED",
-        "article_id": "100000764_0",
+        "appmsgid": "fixture-appmsg-001",
+        "article_id": "fixture-appmsg-001_0",
         "title": "一篇用于验证摘要数据契约的已发表精读文章",
-        "published_at": "2026-11-21T21:10:55+08:00",
-        "canonical_url": "https://mp.weixin.qq.com/s/verifiedArticleIdentifier",
+        "published_at": "2026-01-15T09:30:00+08:00",
+        "canonical_url": "https://mp.weixin.qq.com/s/test-fixture-only",
         "canonical_url_verified": True,
         "url_provenance": {
-            "endpoint": "/cgi-bin/appmsgpublish?sub=list",
-            "field_path": "publish_page.publish_list[0].publish_info.appmsgex[0].link",
-            "verified_at": "2026-11-23T12:00:00+08:00",
+            "endpoint": "/test-fixture/published-articles",
+            "field_path": "fixture.items[0].url",
+            "verified_at": "2026-01-15T10:00:00+08:00",
             "read_only": True,
         },
     }
@@ -112,7 +113,7 @@ def test_published_article_package_and_summary_validate(tmp_path: Path) -> None:
 
     assert validated["spoken_cjk_characters"] >= 150
     assert metadata["extended_link"]["url"] == package["article"]["canonical_url"]
-    assert metadata["extended_link"]["article_id"] == "100000764_0"
+    assert metadata["extended_link"]["article_id"] == "fixture-appmsg-001_0"
     assert metadata["extended_link_required"] is True
     assert metadata["extended_link_status"] == "UNVERIFIED_PLATFORM_UI"
     assert metadata["automatic_publication"] is False
