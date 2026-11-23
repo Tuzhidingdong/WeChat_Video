@@ -104,7 +104,7 @@ def validate_article_summary_tts_runtime(
         except ImportError as exc:
             raise ArticleSummaryTtsError(
                 "The configured Edge-TTS provider is unavailable. Install the optional "
-                "dependency with: python -m pip install -e ".[article-summary-tts]". "
+                "dependency with: python -m pip install -e '.[article-summary-tts]'. "
                 "No fallback provider will be selected automatically."
             ) from exc
         try:
