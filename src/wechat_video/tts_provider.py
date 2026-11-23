@@ -72,9 +72,9 @@ def load_article_summary_tts_config(project_root: Path) -> dict[str, Any]:
         if not str(settings.get("voice") or "").strip():
             raise ArticleSummaryTtsError("Edge-TTS voice must be a non-empty voice name.")
         for key, pattern in (
-            ("rate", r"^[+-]\\d+%$"),
-            ("volume", r"^[+-]\\d+%$"),
-            ("pitch", r"^[+-]\\d+Hz$"),
+            ("rate", r"^[+-]\d+%$"),
+            ("volume", r"^[+-]\d+%$"),
+            ("pitch", r"^[+-]\d+Hz$"),
         ):
             if not re.fullmatch(pattern, str(settings.get(key) or "")):
                 raise ArticleSummaryTtsError(
@@ -160,7 +160,7 @@ def validate_article_summary_tts_runtime(
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
-    parts = re.findall(r"\\d+", value)
+    parts = re.findall(r"\d+", value)
     return tuple(int(part) for part in parts) or (0,)
 
 
