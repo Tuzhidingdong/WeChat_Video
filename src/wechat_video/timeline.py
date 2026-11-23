@@ -50,9 +50,13 @@ def build_audio_timeline(
     audio_dir: Path,
     output_wav: Path,
     ffprobe_records: dict[str, dict[str, Any]],
+    cover_duration_ms: int = COVER_DURATION_MS,
 ) -> dict[str, Any]:
     if not units:
         raise ValueError("无法为零个 speech unit 建立时间轴。")
+    if not 1000 <= int(cover_duration_ms) <= 3000:
+        raise ValueError("封面时长必须在 1000–3000 ms 之间。")
+    cover_duration_ms = int(cover_duration_ms)
 
     wav_info: list[dict[str, Any]] = []
     for unit in units:
@@ -81,7 +85,7 @@ def build_audio_timeline(
             f"{sorted(sample_rates)}"
         )
     sample_rate = sample_rates.pop()
-    cover_frames = sample_rate * COVER_DURATION_MS // 1000
+    cover_frames = sample_rate * cover_duration_ms // 1000
 
     output_wav.parent.mkdir(parents=True, exist_ok=True)
     segments: list[dict[str, Any]] = [
@@ -91,7 +95,7 @@ def build_audio_timeline(
             "start_sample": 0,
             "end_sample": cover_frames,
             "start_ms": 0,
-            "end_ms": COVER_DURATION_MS,
+            "end_ms": cover_duration_ms,
             "speech": False,
             "subtitle": False,
         }
@@ -182,7 +186,7 @@ def build_audio_timeline(
 
     total_frames = cursor
     if first_cue_start_sample != cover_frames:
-        raise ValueError("第一条旁白必须在显式封面结束时开始（1000 ms）。")
+        raise ValueError("第一条旁白必须在显式封面结束时开始。")
     if not segments or segments[0]["segment_id"] != "scene_00_cover":
         raise ValueError("时间轴缺少 scene_00_cover。")
 
@@ -194,6 +198,7 @@ def build_audio_timeline(
         "audio_channels": 1,
         "audio_sample_width_bytes": 2,
         "cover": segments[0],
+        "cover_duration_ms": cover_duration_ms,
         "segments": segments,
         "speech_units": cue_records,
         "sfx_events": [],
