@@ -6,7 +6,7 @@
 
 - 现有基线：项目当前 sherpa-onnx / VITS MeloTTS zh_en（离线 CPU）。
 - 候选一：Edge-TTS，女声 zh-CN-XiaoxiaoNeural。它通过 Microsoft 在线语音服务合成，只用于听感比较；不能仅凭本次试听就认定它适合作为长期生产依赖。
-- 候选二：火山引擎 Seed-TTS 3.0，女声「知性女声 3.0」。仅当本机环境变量 VOLCENGINE_TTS_API_KEY 已配置时运行；没有密钥就跳过，不会请求、生成或记录密钥。该候选采用统一的克制科研讲解指令。
+- 候选二：火山引擎 Seed-TTS 3.0，女声「知性女声 3.0」。本轮默认不调用可能计费的 API。只有在用户明确同意本次测试费用，并同时设置 VOLCENGINE_TTS_API_KEY 与 TTS_ALLOW_PAID_TTS_TEST=1 时才运行；单独存在密钥也会跳过。密钥不会写入文件、命令历史或 Git。该候选采用统一的克制科研讲解指令。
 
 CosyVoice 3 不在本轮自动运行：其官方仓库建议独立 Python 3.10 环境和单独模型下载，避免为了盲听污染项目 .venv。若用户希望本地模型路线，再单独制作隔离环境样本。
 
