@@ -112,6 +112,34 @@ def _ducking_envelope(voice: np.ndarray, sample_rate: int, duck_db: float) -> np
     return np.interp(np.arange(len(voice)), np.arange(count) * frame, gain)
 
 
+def _speech_region_mask(
+    timeline: dict[str, Any] | None,
+    sample_count: int,
+    sample_rate: int,
+    fade_ms: int = 120,
+) -> np.ndarray:
+    """Return a smooth mask that keeps editorial music out of true-silence regions."""
+    mask = np.zeros(int(sample_count), dtype=np.float64)
+    if not timeline:
+        return mask
+    fade_frames = max(0, int(sample_rate) * int(fade_ms) // 1000)
+    for segment in timeline.get("segments", []):
+        if segment.get("kind") != "speech":
+            continue
+        start = max(0, min(len(mask), int(segment.get("start_sample", 0))))
+        end = max(start, min(len(mask), int(segment.get("end_sample", 0))))
+        if end <= start:
+            continue
+        mask[start:end] = 1.0
+        edge = min(fade_frames, (end - start) // 2)
+        if edge > 0:
+            phase = np.linspace(0.0, np.pi / 2.0, edge, endpoint=True)
+            ramp = np.sin(phase) ** 2
+            mask[start:start + edge] *= ramp
+            mask[end - edge:end] *= ramp[::-1]
+    return mask
+
+
 def mix_final_audio(
     narration_wav: Path,
     sfx_events: list[dict[str, Any]],
@@ -119,6 +147,7 @@ def mix_final_audio(
     output_wav: Path,
     config: dict[str, Any] | None = None,
     timeline: dict[str, Any] | None = None,
+    music_bed_path: Path | None = None,
 ) -> dict[str, Any]:
     """Mix narration, relative-level SFX and optional ducked ambient bed.
 
@@ -171,6 +200,43 @@ def mix_final_audio(
         ambient_report["duck_db"] = amb_cfg["duck_db"]
         ambient_report["continuous_through_gaps"] = True
 
+    music_mix = np.zeros_like(voice)
+    music_report: dict[str, Any] = {
+        "enabled": False,
+        "reason": "No original editorial music bed was supplied.",
+    }
+    if music_bed_path is not None:
+        music_cfg = cfg.get("article_summary_music", {})
+        with wave.open(str(music_bed_path), "rb") as reader:
+            if reader.getframerate() != rate or reader.getnchannels() != 1 or reader.getsampwidth() != 2:
+                raise RuntimeError("Editorial music bed must match narration mono PCM format.")
+            music = (
+                np.frombuffer(reader.readframes(reader.getnframes()), dtype="<i2").astype(np.float64)
+                / 32768.0
+            )
+        if len(music) != len(voice):
+            raise RuntimeError("Editorial music sample count does not match narration.")
+        speech_mask = _speech_region_mask(
+            timeline,
+            len(voice),
+            rate,
+            int(music_cfg.get("edge_fade_ms", 120)),
+        )
+        duck_db = float(music_cfg.get("duck_db", 3.5))
+        duck = _ducking_envelope(voice, rate, duck_db)
+        music_mix = music * speech_mask * duck
+        music_report = {
+            "enabled": True,
+            "file": str(music_bed_path),
+            "target_rms_dbfs": float(music_cfg.get("target_rms_dbfs", -28.0)),
+            "measured_source_rms_dbfs": round(_dbfs(float(np.sqrt(np.mean(music**2)))), 2),
+            "duck_db": duck_db,
+            "edge_fade_ms": int(music_cfg.get("edge_fade_ms", 120)),
+            "only_during_speech": True,
+            "silent_cover_and_unit_gaps_preserved": True,
+            "texture": "original_deterministic_harmonic_synth_pad",
+        }
+
     sfx_cfg = cfg["sfx"]
     relative_db = float(sfx_cfg["relative_level_db"])
     min_db = float(sfx_cfg["min_relative_db"])
@@ -220,7 +286,12 @@ def mix_final_audio(
         local_rms = float(np.sqrt(np.mean(local**2))) if local.size else 0.0
         if local_rms <= 0:
             local_rms = float(np.sqrt(np.mean(voice**2))) or 1e-6
-        target_rms_db = _dbfs(local_rms) + relative_db
+        event_relative_db = float(event.get("relative_level_db", relative_db))
+        if not -30.0 <= event_relative_db <= -10.0:
+            raise RuntimeError(
+                f"SFX event relative level must be between -30 and -10 dB: {event_relative_db}"
+            )
+        target_rms_db = _dbfs(local_rms) + event_relative_db
         clip_rms = float(np.sqrt(np.mean(clip**2))) or 1e-6
         gain = 10 ** ((target_rms_db - _dbfs(clip_rms)) / 20.0)
         scaled = clip * gain
@@ -230,7 +301,7 @@ def mix_final_audio(
                 "event_id": event.get("event_id"),
                 "start_sample": start,
                 "local_voice_rms_dbfs": round(_dbfs(local_rms), 2),
-                "target_relative_db": relative_db,
+                "target_relative_db": event_relative_db,
                 "target_sfx_rms_dbfs": round(target_rms_db, 2),
                 "measured_sfx_rms_dbfs": round(_dbfs(float(np.sqrt(np.mean(scaled**2)))), 2),
                 "gain": round(gain, 4),
@@ -239,7 +310,7 @@ def mix_final_audio(
             }
         )
 
-    mixed = voice + bed + sfx_mix
+    mixed = voice + bed + music_mix + sfx_mix
     peak = float(np.max(np.abs(mixed))) if mixed.size else 0.0
     clipped = int(np.sum(np.abs(mixed) >= 1.0))
     if clipped:
@@ -288,6 +359,7 @@ def mix_final_audio(
         "voice_ceiling_dbfs": ceiling,
         "voice_ceiling_gain_db": round(ceiling_gain_db, 3),
         "ambient_bed": ambient_report,
+        "editorial_music_bed": music_report,
         "silence_diagnostics": silence_diagnostics,
         "sfx_events": sfx_reports,
         "sfx_relative_db": relative_db,
