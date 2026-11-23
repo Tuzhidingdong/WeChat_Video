@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "article_id": "100000764_0",
+  "source_article_sha256": "cf08182032e0647b1c2d89aaf37094a9030fbbf1501003d74eeafda60ebf2bff",
+  "summary_title": "晶体缺陷如何定位反铁磁畴",
+  "channels_title": "位错写入反铁磁畴",
+  "core_thesis": "NiO薄膜中的失配位错网络通过剪切应力选择性稳定特定反铁磁T畴，并使畴结构在跨越Néel温度的热循环后恢复到原有空间位置；这为利用界面缺陷设计反铁磁畴结构提供了实验与能量学依据。",
+  "thesis_claim_ids": [
+    "C01",
+    "C02",
+    "C05",
+    "C06"
+  ],
+  "claims": [
+    {
+      "claim_id": "C01",
+      "statement": "NiO反铁磁畴在跨越Néel温度的热循环中表现出空间记忆：失配位错线保持不变，畴在冷却后于近似原位恢复。",
+      "source_excerpt": "当样品被加热至533 K进入顺磁态后，宽阔的畴衬度消失，而失配位错线保持不变；冷却回293 K后，畴在相同位置以几乎相同的几何形态重新出现。"
+    },
+    {
+      "claim_id": "C02",
+      "statement": "热循环前后的畴空间相关系数为0.79，全视场二值化面积匹配度超过96%。",
+      "source_excerpt": "定量空间相关分析给出畴平台内Pearson相关系数$R=0.79$，全视场二值化面积匹配度超过$96\\%$，直接证明了反铁磁畴的空间记忆由下方不可移动的位错网络模板化。"
+    },
+    {
+      "claim_id": "C03",
+      "statement": "ECCI的衍射矢量依赖衬度识别出失配位错两侧的T3与T4畴，周围母畴为T2。",
+      "source_excerpt": "其$\\vec{g}$依赖衬度序列将其识别为T3与T4，而周围母畴为T2。"
+    },
+    {
+      "claim_id": "C04",
+      "statement": "薄膜厚度增加时，主导应变弛豫位错由60°滑移位错转向90°纯刃型失配位错网络。",
+      "source_excerpt": "当厚度增至33 nm及以上时，穿透位错发生交滑移，转入{110}面并形成沿$\\langle100\\rangle$方向的纯刃型90°失配位错网络。"
+    },
+    {
+      "claim_id": "C05",
+      "statement": "Eshelby磁弹相互作用计算表明，失配位错应力场可显著降低匹配T畴变体的能量，并选择性稳定位错侧翼畴。",
+      "source_excerpt": "计算结果显示，在60°失配位错核附近，匹配良好的T畴变体可在某一侧翼形成深能量极小值，典型值可达$-120\\ \\mathrm{meV/nm^3}$量级；即便在距离位错芯3 nm处，能量降低仍约为$-10\\ \\mathrm{meV/nm^3}$。相比之下，T畴壁形核的体积能量代价仅约$0.02$–$0.06\\ \\mathrm{meV/nm^3}$，磁晶各向异性也远低于磁弹相互作用能。"
+    },
+    {
+      "claim_id": "C06",
+      "statement": "研究通过ECCI同场关联成像、晶格倾转衬度模型和Eshelby磁弹计算，建立了失配位错类型与T畴选择性稳定之间的证据链。",
+      "source_excerpt": "这项工作通过ECCI实现了埋藏界面失配位错与上覆反铁磁T畴的同场关联成像，并结合相对晶格倾转衬度模型与Eshelby磁弹能量计算，建立了从位错类型、Burgers矢量、滑移系演化到T畴选择性稳定的完整证据链。"
+    },
+    {
+      "claim_id": "C07",
+      "statement": "反铁磁序参量缺乏净磁化，使反铁磁畴难以像铁磁畴那样通过外加磁场进行可控重构。",
+      "source_excerpt": "然而，反铁磁序参量缺乏净磁化，导致其畴结构难以像铁磁体那样通过外加磁场进行可控重构。"
+    }
+  ],
+  "speech_units": [
+    {
+      "unit_id": "U01",
+      "spoken_text": "反铁磁材料里的磁畴，不容易靠外磁场重构。能不能换个思路，让晶体缺陷来定位？",
+      "display_text": "不用磁场，缺陷也能定位磁畴？",
+      "claim_ids": [
+        "C07"
+      ],
+      "visual_trigger_ids": [
+        "B01"
+      ],
+      "pause_after_ms": 400,
+      "raw_text": "反铁磁材料里的磁畴，不容易靠外磁场重构。能不能换个思路，让晶体缺陷来定位？",
+      "subtitle_text": "反铁磁材料里的磁畴，不容易靠外磁场重构。能不能换个思路，让晶体缺陷来定位？"
+    },
+    {
+      "unit_id": "U02",
+      "spoken_text": "研究者把界面失配位错与上方磁畴放在同一视野观察。位错两侧分别出现T三、T四畴，周围是T二畴。",
+      "display_text": "同一条位错两侧：T3 / T4",
+      "claim_ids": [
+        "C03"
+      ],
+      "visual_trigger_ids": [
+        "B02"
+      ],
+      "pause_after_ms": 400,
+      "raw_text": "研究者把界面失配位错与上方磁畴放在同一视野观察。位错两侧分别出现T三、T四畴，周围是T二畴。",
+      "subtitle_text": "研究者把界面失配位错与上方磁畴放在同一视野观察。位错两侧分别出现T三、T四畴，周围是T二畴。"
+    },
+    {
+      "unit_id": "U03",
+      "spoken_text": "样品升到五百三十三开尔文，进入顺磁态，磁畴的图像明暗对比消失了，但位错线保持不动。冷却回二百九十三开尔文，磁畴几乎原位复现。",
+      "display_text": "533 K：磁畴消失，位错仍在",
+      "claim_ids": [
+        "C01"
+      ],
+      "visual_trigger_ids": [
+        "B03"
+      ],
+      "pause_after_ms": 400,
+      "raw_text": "样品升到五百三十三开尔文，进入顺磁态，磁畴的图像明暗对比消失了，但位错线保持不动。冷却回二百九十三开尔文，磁畴几乎原位复现。",
+      "subtitle_text": "样品升到五百三十三开尔文，进入顺磁态，磁畴的图像明暗对比消失了，但位错线保持不动。冷却回二百九十三开尔文，磁畴几乎原位复现。"
+    },
+    {
+      "unit_id": "U04",
+      "spoken_text": "图像数据也支持这一点：热循环前后的空间相关系数为零点七九，全视场面积匹配超过百分之九十六。",
+      "display_text": "空间相关系数 0.79 · 面积匹配 >96%",
+      "claim_ids": [
+        "C02"
+      ],
+      "visual_trigger_ids": [
+        "B04"
+      ],
+      "pause_after_ms": 400,
+      "raw_text": "图像数据也支持这一点：热循环前后的空间相关系数为零点七九，全视场面积匹配超过百分之九十六。",
+      "subtitle_text": "图像数据也支持这一点：热循环前后的空间相关系数为零点七九，全视场面积匹配超过百分之九十六。"
+    },
+    {
+      "unit_id": "U05",
+      "spoken_text": "随着薄膜变厚，位错类型也发生变化：从六十度滑移位错，逐渐转为九十度纯刃型失配位错网络。",
+      "display_text": "60°滑移位错 → 90°纯刃型网络",
+      "claim_ids": [
+        "C04"
+      ],
+      "visual_trigger_ids": [
+        "B05"
+      ],
+      "pause_after_ms": 400,
+      "raw_text": "随着薄膜变厚，位错类型也发生变化：从六十度滑移位错，逐渐转为九十度纯刃型失配位错网络。",
+      "subtitle_text": "随着薄膜变厚，位错类型也发生变化：从六十度滑移位错，逐渐转为九十度纯刃型失配位错网络。"
+    },
+    {
+      "unit_id": "U06",
+      "spoken_text": "计算给出机制线索：位错周围的剪切应力，会降低匹配磁畴的磁弹能量，让它们更容易稳定在位错两侧。",
+      "display_text": "局域剪切应力降低匹配磁畴能量",
+      "claim_ids": [
+        "C05"
+      ],
+      "visual_trigger_ids": [
+        "B06"
+      ],
+      "pause_after_ms": 400,
+      "raw_text": "计算给出机制线索：位错周围的剪切应力，会降低匹配磁畴的磁弹能量，让它们更容易稳定在位错两侧。",
+      "subtitle_text": "计算给出机制线索：位错周围的剪切应力，会降低匹配磁畴的磁弹能量，让它们更容易稳定在位错两侧。"
+    },
+    {
+      "unit_id": "U07",
+      "spoken_text": "所以，位错不只是应变弛豫留下的缺陷，也可能成为设计反铁磁畴位置和形态的功能模板。你会怎样利用它？",
+      "display_text": "从应变缺陷，到磁畴定位模板",
+      "claim_ids": [
+        "C06"
+      ],
+      "visual_trigger_ids": [
+        "B07"
+      ],
+      "pause_after_ms": 550,
+      "raw_text": "所以，位错不只是应变弛豫留下的缺陷，也可能成为设计反铁磁畴位置和形态的功能模板。你会怎样利用它？",
+      "subtitle_text": "所以，位错不只是应变弛豫留下的缺陷，也可能成为设计反铁磁畴位置和形态的功能模板。你会怎样利用它？"
+    }
+  ],
+  "beats": [
+    {
+      "beat_id": "B01",
+      "unit_id": "U01",
+      "kind": "hook",
+      "headline": "不用磁场，缺陷也能定位磁畴？",
+      "body": "界面位错网络可能成为反铁磁畴的定位模板。",
+      "claim_ids": [
+        "C07",
+        "C06"
+      ]
+    },
+    {
+      "beat_id": "B02",
+      "unit_id": "U02",
+      "kind": "image",
+      "headline": "一条位错两侧，出现不同磁畴变体",
+      "image_ids": [
+        "figure_01"
+      ],
+      "caption": "失配位错两侧的T3与T4畴",
+      "claim_ids": [
+        "C03"
+      ]
+    },
+    {
+      "beat_id": "B03",
+      "unit_id": "U03",
+      "kind": "compare",
+      "headline": "升温后消失，冷却后近原位复现",
+      "left": {
+        "label": "升温至 533 K",
+        "detail": "进入顺磁态\n磁畴明暗对比消失\n位错线保持不变"
+      },
+      "right": {
+        "label": "冷却至 293 K",
+        "detail": "反铁磁畴重新出现\n位置与形态近似重现"
+      },
+      "claim_ids": [
+        "C01"
+      ]
+    },
+    {
+      "beat_id": "B04",
+      "unit_id": "U04",
+      "kind": "stat",
+      "headline": "热循环前后的空间匹配",
+      "stat_value": "0.79",
+      "stat_label": "空间相关系数",
+      "stat_secondary_value": ">96%",
+      "stat_secondary_label": "全视场面积匹配度",
+      "claim_ids": [
+        "C02"
+      ]
+    },
+    {
+      "beat_id": "B05",
+      "unit_id": "U05",
+      "kind": "image",
+      "headline": "薄膜厚度改变，位错网络随之演化",
+      "image_ids": [
+        "figure_02"
+      ],
+      "caption": "位错网络与T畴面积分数随厚度演化",
+      "claim_ids": [
+        "C04"
+      ]
+    },
+    {
+      "beat_id": "B06",
+      "unit_id": "U06",
+      "kind": "mechanism",
+      "headline": "局域剪切应力，选择性稳定匹配磁畴",
+      "steps": [
+        "界面失配位错",
+        "局域剪切应力",
+        "匹配磁畴能量降低",
+        "侧翼磁畴稳定"
+      ],
+      "body": "Eshelby 磁弹相互作用计算给出能量学解释",
+      "claim_ids": [
+        "C05"
+      ]
+    },
+    {
+      "beat_id": "B07",
+      "unit_id": "U07",
+      "kind": "takeaway",
+      "headline": "让缺陷成为可设计的磁畴模板",
+      "body": "界面位错网络为反铁磁畴的位置与形态调控提供功能模板。",
+      "claim_ids": [
+        "C06"
+      ]
+    }
+  ],
+  "cover_title": "晶体缺陷\n能不能“写入”磁畴？",
+  "cover_subtitle": "氧化镍薄膜中的反铁磁畴",
+  "source_line": "维也纳科技大学团队 · Applied Physics Letters",
+  "editorial_revision": {
+    "revision": 2,
+    "intent": "shortform_science_story",
+    "narration_policy": "plain_chinese_first; preserve_claim_scope; no_unverified_application_claims",
+    "subtitles": "spoken_text_per_measured_speech_unit",
+    "music": "original_synth_pad_below_narration"
+  }
+}
