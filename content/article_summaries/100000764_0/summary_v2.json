@@ -177,7 +177,16 @@
       "caption": "失配位错两侧的T3与T4畴",
       "claim_ids": [
         "C03"
-      ]
+      ],
+      "focus_regions": {
+        "figure_01": {
+          "x": 0.5,
+          "y": 0.47,
+          "width": 0.25,
+          "height": 0.52,
+          "label": "T3 / T4 侧翼畴"
+        }
+      }
     },
     {
       "beat_id": "B03",
@@ -220,7 +229,16 @@
       "caption": "位错网络与T畴面积分数随厚度演化",
       "claim_ids": [
         "C04"
-      ]
+      ],
+      "focus_regions": {
+        "figure_02": {
+          "x": 0.13,
+          "y": 0.04,
+          "width": 0.36,
+          "height": 0.44,
+          "label": "60° → 90° 位错转变"
+        }
+      }
     },
     {
       "beat_id": "B06",
@@ -251,7 +269,7 @@
   ],
   "cover_title": "晶体缺陷\n能不能“写入”磁畴？",
   "cover_subtitle": "氧化镍薄膜中的反铁磁畴",
-  "source_line": "维也纳科技大学团队 · Applied Physics Letters",
+  "source_line": "俄亥俄州立大学团队 · Applied Physics Letters",
   "editorial_revision": {
     "revision": 2,
     "intent": "shortform_science_story",
