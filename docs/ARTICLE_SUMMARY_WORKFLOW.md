@@ -96,15 +96,21 @@ The spoken script is constrained to 150–360 Chinese characters before TTS. The
 
 ## 4. Local commands
 
-The default Slice A English voice and its personal OpenVoice profile are unchanged. The article-summary workflow uses the existing offline Chinese MeloTTS zh_en model on CPU. It does not use a cloud TTS service and does not fall back to the English voice.
+The default Slice A English voice and its personal OpenVoice profile are unchanged. The Chinese article-summary workflow now defaults to **Edge-TTS / zh-CN-XiaoxiaoNeural**, selected by the user's A/B blind listening. This is an online Microsoft Edge speech endpoint accessed through the pinned `edge-tts` community client; narration text is sent to that service.
 
-Check whether the local Chinese model is already available. Only when it is missing, run the existing one-time model command:
+Install the optional provider once into the project .venv:
 
-    .venv\Scripts\python.exe -X utf8 -m wechat_video.cli download-model-zh
+    .venv\Scripts\python.exe -m pip install -e ".[article-summary-tts]"
+
+The selected provider, voice, rate, pitch, volume and no-fallback policy are recorded in `configs/article_summary_tts.json`. The default is Edge-TTS at the same neutral settings used in the blind test (`rate=+0%`, `volume=+0%`, `pitch=+0Hz`). There are no automatic network retries and no silent fallback to MeloTTS. A provider/network failure stops the run with an explicit error.
+
+MeloTTS remains available only as a deliberate local alternative by changing `default_provider` to `melo_onnx`; that choice requires the existing Chinese ONNX model and sherpa-onnx runtime. Do not set an automatic fallback provider.
 
 Generate a local review sample:
 
     .venv\Scripts\python.exe -X utf8 -m wechat_video.cli run-article-summary --article-dir "path\to\article-package" --summary "path\to\summary.json"
+
+The audio clock is audio-first: after synthesis, each normalized WAV is inspected for its actual PCM sample count. `timeline.py` assembles the narration and derives every speech-unit start/end boundary from those samples; FFprobe durations are retained as diagnostics, not used to override sample timing. A timeline validator rejects gaps, overlaps, inconsistent cue boundaries, or a mismatch between the summed segments and the total sample count before rendering.
 
 The output is a new folder under outputs/ and includes:
 
