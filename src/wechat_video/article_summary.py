@@ -153,11 +153,17 @@ def _build_scene_beats(
         resolved["end_ms"] = int(cue["end_ms"])
         resolved["footer"] = str(beat.get("source_label") or "成核生长 · 精读一分钟")
         if beat["kind"] == "image":
+            focus_regions = beat.get("focus_regions") or {}
+            if not isinstance(focus_regions, dict):
+                raise ArticleSourceError(
+                    f"{beat['beat_id']} focus_regions must map image IDs to normalized rectangles."
+                )
             resolved["images"] = [
                 {
                     "path": copied_images[image_id]["path"],
                     "caption": copied_images[image_id]["caption"],
                     "image_aspect": copied_images[image_id]["image_aspect"],
+                    "focus_region": focus_regions.get(image_id),
                 }
                 for image_id in beat["image_ids"]
             ]
@@ -277,6 +283,7 @@ def run_article_summary(
         audio_dir=run_dir / "audio",
         output_wav=run_dir / "narration.wav",
         ffprobe_records=probes,
+        cover_duration_ms=int(summary.get("cover_duration_ms", 1500)),
     )
     duration = float(timeline["total_duration_seconds"])
     if not 45.0 <= duration <= 75.0:
@@ -297,11 +304,15 @@ def run_article_summary(
     scene_spec = {
         "schema_version": 1,
         "article_title": str(article["title"]),
+        "cover_title": str(summary.get("cover_title") or summary["summary_title"]),
+        "cover_subtitle": str(summary.get("cover_subtitle") or "一篇文章 · 一个关键发现"),
+        "source_line": str(summary.get("source_line") or "成核生长 · 原文精读"),
+        "cover_duration_ms": int(timeline["cover_duration_ms"]),
         "cjk_font_family": environment["font"]["family"],
         "total_duration_ms": int(timeline["total_duration_ms"]),
         "speech_units": timeline["speech_units"],
         "beats": scene_beats,
-        "visual_identity": "premium_editorial_science_documentary",
+        "visual_identity": "mobile_first_shortform_science_story",
     }
     _write_json(run_dir / "article_scene_spec.json", scene_spec)
     scene_video = render_article_summary_scene(project_root, run_dir, scene_spec)
