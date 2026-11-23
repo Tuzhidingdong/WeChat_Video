@@ -41,7 +41,7 @@ article.json:
       }
     }
 
-The URL must be the exact HTTPS mp.weixin.qq.com/s/... link read from an observed published-article response. Do not construct it from appmsgid. Do not put tokens, cookies, credentials, or authenticated query parameters in the package. The endpoint field is the route only; the field path identifies the actual response property that carried the URL.
+The canonical URL is optional for **local preview rendering**. When the published-article response has not yet yielded a verified URL, set canonical_url to null and canonical_url_verified to false, and omit url_provenance. The local preview can still be rendered from the real published article body. If a URL is supplied, it must be the exact HTTPS mp.weixin.qq.com/s/... link read from an observed published-article response, with canonical_url_verified=true and a complete read-only url_provenance. Never construct it from appmsgid. Never put tokens, cookies, credentials, or authenticated query parameters in the package. The endpoint field is the route only; field_path identifies the actual response property that carried the URL. A package containing a URL while canonical_url_verified is false is rejected.
 
 article.md is the complete exported article text. images.json uses this structure:
 
@@ -119,7 +119,7 @@ The visual identity is a premium editorial science documentary: warm paper backg
 The CLI refuses to render unless:
 
 1. The article package is marked published and its account is exactly 「成核生长」.
-2. The canonical URL is a verified mp.weixin.qq.com/s/... link with recorded read-only provenance.
+2. If a canonical URL is present, it is verified as an mp.weixin.qq.com/s/... link with recorded read-only provenance. A missing URL is allowed only for local preview and is explicitly recorded as unverified.
 3. The summary source hash matches the article Markdown.
 4. Every claim excerpt is found verbatim in the original Markdown.
 5. Every spoken unit maps to claims and exactly one visual beat.
@@ -131,10 +131,10 @@ A duplicate article ID is blocked if a prior article-summary run already exists.
 
 ## 6. Extended-link status and upload safety
 
-channels_draft.json carries the exact article URL, article ID, and title in an extended_link object. This is only a local metadata payload; it does not mean the Channels Assistant has mounted the article card.
+When a verified URL exists, channels_draft.json carries the exact article URL, article ID, and title in an extended_link object. If the URL is still missing, extended_link is null and the metadata status is MISSING_VERIFIED_ARTICLE_URL. In both cases this is only a local metadata payload; it does not mean the Channels Assistant has mounted the article card.
 
 **All article-summary runs are explicitly blocked from the existing uploader.** The upload guard remains active until a live, read-only inspection identifies the actual extended-link control and a later authorized test proves that the article link is selected, saved, and read back from the resulting draft. Putting the URL in the ordinary description field is not accepted as a substitute.
 
-The current local audit found the WeChat_control research_subscription session expired. No reliable article URL field was obtained. Accordingly, no URL adapter or field selector is claimed to be production-ready. The publishing workflow must first export a real article package using a verified response field.
+The current local audit found the WeChat_control research_subscription session expired. No reliable article URL field was obtained. A local preview may still be rendered from the already-published article body and its article ID; the link is marked missing. No URL adapter or field selector is claimed to be production-ready. Before a future draft-only upload, the publishing workflow must export the actual URL using a verified response field and the Channels uploader must prove the extended link is saved and read back.
 
 No video is uploaded, saved as a draft, or published by run-article-summary. User review of the complete MP4 is required before any future draft-only integration is enabled.

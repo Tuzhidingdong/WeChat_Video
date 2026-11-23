@@ -97,20 +97,32 @@ def load_article_package(article_dir: Path) -> dict[str, Any]:
     except ValueError as exc:
         raise ArticleSourceError("published_at must be an ISO-8601 timestamp.") from exc
 
-    if article.get("canonical_url_verified") is not True:
-        raise ArticleSourceError("The canonical article URL has not been verified from a backend response.")
-    url = validate_canonical_article_url(article.get("canonical_url"))
-    provenance = article.get("url_provenance")
-    if not isinstance(provenance, dict):
-        raise ArticleSourceError("url_provenance must record the observed URL source.")
-    for field in ("endpoint", "field_path", "verified_at"):
-        if not str(provenance.get(field) or "").strip():
-            raise ArticleSourceError(f"url_provenance.{field} is required.")
-    endpoint_query = parse_qsl(urlparse(str(provenance["endpoint"])).query, keep_blank_values=True)
-    if any(key.casefold() in {"token", "access_token", "auth", "code", "pass_ticket"} for key, _ in endpoint_query):
-        raise ArticleSourceError("url_provenance.endpoint must not contain authentication parameters.")
-    if provenance.get("read_only") is not True:
-        raise ArticleSourceError("Article URL provenance must explicitly record a read-only lookup.")
+    raw_url = str(article.get("canonical_url") or "").strip()
+    if article.get("canonical_url_verified") is True:
+        if not raw_url:
+            raise ArticleSourceError("A verified canonical_url value is required when canonical_url_verified is true.")
+        url = validate_canonical_article_url(raw_url)
+        provenance = article.get("url_provenance")
+        if not isinstance(provenance, dict):
+            raise ArticleSourceError("url_provenance must record the observed URL source.")
+        for field in ("endpoint", "field_path", "verified_at"):
+            if not str(provenance.get(field) or "").strip():
+                raise ArticleSourceError(f"url_provenance.{field} is required.")
+        endpoint_query = parse_qsl(urlparse(str(provenance["endpoint"])).query, keep_blank_values=True)
+        if any(key.casefold() in {"token", "access_token", "auth", "code", "pass_ticket"} for key, _ in endpoint_query):
+            raise ArticleSourceError("url_provenance.endpoint must not contain authentication parameters.")
+        if provenance.get("read_only") is not True:
+            raise ArticleSourceError("Article URL provenance must explicitly record a read-only lookup.")
+    elif article.get("canonical_url_verified") is False and not raw_url:
+        # A missing URL does not block a local video preview. It will still block
+        # any future upload/link-mounting path, which is separately fail-closed.
+        url = None
+        provenance = None
+    else:
+        raise ArticleSourceError(
+            "A supplied canonical URL must be verified; omit the URL and set "
+            "canonical_url_verified=false for local-preview-only production."
+        )
 
     markdown_path = _safe_child(root, "article.md")
     markdown = markdown_path.read_text(encoding="utf-8")
@@ -156,7 +168,7 @@ def load_article_package(article_dir: Path) -> dict[str, Any]:
 
     return {
         "root": root,
-        "article": {**article, "canonical_url": url},
+        "article": {**article, "canonical_url": url, "canonical_url_verified": url is not None, "url_provenance": provenance},
         "markdown": markdown,
         "markdown_path": markdown_path,
         "markdown_sha256": sha256_file(markdown_path),
@@ -368,7 +380,11 @@ def build_article_channels_metadata(
     job_id: str,
 ) -> dict[str, Any]:
     """Build a draft payload that explicitly retains, but does not claim to mount, the article link."""
-    url = validate_canonical_article_url(article.get("canonical_url"))
+    url = None
+    link_status = "MISSING_VERIFIED_ARTICLE_URL"
+    if article.get("canonical_url_verified") is True and article.get("canonical_url"):
+        url = validate_canonical_article_url(article.get("canonical_url"))
+        link_status = "UNVERIFIED_PLATFORM_UI"
     title = str(summary.get("channels_title") or "").strip()
     description = (
         f"{str(summary.get('core_thesis') or '').strip()}\n\n"
@@ -377,6 +393,14 @@ def build_article_channels_metadata(
     )
     if not 6 <= len(title) <= 16 or len(description) > 1000:
         raise ArticleSourceError("Article-summary Channels metadata fails title/description length limits.")
+    extended_link = None
+    if url:
+        extended_link = {
+            "type": "wechat_article",
+            "title": str(article.get("title") or ""),
+            "article_id": str(article.get("article_id") or ""),
+            "url": url,
+        }
     return {
         "schema_version": 2,
         "content_type": "article_summary",
@@ -384,13 +408,8 @@ def build_article_channels_metadata(
         "account_name": "成核生长",
         "title": title,
         "description": description,
-        "extended_link": {
-            "type": "wechat_article",
-            "title": str(article.get("title") or ""),
-            "article_id": str(article.get("article_id") or ""),
-            "url": url,
-        },
+        "extended_link": extended_link,
         "extended_link_required": True,
-        "extended_link_status": "UNVERIFIED_PLATFORM_UI",
+        "extended_link_status": link_status,
         "automatic_publication": False,
     }

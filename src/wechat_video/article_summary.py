@@ -210,9 +210,9 @@ def run_article_summary(
         "article_id": str(article["article_id"]),
         "article_title": str(article["title"]),
         "published_at": str(article["published_at"]),
-        "canonical_url": str(article["canonical_url"]),
-        "canonical_url_verified": True,
-        "url_provenance": article["url_provenance"],
+        "canonical_url": article.get("canonical_url"),
+        "canonical_url_verified": bool(article.get("canonical_url_verified")),
+        "url_provenance": article.get("url_provenance"),
         "account_name": "成核生长",
         "editorial_slot": int(article["editorial_slot"]),
         "editorial_pillar_id": str(article["editorial_pillar_id"]),
@@ -233,8 +233,9 @@ def run_article_summary(
         "editorial_slot": article["editorial_slot"],
         "editorial_pillar_id": article["editorial_pillar_id"],
         "published_at": article["published_at"],
-        "canonical_url": article["canonical_url"],
-        "url_provenance": article["url_provenance"],
+        "canonical_url": article.get("canonical_url"),
+        "canonical_url_verified": bool(article.get("canonical_url_verified")),
+        "url_provenance": article.get("url_provenance"),
         "article_markdown_sha256": package["markdown_sha256"],
     })
     _write_json(run_dir / "fact_card.json", {
@@ -371,7 +372,7 @@ def run_article_summary(
         "sample_status": "LOCAL_PREVIEW_ONLY",
         "technical_qa": qa["overall_status"],
         "user_video_acceptance": "PENDING",
-        "extended_link_status": "UNVERIFIED_PLATFORM_UI",
+        "extended_link_status": channels_metadata["extended_link_status"],
         "automatic_upload": False,
         "automatic_publication": False,
     }
@@ -382,7 +383,11 @@ def run_article_summary(
             "",
             f"- 原文：{article['title']}",
             f"- 发表时间：{article['published_at']}",
-            f"- 原文链接：{article['canonical_url']}",
+            (
+                f"- 原文链接：{article['canonical_url']}"
+                if article.get("canonical_url_verified")
+                else "- 原文永久链接：尚未取得；本次仅生成本地预览，不能挂载扩展链接"
+            ),
             "- 视频：final.mp4",
             f"- 实测时长：{duration:.2f}s",
             f"- 技术 QA：{qa['overall_status']}",

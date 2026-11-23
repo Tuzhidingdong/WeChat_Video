@@ -144,7 +144,7 @@ def test_unverified_url_provenance_is_rejected(tmp_path: Path) -> None:
     article["canonical_url_verified"] = False
     path.write_text(json.dumps(article), encoding="utf-8")
 
-    with pytest.raises(ArticleSourceError, match="not been verified"):
+    with pytest.raises(ArticleSourceError, match="must be verified"):
         load_article_package(article_dir)
 
 
@@ -221,3 +221,37 @@ def test_core_thesis_must_reference_evidence_claims(tmp_path: Path) -> None:
 
     with pytest.raises(ArticleSourceError, match="thesis_claim_ids"):
         validate_article_summary(package, summary)
+
+
+def test_missing_published_url_allows_local_preview_but_never_claims_extended_link(tmp_path: Path) -> None:
+    article_dir, summary = _make_package(tmp_path)
+    path = article_dir / "article.json"
+    article = json.loads(path.read_text(encoding="utf-8"))
+    article.pop("canonical_url", None)
+    article.pop("url_provenance", None)
+    article["canonical_url_verified"] = False
+    path.write_text(json.dumps(article, ensure_ascii=False), encoding="utf-8")
+
+    package = load_article_package(article_dir)
+    validated = validate_article_summary(package, summary)
+    metadata = build_article_channels_metadata(
+        package["article"], validated, "local_preview_without_published_url"
+    )
+
+    assert package["article"]["canonical_url"] is None
+    assert package["article"]["canonical_url_verified"] is False
+    assert metadata["extended_link"] is None
+    assert metadata["extended_link_required"] is True
+    assert metadata["extended_link_status"] == "MISSING_VERIFIED_ARTICLE_URL"
+    assert metadata["automatic_publication"] is False
+
+
+def test_unverified_url_must_not_be_used_for_local_or_draft_metadata(tmp_path: Path) -> None:
+    article_dir, _ = _make_package(tmp_path)
+    path = article_dir / "article.json"
+    article = json.loads(path.read_text(encoding="utf-8"))
+    article["canonical_url_verified"] = False
+    path.write_text(json.dumps(article, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ArticleSourceError, match="must be verified"):
+        load_article_package(article_dir)
