@@ -22,7 +22,8 @@ from .preflight import find_font
 from .qa import run_qa
 from .render import render_article_summary_scene
 from .subtitles import write_chinese_subtitles
-from .timeline import build_audio_timeline, write_timeline
+from .timeline import attach_editorial_events, build_audio_timeline, write_timeline
+from .sfx import generate_editorial_music_bed, generate_sfx
 from .tooling import legacy_model_root, resolve_command, tool_env
 
 
@@ -291,6 +292,10 @@ def run_article_summary(
             f"Measured Chinese narration is {duration:.2f}s; expected 45–75s. "
             "Rewrite the script; playback speed will not be altered."
         )
+    sfx_durations = generate_sfx(run_dir / "sfx")
+    timeline = attach_editorial_events(timeline, units, sfx_durations)
+    for event in timeline["sfx_events"]:
+        event["relative_level_db"] = -20.0
     write_timeline(run_dir / "audio_timing.json", timeline)
     subtitle_count = write_chinese_subtitles(
         timeline,
@@ -330,13 +335,24 @@ def run_article_summary(
     _write_json(run_dir / "audio_postprocess_snapshot.json", audio_master)
     _write_json(run_dir / "theme_config_snapshot.json", theme_master)
     final_mix = run_dir / "final_mix.wav"
+    music_bed_path = run_dir / "article_summary_music.wav"
+    music_config = audio_master.get("article_summary_music", {})
+    music_generation = generate_editorial_music_bed(
+        music_bed_path,
+        int(timeline["total_sample_count"]),
+        sample_rate=int(timeline["audio_sample_rate"]),
+        target_rms_dbfs=float(music_config.get("target_rms_dbfs", -28.0)),
+        fade_ms=int(music_config.get("fade_ms", 700)),
+    )
+    _write_json(run_dir / "article_summary_music_manifest.json", music_generation)
     mix_report = mix_final_audio(
         run_dir / "narration.wav",
-        [],
+        timeline["sfx_events"],
         run_dir,
         final_mix,
         config=audio_master,
         timeline=timeline,
+        music_bed_path=music_bed_path,
     )
     _write_json(run_dir / "audio_mix_report.json", mix_report)
     expected_frames = round(
