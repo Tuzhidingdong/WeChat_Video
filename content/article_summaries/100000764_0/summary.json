@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "article_id": "100000764_0",
+  "source_article_sha256": "cf08182032e0647b1c2d89aaf37094a9030fbbf1501003d74eeafda60ebf2bff",
+  "summary_title": "失配位错如何模板化NiO反铁磁畴",
+  "channels_title": "位错写入反铁磁畴",
+  "core_thesis": "这项研究证明，NiO/MgO界面失配位错产生的剪切应力场能够选择性稳定反铁磁T畴，并使畴结构在跨越Néel温度后仍保留空间记忆；通过改变薄膜厚度与位错滑移系，研究者还揭示了位错网络对T畴形态、方向和面积分数的模板化作用。",
+  "thesis_claim_ids": [
+    "C1",
+    "C2"
+  ],
+  "claims": [
+    {
+      "claim_id": "C1",
+      "statement": "研究利用ECCI在同一视场中直接关联了埋藏界面失配位错与上覆反铁磁T畴，跨越Néel温度的热循环后，畴在原位置恢复。",
+      "source_excerpt": "冷却回293 K后，畴在相同位置以几乎相同的几何形态重新出现。定量空间相关分析给出畴平台内Pearson相关系数$R=0.79$，全视场二值化面积匹配度超过$96\%$，直接证明了反铁磁畴的空间记忆由下方不可移动的位错网络模板化。"
+    },
+    {
+      "claim_id": "C2",
+      "statement": "失配位错的剪切应力与NiO自发本征应变产生磁弹相互作用，可打破不同T畴变体的简并并选择性稳定特定侧翼畴。",
+      "source_excerpt": "失配位错应力场$\sigma^{MD}(y,z)$在NiO从立方相向菱方相转变时对自发本征应变$\varepsilon^*$做功，相互作用能可写为："
+    },
+    {
+      "claim_id": "C3",
+      "statement": "在60 nm薄膜中，NiO相对于MgO约+0.64%的拉伸失配仅弛豫约11%，体系整体仍处于低弛豫状态。",
+      "source_excerpt": "以最厚的60 nm薄膜为例，在泊松比取0.21的假设下，NiO相对于MgO衬底约$+0.64\%$的拉伸失配仅弛豫了约$11\%$，说明体系整体仍处于低弛豫状态"
+    },
+    {
+      "claim_id": "C4",
+      "statement": "T畴衬度随面内衍射矢量变化，可用于区分不同T畴变体；研究识别出同一条失配位错两侧的T3与T4侧翼畴，周围母畴为T2。",
+      "source_excerpt": "其$\vec{g}$依赖衬度序列将其识别为T3与T4，而周围母畴为T2。"
+    },
+    {
+      "claim_id": "C5",
+      "statement": "薄膜厚度增加伴随位错滑移系由以60°失配位错为主向90°纯刃型失配位错网络转变。",
+      "source_excerpt": "当厚度增至33 nm及以上时，穿透位错发生交滑移，转入{110}面并形成沿$\langle100\rangle$方向的纯刃型90°失配位错网络。"
+    },
+    {
+      "claim_id": "C6",
+      "statement": "T畴面积分数及形态随失配位错网络演化，T畴长轴总体沿底层位错线方向排列。",
+      "source_excerpt": "角度分布统计还表明，T畴长轴总体上跟随底层位错线方向，仅在位错交叉、畴合并处出现局部偏转。"
+    },
+    {
+      "claim_id": "C7",
+      "statement": "作者计算比较了12种可能失配位错与4种T畴的48种组合，模型预测的侧翼畴类型与ECCI观测高度一致。",
+      "source_excerpt": "作者还系统评估了12种可能失配位错与4种T畴组成的48种组合，发现模型预测的侧翼畴类型与ECCI观测高度一致"
+    }
+  ],
+  "speech_units": [
+    {
+      "unit_id": "U01",
+      "spoken_text": "反铁磁材料没有净磁化，抗外磁场干扰，但畴结构很难被精确写入。这项研究发现，晶体中的失配位错，可能正是控制反铁磁畴的天然模板。",
+      "display_text": "反铁磁畴，能否由晶体缺陷写入？",
+      "claim_ids": [
+        "C1",
+        "C2"
+      ],
+      "visual_trigger_ids": [
+        "B01"
+      ],
+      "pause_after_ms": 300
+    },
+    {
+      "unit_id": "U02",
+      "spoken_text": "研究者在氧化镍薄膜中用电子通道衬度成像，同时观察位错和反铁磁T畴。样品加热越过五百二十三开尔文的奈尔温度后，畴衬度消失；冷却回来，原来的畴又在同一位置恢复。",
+      "display_text": "跨越奈尔温度，畴结构仍有空间记忆",
+      "claim_ids": [
+        "C1"
+      ],
+      "visual_trigger_ids": [
+        "B02"
+      ],
+      "pause_after_ms": 350
+    },
+    {
+      "unit_id": "U03",
+      "spoken_text": "这种恢复并非巧合。研究测得畴平台的空间相关系数达到零点七九，全视场面积匹配超过百分之九十六，说明稳定的位错网络记录了畴的位置。",
+      "display_text": "R = 0.79；面积匹配度 > 96%",
+      "claim_ids": [
+        "C1"
+      ],
+      "visual_trigger_ids": [
+        "B03"
+      ],
+      "pause_after_ms": 300
+    },
+    {
+      "unit_id": "U04",
+      "spoken_text": "为什么位错能做到这一点？关键在剪切应力。位错应力场与氧化镍相变时的自发应变耦合，产生磁弹相互作用，打破不同畴变体的能量简并，优先稳定特定侧翼畴。",
+      "display_text": "位错剪切应力 → 磁弹耦合 → 畴变体选择",
+      "claim_ids": [
+        "C2",
+        "C7"
+      ],
+      "visual_trigger_ids": [
+        "B04"
+      ],
+      "pause_after_ms": 300
+    },
+    {
+      "unit_id": "U05",
+      "spoken_text": "研究还发现，薄膜变厚时，位错网络会从六十度位错主导，转向九十度纯刃型位错。这一变化伴随T畴面积分数和畴壁形态的同步演化。",
+      "display_text": "60° 位错 → 90° 位错网络",
+      "claim_ids": [
+        "C5",
+        "C6"
+      ],
+      "visual_trigger_ids": [
+        "B05"
+      ],
+      "pause_after_ms": 350
+    },
+    {
+      "unit_id": "U06",
+      "spoken_text": "定量分析表明，T畴长轴总体沿着底层位错线排列。作者进一步比较四十八种位错与畴变体组合，计算预测与实验观察相互吻合。",
+      "display_text": "位错网络决定T畴的空间组织",
+      "claim_ids": [
+        "C6",
+        "C7"
+      ],
+      "visual_trigger_ids": [
+        "B06"
+      ],
+      "pause_after_ms": 300
+    },
+    {
+      "unit_id": "U07",
+      "spoken_text": "这项工作把晶体缺陷从传统的性能退化源，转变为可设计的反铁磁织构模板。通过界面和应变工程，未来或可按需控制反铁磁畴的位置、方向与形态。",
+      "display_text": "从缺陷到模板：反铁磁畴工程",
+      "claim_ids": [
+        "C2",
+        "C6"
+      ],
+      "visual_trigger_ids": [
+        "B07"
+      ],
+      "pause_after_ms": 400
+    }
+  ],
+  "beats": [
+    {
+      "beat_id": "B01",
+      "unit_id": "U01",
+      "kind": "hook",
+      "headline": "反铁磁畴可以被写入吗？",
+      "body": "没有净磁化，却需要确定性的畴结构",
+      "claim_ids": [
+        "C1",
+        "C2"
+      ]
+    },
+    {
+      "beat_id": "B02",
+      "unit_id": "U02",
+      "kind": "image",
+      "headline": "热循环前后，畴在原位恢复",
+      "body": "用原文ECCI图像呈现位错与T畴的共存及空间记忆",
+      "image_ids": [
+        "figure_01"
+      ],
+      "caption": "图 2 ｜ 失配位错两侧T畴的三维构型与衍射矢量识别。",
+      "claim_ids": [
+        "C1",
+        "C4"
+      ]
+    },
+    {
+      "beat_id": "B03",
+      "unit_id": "U03",
+      "kind": "stat",
+      "headline": "空间记忆有定量证据",
+      "stat_value": "R = 0.79",
+      "stat_label": "全视场面积匹配度超过 96%",
+      "claim_ids": [
+        "C1"
+      ]
+    },
+    {
+      "beat_id": "B04",
+      "unit_id": "U04",
+      "kind": "mechanism",
+      "headline": "剪切应力选择畴变体",
+      "steps": [
+        "界面失配位错",
+        "局域剪切应力场",
+        "磁弹能量差",
+        "T畴变体选择"
+      ],
+      "body": "应力场与相变自发应变耦合，打破畴变体简并",
+      "claim_ids": [
+        "C2",
+        "C7"
+      ]
+    },
+    {
+      "beat_id": "B05",
+      "unit_id": "U05",
+      "kind": "compare",
+      "headline": "厚度改变位错网络",
+      "left": {
+        "label": "较薄薄膜",
+        "detail": "60°失配位错占主导"
+      },
+      "right": {
+        "label": "较厚薄膜",
+        "detail": "90°纯刃型位错网络形成"
+      },
+      "claim_ids": [
+        "C5",
+        "C6"
+      ]
+    },
+    {
+      "beat_id": "B06",
+      "unit_id": "U06",
+      "kind": "image",
+      "headline": "位错方向与畴长轴相关",
+      "body": "原文图像展示位错网络与T畴面积分数、形态及方向的关系",
+      "image_ids": [
+        "figure_02"
+      ],
+      "caption": "图 4 ｜ 失配位错网络演化与T畴面积分数的定量关联。",
+      "claim_ids": [
+        "C6",
+        "C7"
+      ]
+    },
+    {
+      "beat_id": "B07",
+      "unit_id": "U07",
+      "kind": "takeaway",
+      "headline": "缺陷可成为反铁磁织构模板",
+      "body": "界面和应变工程为定向调控畴结构提供思路",
+      "claim_ids": [
+        "C2",
+        "C6"
+      ]
+    }
+  ]
+}
