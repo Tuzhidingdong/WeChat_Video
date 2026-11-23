@@ -6,7 +6,7 @@
 
 「精读一分钟」 is a separate Chinese-language content type. Its source is an article that has already been published by the 「成核生长」 WeChat Official Account. It is not a shortened version of the critical-nucleus explainer series.
 
-The pipeline consumes a sanitized, local article package exported by the publishing workflow. The package must identify the article as Slot 1 with editorial_pillar_id set to literature_translation. It does not access or reuse the WeChat_control browser profile, cookies, access tokens, or private platform APIs. This keeps the Video project isolated from the WeChat_control account session and browser automation.
+The pipeline consumes a sanitized, local article package exported by the publishing workflow. Its taxonomy mirrors the upstream record: editorial_slot=1, article_type=literature_translation, and editorial_pillar_id=literature_manuscript. It does not access or reuse the WeChat_control browser profile, cookies, access tokens, or private platform APIs. This keeps the Video project isolated from the WeChat_control account session and browser automation.
 
 ## 2. Input package contract
 
@@ -26,7 +26,8 @@ article.json:
       "schema_version": 1,
       "account_name": "成核生长",
       "editorial_slot": 1,
-      "editorial_pillar_id": "literature_translation",
+      "article_type": "literature_translation",
+      "editorial_pillar_id": "literature_manuscript",
       "publication_status": "PUBLISHED",
       "article_id": "the published appmsg/article identifier",
       "title": "The exact published article title",

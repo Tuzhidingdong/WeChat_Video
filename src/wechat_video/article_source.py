@@ -80,9 +80,17 @@ def load_article_package(article_dir: Path) -> dict[str, Any]:
         raise ArticleSourceError("article.json schema_version must be 1.")
     if article.get("account_name") != "成核生长":
         raise ArticleSourceError("Article package account_name must be exactly '成核生长'.")
-    if article.get("editorial_slot") != 1 or article.get("editorial_pillar_id") != "literature_translation":
+    # Map the upstream editorial taxonomy without conflating article type and pillar:
+    # prepared_articles.json uses type=literature_translation and
+    # pillar_id=literature_manuscript for the Slot 1 reading series.
+    if (
+        article.get("editorial_slot") != 1
+        or article.get("article_type") != "literature_translation"
+        or article.get("editorial_pillar_id") != "literature_manuscript"
+    ):
         raise ArticleSourceError(
-            "Only the published Slot 1 literature_translation article is eligible for this series."
+            "Only a published Slot 1 article with article_type=literature_translation "
+            "and editorial_pillar_id=literature_manuscript is eligible."
         )
     if str(article.get("publication_status", "")).upper() != "PUBLISHED":
         raise ArticleSourceError("Only an already-published WeChat article may be summarized.")

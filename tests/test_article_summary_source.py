@@ -29,13 +29,16 @@ ARTICLE_TEXT = """# 测试文章标题
 def _make_package(tmp_path: Path) -> tuple[Path, dict]:
     root = tmp_path / "published_article"
     root.mkdir()
-    (root / "article.md").write_text(ARTICLE_TEXT, encoding="utf-8")
+    # Write exact UTF-8 bytes so Windows text-mode newline translation cannot
+    # change the content hash expected by the summary fixture.
+    (root / "article.md").write_bytes(ARTICLE_TEXT.encode("utf-8"))
     (root / "images.json").write_text(json.dumps({"images": []}), encoding="utf-8")
     article = {
         "schema_version": 1,
         "account_name": "成核生长",
         "editorial_slot": 1,
-        "editorial_pillar_id": "literature_translation",
+        "article_type": "literature_translation",
+        "editorial_pillar_id": "literature_manuscript",
         "publication_status": "PUBLISHED",
         "article_id": "100000764_0",
         "title": "一篇用于验证摘要数据契约的已发表精读文章",
@@ -210,7 +213,7 @@ def test_non_literature_slot_is_not_accepted_as_daily_reading_article(tmp_path: 
     article["editorial_slot"] = 2
     path.write_text(json.dumps(article), encoding="utf-8")
 
-    with pytest.raises(ArticleSourceError, match="Slot 1 literature_translation"):
+    with pytest.raises(ArticleSourceError, match="Slot 1 article"):
         load_article_package(article_dir)
 
 
@@ -254,4 +257,15 @@ def test_unverified_url_must_not_be_used_for_local_or_draft_metadata(tmp_path: P
     path.write_text(json.dumps(article, ensure_ascii=False), encoding="utf-8")
 
     with pytest.raises(ArticleSourceError, match="must be verified"):
+        load_article_package(article_dir)
+
+
+def test_article_type_and_pillar_must_match_slot_one_taxonomy(tmp_path: Path) -> None:
+    article_dir, _ = _make_package(tmp_path)
+    path = article_dir / "article.json"
+    article = json.loads(path.read_text(encoding="utf-8"))
+    article["editorial_pillar_id"] = "literature_translation"
+    path.write_text(json.dumps(article, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ArticleSourceError, match="article_type=literature_translation"):
         load_article_package(article_dir)
