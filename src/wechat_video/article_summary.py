@@ -22,9 +22,9 @@ from .preflight import find_font
 from .qa import run_qa
 from .render import render_article_summary_scene
 from .subtitles import write_chinese_subtitles
-from .timeline import attach_editorial_events, build_audio_timeline, write_timeline
+from .timeline import attach_editorial_events, build_audio_timeline, validate_audio_timeline, write_timeline
 from .sfx import generate_editorial_music_bed, generate_sfx
-from .tooling import legacy_model_root, resolve_command, tool_env
+from .tooling import resolve_command, tool_env
 from .tts_provider import (
     generate_article_summary_speech_units,
     load_article_summary_tts_config,
@@ -281,6 +281,8 @@ def run_article_summary(
         ffprobe_records=probes,
         cover_duration_ms=int(summary.get("cover_duration_ms", 1500)),
     )
+    timeline_validation = validate_audio_timeline(timeline)
+    _write_json(run_dir / "audio_timeline_validation.json", timeline_validation)
     duration = float(timeline["total_duration_seconds"])
     if not 45.0 <= duration <= 75.0:
         raise RuntimeError(
