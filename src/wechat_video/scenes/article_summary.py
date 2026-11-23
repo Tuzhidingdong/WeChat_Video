@@ -350,7 +350,7 @@ class ArticleSummaryScene(Scene):
             if not 2 <= len(steps) <= 4:
                 raise RuntimeError("Mechanism scenes require two to four steps.")
             card_width = 1.72
-            card_height = 4.0
+            card_height = 3.5
             count_steps = len(steps)
             gap = 0.17
             total_width = count_steps * card_width + (count_steps - 1) * gap
@@ -366,7 +366,7 @@ class ArticleSummaryScene(Scene):
                     stroke_width=3,
                     fill_color=CARD,
                     fill_opacity=1,
-                ).move_to(RIGHT * x + DOWN * 0.05)
+                ).move_to(RIGHT * x + UP * 0.20)
                 number = Text(
                     f"{node_index + 1:02d}",
                     font=font,
@@ -384,8 +384,8 @@ class ArticleSummaryScene(Scene):
                     end_x_arrow = start_x_arrow + gap - 0.04
                     cards.append(
                         Arrow(
-                            RIGHT * start_x_arrow + DOWN * 0.05,
-                            RIGHT * end_x_arrow + DOWN * 0.05,
+                            RIGHT * start_x_arrow + UP * 0.20,
+                            RIGHT * end_x_arrow + UP * 0.20,
                             buff=0,
                             color=MUTED,
                             stroke_width=2,
