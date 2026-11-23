@@ -225,6 +225,85 @@ def build_audio_timeline(
     }
 
 
+def validate_audio_timeline(timeline: dict[str, Any]) -> dict[str, Any]:
+    """Prove that every cue/scene boundary is derived from one contiguous PCM sample clock."""
+    try:
+        sample_rate = int(timeline["audio_sample_rate"])
+        total_samples = int(timeline["total_sample_count"])
+        segments = timeline["segments"]
+        cues = timeline["speech_units"]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Audio timeline is missing its sample-clock fields.") from exc
+    if sample_rate <= 0 or total_samples <= 0:
+        raise ValueError("Audio timeline sample rate and total sample count must be positive.")
+    if not isinstance(segments, list) or not segments:
+        raise ValueError("Audio timeline must contain ordered segments.")
+    if not isinstance(cues, list) or not cues:
+        raise ValueError("Audio timeline must contain speech-unit cues.")
+
+    cursor = 0
+    speech_segments: dict[str, dict[str, Any]] = {}
+    for segment in segments:
+        try:
+            start = int(segment["start_sample"])
+            end = int(segment["end_sample"])
+            start_ms = int(segment["start_ms"])
+            end_ms = int(segment["end_ms"])
+            kind = str(segment["kind"])
+            segment_id = str(segment["segment_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Audio timeline contains a malformed segment.") from exc
+        if start != cursor or end < start:
+            raise ValueError(
+                f"Audio timeline has a gap, overlap, or reversed segment at {segment_id}: "
+                f"expected start={cursor}, actual={start}, end={end}."
+            )
+        if start_ms != _round_samples_to_ms(start, sample_rate) or end_ms != _round_samples_to_ms(end, sample_rate):
+            raise ValueError(f"Audio timeline millisecond boundary disagrees with PCM samples: {segment_id}.")
+        if kind == "speech":
+            if segment_id in speech_segments:
+                raise ValueError(f"Duplicate speech segment in audio timeline: {segment_id}.")
+            speech_segments[segment_id] = segment
+        cursor = end
+
+    if cursor != total_samples:
+        raise ValueError(
+            f"Audio timeline ends at sample {cursor}, but total_sample_count is {total_samples}."
+        )
+    if segments[0].get("segment_id") != "scene_00_cover" or int(segments[0].get("start_sample", -1)) != 0:
+        raise ValueError("Audio timeline must begin with the explicit cover segment.")
+
+    cue_ids: set[str] = set()
+    for cue in cues:
+        unit_id = str(cue.get("unit_id") or "")
+        if not unit_id or unit_id in cue_ids:
+            raise ValueError(f"Missing or duplicate speech cue unit_id: {unit_id!r}.")
+        cue_ids.add(unit_id)
+        segment = speech_segments.get(unit_id)
+        if segment is None:
+            raise ValueError(f"Speech cue {unit_id} has no matching speech segment.")
+        for key in ("start_sample", "end_sample", "start_ms", "end_ms"):
+            if int(cue.get(key, -1)) != int(segment.get(key, -2)):
+                raise ValueError(f"Speech cue {unit_id} {key} does not match its audio segment.")
+        sample_count = int(cue.get("sample_count", -1))
+        if sample_count != int(cue["end_sample"]) - int(cue["start_sample"]):
+            raise ValueError(f"Speech cue {unit_id} sample_count disagrees with its boundaries.")
+    if cue_ids != set(speech_segments):
+        raise ValueError("Speech cue IDs and speech segment IDs are not a one-to-one match.")
+
+    measured_seconds = total_samples / sample_rate
+    if abs(float(timeline.get("total_duration_seconds", -1.0)) - measured_seconds) > 1e-9:
+        raise ValueError("Audio timeline duration is not derived from total PCM sample count.")
+    return {
+        "valid": True,
+        "sample_rate": sample_rate,
+        "total_sample_count": total_samples,
+        "speech_unit_count": len(cues),
+        "segment_count": len(segments),
+        "authority": "measured_pcm_wav_sample_counts",
+    }
+
+
 def attach_editorial_events(
     timeline: dict[str, Any], units: list[dict[str, Any]], sfx_durations_ms: dict[str, int]
 ) -> dict[str, Any]:
