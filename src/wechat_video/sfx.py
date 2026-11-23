@@ -120,15 +120,21 @@ def generate_editorial_music_bed(
     bar_samples = max(1, rate * 8)
     signal = np.zeros(count, dtype=np.float64)
     weights = (0.42, 0.29, 0.19, 0.10)
-    for index, frequencies in enumerate(chords):
+    bar_count = (count + bar_samples - 1) // bar_samples
+    for index in range(bar_count):
+        frequencies = chords[index % len(chords)]
         start = index * bar_samples
         end = min(count, start + bar_samples)
-        if start >= count:
-            break
         local_t = t[start:end] - t[start]
         local = np.zeros(end - start, dtype=np.float64)
         for frequency, weight in zip(frequencies, weights):
             local += weight * np.sin(2 * math.pi * frequency * local_t)
+        edge = min(rate // 4, len(local) // 2)
+        if edge:
+            phase = np.linspace(0.0, math.pi / 2.0, edge, endpoint=True)
+            ramp = np.sin(phase) ** 2
+            local[:edge] *= ramp
+            local[-edge:] *= ramp[::-1]
         signal[start:end] += local
     modulation = 0.88 + 0.12 * np.sin(2 * math.pi * 0.075 * t)
     signal *= modulation
