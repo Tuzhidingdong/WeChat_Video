@@ -9,11 +9,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import soundfile as sf
 
 
 class LocalTtsError(RuntimeError):
     pass
+
+
+def _soundfile_module():
+    """Load the audio I/O dependency only when a TTS job actually runs."""
+    try:
+        import soundfile
+    except ImportError as exc:
+        raise LocalTtsError(
+            "The soundfile package is required for offline audio generation. "
+            "Install the project's audio runtime dependencies."
+        ) from exc
+    return soundfile
 
 
 def engine_label(model_root: Path) -> str:
@@ -102,6 +113,7 @@ def _generate_with_personal_voice(
     audio_dir: Path,
     pronunciation_text: str,
 ) -> list[dict[str, Any]]:
+    sf = _soundfile_module()
     root, profile_dir, voice_python, worker = _voice_profile_paths()
     profile_json = profile_dir / "voice_profile.json"
     target_se = profile_dir / "target_se.pth"
@@ -303,6 +315,7 @@ def generate_chinese_speech_units(
     """
     if not units:
         raise LocalTtsError("Article-summary TTS received no speech units.")
+    sf = _soundfile_module()
     sherpa, engine = _create_engine(model_root)
     audio_dir.mkdir(parents=True, exist_ok=True)
     results: list[dict[str, Any]] = []
