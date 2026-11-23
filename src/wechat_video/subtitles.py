@@ -142,33 +142,38 @@ def write_chinese_subtitles(
     layout: dict[str, Any],
     cjk_font_family: str,
 ) -> int:
-    """Write one centered Chinese-only subtitle cue per measured speech unit."""
+    """Write a spoken-text subtitle cue synchronized to each measured WAV unit."""
     subtitle_config = layout["subtitle"]
-    limit = int(subtitle_config.get("max_line_chars_zh", 12))
+    limit = int(subtitle_config.get("max_line_chars_zh", 20))
     canvas_width = int(layout["canvas"]["width"])
     canvas_height = int(layout["canvas"]["height"])
-    y = round(canvas_height * float(subtitle_config.get("zh_y_percent", 75.0)) / 100)
+    y = round(canvas_height * float(subtitle_config.get("zh_y_percent", 72.5)) / 100)
     center_x = canvas_width // 2
     srt_blocks: list[str] = []
     ass_events: list[str] = []
     for index, cue in enumerate(timeline["speech_units"], start=1):
-        text = _wrap_text(str(cue["display_text"]), limit)
+        # The old article-summary renderer used display_text here, so the viewer
+        # saw a fixed slide takeaway rather than the words being spoken. Prefer
+        # the actual narrated sentence; display_text remains the scene headline.
+        spoken = str(cue.get("subtitle_text") or cue.get("spoken_text") or cue.get("display_text") or "").strip()
+        if not spoken:
+            raise ValueError(f"Subtitle cue {cue.get('unit_id')} has no spoken text.")
+        text = _wrap_text(spoken, limit)
         srt_blocks.append(
             f"{index}\n"
             f"{_srt_timestamp(cue['start_ms'])} --> {_srt_timestamp(cue['end_ms'])}\n"
             f"{text}\n"
         )
         ass_events.append(
-            f"Dialogue: 0,{_ass_timestamp(cue['start_ms'])},{_ass_timestamp(cue['end_ms'])},ZH,,0,0,0,,"
-            rf"{{\an5\pos({center_x},{y})}}{_ass_escape(text)}"
+            f"Dialogue: 2,{_ass_timestamp(cue['start_ms'])},{_ass_timestamp(cue['end_ms'])},ZH,,0,0,0,,"
+            rf"{{\an5\fad(90,90)\pos({center_x},{y})}}{_ass_escape(text)}"
         )
     style = (
-        f"Style: ZH,{cjk_font_family},{int(subtitle_config.get('cjk_font_size', 46))},"
-        "&H000F2332,&H000000FF,&H00FFFFFF,&H90000000,"
-        "0,0,0,0,100,100,0,0,1,"
-        f"{int(subtitle_config['outline'])},{int(subtitle_config['shadow'])},"
-        "2,"
-        f"{int(subtitle_config['margin_left'])},{int(subtitle_config['margin_right'])},0,1"
+        f"Style: ZH,{cjk_font_family},{int(subtitle_config.get('cjk_font_size', 42))},"
+        "&H00FFFFFF,&H000000FF,&H00101820,&H700B1C2C,"
+        "0,0,0,0,100,100,0,0,3,"
+        "8,0,2,"
+        f"{int(subtitle_config.get('margin_left', 75))},{int(subtitle_config.get('margin_right', 75))},0,1"
     )
     ass = "\n".join([
         "[Script Info]", "ScriptType: v4.00+", "WrapStyle: 2",
