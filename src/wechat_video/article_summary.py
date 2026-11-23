@@ -25,6 +25,11 @@ from .subtitles import write_chinese_subtitles
 from .timeline import attach_editorial_events, build_audio_timeline, write_timeline
 from .sfx import generate_editorial_music_bed, generate_sfx
 from .tooling import legacy_model_root, resolve_command, tool_env
+from .tts_provider import (
+    generate_article_summary_speech_units,
+    load_article_summary_tts_config,
+    validate_article_summary_tts_runtime,
+)
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
@@ -50,20 +55,12 @@ def _runtime_preflight(project_root: Path, article_title: str) -> dict[str, Any]
         raise RuntimeError("Article-summary production must run inside the project .venv.")
     try:
         import manim
-        import sherpa_onnx
         import soundfile  # noqa: F401
     except ImportError as exc:
         raise RuntimeError(f"Article-summary runtime dependency is missing: {exc}") from exc
 
-    model_root = legacy_model_root(project_root)
-    required_model = [model_root / "model.onnx", model_root / "lexicon.txt", model_root / "tokens.txt"]
-    missing = [str(path.relative_to(project_root)) for path in required_model if not path.is_file()]
-    if missing:
-        raise RuntimeError(
-            "The local Chinese MeloTTS model is not ready: "
-            + ", ".join(missing)
-            + ". Run the existing download-model-zh command once; no automatic download is performed."
-        )
+    tts_config = load_article_summary_tts_config(project_root)
+    tts_runtime = validate_article_summary_tts_runtime(project_root, tts_config)
 
     tools = {name: resolve_command(name, project_root) for name in ("ffmpeg", "ffprobe")}
     from .process import run_checked
@@ -87,9 +84,11 @@ def _runtime_preflight(project_root: Path, article_title: str) -> dict[str, Any]
     return {
         "python": sys.version,
         "manim_version": getattr(manim, "__version__", "unknown"),
-        "sherpa_onnx_version": getattr(sherpa_onnx, "__version__", "unknown"),
-        "chinese_tts_model": "sherpa-onnx OfflineTts / VITS MeloTTS zh_en",
-        "chinese_tts_model_path": str(model_root),
+        "sherpa_onnx_version": tts_runtime["version"] if tts_runtime["provider_id"] == "melo_onnx" else None,
+        "chinese_tts_model": tts_runtime["engine"],
+        "chinese_tts_model_path": tts_runtime.get("model_path"),
+        "tts_runtime": tts_runtime,
+        "tts_config": tts_config,
         "font": {"family": cjk_family, "path": cjk_path},
         "tools": tools,
         "audio_profile": audio_master["preset_id"],
@@ -260,21 +259,17 @@ def run_article_summary(
         ],
     })
 
-    # Keep CLI/parser imports lightweight: the offline audio stack is runtime-only.
-    from .tts import generate_chinese_speech_units
-
-    tts_results = generate_chinese_speech_units(
-        legacy_model_root(project_root),
+    # Provider selection is explicit and recorded. The selected provider must
+    # succeed; there is no silent switch to a different voice on network failure.
+    tts_generation = generate_article_summary_speech_units(
+        project_root,
+        environment["tts_config"],
         units,
         run_dir / "audio",
+        environment["tools"]["ffmpeg"],
     )
-    _write_json(run_dir / "audio_manifest.json", {
-        "engine": "sherpa-onnx OfflineTts / VITS MeloTTS zh_en",
-        "provider": "cpu",
-        "voice_profile": None,
-        "speech_units": tts_results,
-        "online_fallback": False,
-    })
+    tts_results = tts_generation["speech_units"]
+    _write_json(run_dir / "audio_manifest.json", tts_generation)
     probes = {
         item["unit_id"]: probe_media(Path(item["audio_file"]))
         for item in tts_results
@@ -424,7 +419,9 @@ def run_article_summary(
             "- 视频：final.mp4",
             f"- 实测时长：{duration:.2f}s",
             f"- 技术 QA：{qa['overall_status']}",
-            "- 中文离线配音：MeloTTS zh_en / CPU",
+            f"- 中文配音：{tts_generation['engine']} / {tts_generation.get('voice') or tts_generation.get('provider')}",
+            f"- TTS 参数：rate={tts_generation.get('rate')}; pitch={tts_generation.get('pitch')}; volume={tts_generation.get('volume')}",
+            "- TTS 自动回退：关闭；所选供应商失败即停止",
             "- 扩展链接：待视频号页面实测；当前没有上传",
             "- 发布状态：未上传、未发布",
             "",
