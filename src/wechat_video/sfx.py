@@ -87,3 +87,68 @@ def generate_ambient(
         "fade_ms": fade_ms,
         "texture": "soft_low_hiss",
     }
+
+
+def generate_editorial_music_bed(
+    out_path: Path,
+    sample_count: int,
+    sample_rate: int = SAMPLE_RATE,
+    target_rms_dbfs: float = -28.0,
+    fade_ms: int = 700,
+) -> dict[str, float | int | str]:
+    """Generate an original, deterministic low-level synth pad (not random noise).
+
+    The bed is intentionally created locally, without downloaded music or samples.
+    The mixer later gates it to measured speech regions so cover and inter-unit
+    comprehension gaps remain genuinely silent.
+    """
+    count = int(sample_count)
+    rate = int(sample_rate)
+    if count <= 0 or rate < 8000:
+        raise ValueError("Editorial music requires a positive sample count and a valid sample rate.")
+    if not -40.0 <= float(target_rms_dbfs) <= -20.0:
+        raise ValueError("Editorial music target RMS must be between -40 and -20 dBFS.")
+
+    t = np.arange(count, dtype=np.float64) / rate
+    # A slow four-chord progression using soft sine/triangle-like partials.
+    chords = (
+        (65.41, 98.00, 130.81, 196.00),   # C
+        (58.27, 87.31, 116.54, 174.61),   # B-flat
+        (69.30, 103.83, 138.59, 207.65),  # C-sharp / D-flat
+        (61.74, 92.50, 123.47, 185.00),   # B
+    )
+    bar_samples = max(1, rate * 8)
+    signal = np.zeros(count, dtype=np.float64)
+    weights = (0.42, 0.29, 0.19, 0.10)
+    for index, frequencies in enumerate(chords):
+        start = index * bar_samples
+        end = min(count, start + bar_samples)
+        if start >= count:
+            break
+        local_t = t[start:end] - t[start]
+        local = np.zeros(end - start, dtype=np.float64)
+        for frequency, weight in zip(frequencies, weights):
+            local += weight * np.sin(2 * math.pi * frequency * local_t)
+        signal[start:end] += local
+    modulation = 0.88 + 0.12 * np.sin(2 * math.pi * 0.075 * t)
+    signal *= modulation
+    rms = float(np.sqrt(np.mean(signal**2))) or 1.0
+    signal *= (10 ** (float(target_rms_dbfs) / 20.0)) / rms
+
+    fade_frames = min(count // 2, max(0, rate * int(fade_ms) // 1000))
+    if fade_frames:
+        phase = np.linspace(0.0, math.pi / 2.0, fade_frames, endpoint=True)
+        ramp = np.sin(phase) ** 2
+        signal[:fade_frames] *= ramp
+        signal[-fade_frames:] *= ramp[::-1]
+
+    _write_wav(out_path, signal, rate)
+    measured = float(np.sqrt(np.mean(signal**2)))
+    return {
+        "sample_count": count,
+        "sample_rate": rate,
+        "target_rms_dbfs": float(target_rms_dbfs),
+        "measured_rms_dbfs": 20 * math.log10(measured) if measured > 0 else -120.0,
+        "fade_ms": int(fade_ms),
+        "texture": "original_deterministic_harmonic_synth_pad",
+    }
