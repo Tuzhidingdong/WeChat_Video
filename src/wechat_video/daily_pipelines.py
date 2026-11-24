@@ -327,7 +327,7 @@ def _run_content_planner(
     opencode_cfg = config.get("opencode") or {}
     resolved, agent, model = _planner_preflight(config)
     print(
-        f"[CONTENT PLANNER] agent={agent} model={model} "
+        f"[CONTENT PLANNER] role={agent} model={model} "
         f"project={project_root} attachments={len(attachments)}"
     )
     cmd = [resolved, "run", "--format", "json", "--agent", agent]
@@ -364,13 +364,24 @@ def _run_content_planner(
         raise DailyPipelineError(f"Planner JSON is invalid: {exc}") from exc
     if not isinstance(result, dict):
         raise DailyPipelineError("Planner must return a JSON object.")
+    usage = _extract_model_usage(completed.stdout)
     result["_planner_run_metadata"] = {
         "agent": agent,
         "model": model,
         "project_root": str(project_root),
         "attachments": [str(path.resolve()) for path in attachments],
-        "usage": _extract_model_usage(completed.stdout),
+        "usage": usage,
     }
+    if usage.get("available"):
+        print(
+            "[CONTENT PLANNER USAGE] "
+            f"session={','.join(usage.get('session_ids', [])) or 'unavailable'} "
+            f"steps={usage.get('step_count')} "
+            f"tokens={usage.get('tokens', {}).get('total')} "
+            f"cost_usd={usage.get('cost') if usage.get('cost_available') else 'not-reported'}"
+        )
+    else:
+        print("[CONTENT PLANNER USAGE] Token/cost telemetry was not supplied by this OpenCode run.")
     return result
 
 
