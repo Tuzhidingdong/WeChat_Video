@@ -430,6 +430,43 @@ def _update_job(path: Path, record: dict[str, Any], state: str, **fields: Any) -
     return record
 
 
+def _find_upload_job_for_run(
+    project_root: Path,
+    record: dict[str, Any],
+) -> dict[str, Any] | None:
+    run_dir_text = str(record.get("run_dir") or "")
+    if not run_dir_text:
+        return None
+    run_id = Path(run_dir_text).name
+    config_path = project_root / "config" / "channels_upload.json"
+    try:
+        upload_config = _read_json(config_path)
+        jobs_root = _project_path(
+            project_root, str(upload_config.get("jobs_dir") or "runtime/upload_jobs")
+        )
+    except DailyPipelineError:
+        return None
+    if not jobs_root.is_dir():
+        return None
+    matches: list[dict[str, Any]] = []
+    for path in jobs_root.glob("*.json"):
+        try:
+            item = _read_json(path)
+        except DailyPipelineError:
+            continue
+        if str(item.get("source_run_id") or path.stem) == run_id:
+            matches.append(item)
+    if not matches:
+        exact = jobs_root / f"{run_id}.json"
+        if exact.is_file():
+            try:
+                matches.append(_read_json(exact))
+            except DailyPipelineError:
+                pass
+    matches.sort(key=lambda item: int(item.get("upload_attempt", 1)))
+    return matches[-1] if matches else None
+
+
 def _mark_daily_job(
     project_root: Path,
     config: dict[str, Any],
@@ -446,11 +483,34 @@ def _mark_daily_job(
         existing_state = str(record.get("state") or "")
         if existing_state == "DRAFT_SAVED":
             return "DRAFT_SAVED"
-        # Once the job has entered UPLOADING, a later exception cannot prove
-        # that Save was not accepted. Preserve uncertainty and require the
-        # uploader's read-only reconciliation rather than retrying.
-        final_state = "UPLOAD_UNKNOWN" if existing_state in {"UPLOADING", "UPLOAD_UNKNOWN"} else state
-        _update_job(job_path, record, final_state, error=error)
+        upload_job = _find_upload_job_for_run(project_root, record)
+        upload_state = str((upload_job or {}).get("state") or "")
+        if upload_state == "DRAFT_SAVED":
+            _update_job(
+                job_path,
+                record,
+                "DRAFT_SAVED",
+                upload_job_id=upload_job.get("job_id"),
+                verified_draft=upload_job.get("verified_draft"),
+                account_name=upload_job.get("account_name"),
+                automatic_publication=False,
+                recovered_from_upload_journal=True,
+                error=error,
+            )
+            return "DRAFT_SAVED"
+        if upload_state in {"SAVE_REQUESTED", "UPLOAD_UNKNOWN", "UPLOADING", "PREPARED"}:
+            final_state = "UPLOAD_UNKNOWN"
+        elif upload_state in {"CREATED", "FAILED_BEFORE_SAVE", "BLOCKED_DUPLICATE_TITLE"}:
+            # The uploader journal proves no draft-save result was confirmed.
+            # Do not automatically retry; report a known pre-save block/failure.
+            final_state = "FAILED"
+        else:
+            # No upload journal generally means failure occurred before the
+            # uploader created a job. An existing daily UPLOADING state without
+            # its matching uploader record remains uncertain.
+            final_state = "UPLOAD_UNKNOWN" if existing_state in {"UPLOADING", "UPLOAD_UNKNOWN"} else state
+        if existing_state != "DRAFT_SAVED":
+            _update_job(job_path, record, final_state, error=error)
         return final_state
     except Exception:
         # The uploader's own job journal remains the authoritative recovery
