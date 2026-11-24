@@ -125,7 +125,7 @@ The output is a new folder under outputs/ and includes:
 - final.mp4, narration.wav, and audio/*.wav
 - captions.srt and captions.ass
 - article_summary_manifest.json and article_scene_spec.json
-- audio_manifest.json and audio_timeline_validation.json (selected TTS provider, per-unit audio measurements, and sample-clock validation)
+- audio_manifest.json, audio_timeline_validation.json, and duration_budget_report.json (selected TTS provider, per-unit audio measurements, preflight estimate, measured duration and sample-clock validation)
 - source/article.md, source/article.json, source/images.json, and copied local images
 - channels_draft.json, qa_report.json, content_qa_report.json, review_status.json, and REVIEW.md
 
