@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
@@ -202,6 +203,56 @@ def _discover_literature_packages(
     return candidates, rejected
 
 
+def _usage_totals_from_tokens(tokens: dict[str, Any]) -> dict[str, int]:
+    cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+    return {
+        "input": int(tokens.get("input") or 0),
+        "output": int(tokens.get("output") or 0),
+        "reasoning": int(tokens.get("reasoning") or 0),
+        "cache_read": int(
+            cache.get("read")
+            or tokens.get("cache_read")
+            or tokens.get("cacheRead")
+            or 0
+        ),
+        "cache_write": int(
+            cache.get("write")
+            or tokens.get("cache_write")
+            or tokens.get("cacheWrite")
+            or tokens.get("cache_write_5m")
+            or 0
+        ) + int(cache.get("write_5m") or cache.get("write_1h") or 0),
+    }
+
+
+def _usage_result(
+    *,
+    session_ids: set[str],
+    step_count: int,
+    totals: dict[str, int],
+    cost_total: float,
+    cost_available: bool,
+    source: str,
+    complete: bool,
+) -> dict[str, Any]:
+    token_total = totals["input"] + totals["output"] + totals["reasoning"]
+    return {
+        "available": step_count > 0 and token_total > 0,
+        "complete": complete,
+        "session_ids": sorted(session_ids),
+        "step_count": step_count,
+        "tokens": {
+            **totals,
+            "total": token_total,
+            "total_including_cache_io": token_total + totals["cache_read"] + totals["cache_write"],
+        },
+        "cost": round(cost_total, 8) if cost_available else None,
+        "cost_currency": "USD" if cost_available else None,
+        "cost_available": cost_available,
+        "source": source,
+    }
+
+
 def _extract_model_usage(stdout: str) -> dict[str, Any]:
     session_ids: set[str] = set()
     step_count = 0
@@ -214,6 +265,7 @@ def _extract_model_usage(stdout: str) -> dict[str, Any]:
     }
     cost_total = 0.0
     cost_available = False
+    final_step_seen = False
     for line in stdout.splitlines():
         try:
             event = json.loads(line)
@@ -228,23 +280,9 @@ def _extract_model_usage(stdout: str) -> dict[str, Any]:
             continue
         part = event.get("part") if isinstance(event.get("part"), dict) else {}
         tokens = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
-        cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
-        totals["input"] += int(tokens.get("input") or 0)
-        totals["output"] += int(tokens.get("output") or 0)
-        totals["reasoning"] += int(tokens.get("reasoning") or 0)
-        totals["cache_read"] += int(
-            cache.get("read")
-            or tokens.get("cache_read")
-            or tokens.get("cacheRead")
-            or 0
-        )
-        totals["cache_write"] += int(
-            cache.get("write")
-            or tokens.get("cache_write")
-            or tokens.get("cacheWrite")
-            or tokens.get("cache_write_5m")
-            or 0
-        ) + int(cache.get("write_5m") or cache.get("write_1h") or 0)
+        step_totals = _usage_totals_from_tokens(tokens)
+        for key, value in step_totals.items():
+            totals[key] += value
         if part.get("cost") is not None:
             try:
                 cost_total += float(part["cost"])
@@ -252,23 +290,145 @@ def _extract_model_usage(stdout: str) -> dict[str, Any]:
             except (TypeError, ValueError):
                 pass
         step_count += 1
+        if str(part.get("reason") or "").casefold() == "stop":
+            final_step_seen = True
     # Keep normal input/output/reasoning usage distinct from cache I/O.
     # In particular, cache read/write is not added to the primary token total.
-    token_total = totals["input"] + totals["output"] + totals["reasoning"]
-    return {
-        "available": step_count > 0 and token_total > 0,
-        "session_ids": sorted(session_ids),
-        "step_count": step_count,
-        "tokens": {
-            **totals,
-            "total": token_total,
-            "total_including_cache_io": token_total + totals["cache_read"] + totals["cache_write"],
-        },
-        "cost": round(cost_total, 8) if cost_available else None,
-        "cost_currency": "USD" if cost_available else None,
-        "cost_available": cost_available,
-        "source": "OpenCode --format json step_finish events",
+    return _usage_result(
+        session_ids=session_ids,
+        step_count=step_count,
+        totals=totals,
+        cost_total=cost_total,
+        cost_available=cost_available,
+        source="OpenCode --format json step_finish events",
+        complete=final_step_seen,
+    )
+
+
+def _extract_exported_model_usage(
+    exported: dict[str, Any],
+    *,
+    fallback_session_id: str,
+) -> dict[str, Any]:
+    """Read token/cost totals from OpenCode's durable session export."""
+    session_info = exported.get("info")
+    if not isinstance(session_info, dict):
+        session_info = exported.get("session") if isinstance(exported.get("session"), dict) else {}
+    session_id = str(session_info.get("id") or fallback_session_id).strip()
+    totals = {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache_read": 0,
+        "cache_write": 0,
     }
+    step_count = 0
+    cost_total = 0.0
+    cost_available = False
+    messages = exported.get("messages")
+    if not isinstance(messages, list):
+        raise DailyPipelineError("OpenCode session export has no messages array.")
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        info = message.get("info") if isinstance(message.get("info"), dict) else {}
+        if str(info.get("role") or "").casefold() != "assistant":
+            continue
+        parts = message.get("parts") if isinstance(message.get("parts"), list) else []
+        finish_parts = [
+            part for part in parts
+            if isinstance(part, dict) and str(part.get("type") or "").casefold() in {"step-finish", "step_finish"}
+        ]
+        if finish_parts:
+            for part in finish_parts:
+                tokens = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
+                part_totals = _usage_totals_from_tokens(tokens)
+                for key, value in part_totals.items():
+                    totals[key] += value
+                if part.get("cost") is not None:
+                    try:
+                        cost_total += float(part["cost"])
+                        cost_available = True
+                    except (TypeError, ValueError):
+                        pass
+                step_count += 1
+            continue
+
+        # Some OpenCode versions retain the aggregated usage on assistant
+        # message.info even when the terminal step-finish part is absent.
+        tokens = info.get("tokens") if isinstance(info.get("tokens"), dict) else {}
+        if tokens:
+            message_totals = _usage_totals_from_tokens(tokens)
+            for key, value in message_totals.items():
+                totals[key] += value
+            if info.get("cost") is not None:
+                try:
+                    cost_total += float(info["cost"])
+                    cost_available = True
+                except (TypeError, ValueError):
+                    pass
+            step_count += 1
+
+    if step_count == 0:
+        raise DailyPipelineError("OpenCode session export contains no assistant token usage.")
+    return _usage_result(
+        session_ids={session_id} if session_id else set(),
+        step_count=step_count,
+        totals=totals,
+        cost_total=cost_total,
+        cost_available=cost_available,
+        source="OpenCode opencode session export",
+        complete=True,
+    )
+
+
+def _export_model_usage(
+    executable: str,
+    session_id: str,
+    project_root: Path,
+    *,
+    timeout_seconds: int,
+) -> dict[str, Any] | None:
+    """Read durable usage metadata without retaining the exported transcript."""
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="wechat-video-opencode-usage-",
+            suffix=".json",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            completed = subprocess.run(
+                [executable, "session", "export", session_id],
+                cwd=project_root,
+                stdout=handle,
+                stderr=subprocess.PIPE,
+                timeout=max(15, min(timeout_seconds, 120)),
+                check=False,
+                env={**os.environ, "NO_COLOR": "1"},
+            )
+        if completed.returncode != 0:
+            return None
+        exported = json.loads(temporary_path.read_text(encoding="utf-8"))
+        if not isinstance(exported, dict):
+            return None
+        return _extract_exported_model_usage(
+            exported,
+            fallback_session_id=session_id,
+        )
+    except (
+        OSError,
+        json.JSONDecodeError,
+        subprocess.SubprocessError,
+        DailyPipelineError,
+    ):
+        return None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _extract_model_text(stdout: str) -> str:
@@ -382,6 +542,21 @@ def _run_content_planner(
     if not isinstance(result, dict):
         raise DailyPipelineError("Planner must return a JSON object.")
     usage = _extract_model_usage(completed.stdout)
+    if not usage.get("complete") and usage.get("session_ids"):
+        # OpenCode may finish a run without flushing its final step_finish
+        # event to JSONL. Recover only the usage counters from the durable
+        # session export, and delete the temporary transcript immediately.
+        exported_usage = _export_model_usage(
+            resolved,
+            str(usage["session_ids"][0]),
+            project_root,
+            timeout_seconds=int(opencode_cfg.get("timeout_seconds", 1800)),
+        )
+        if exported_usage and exported_usage.get("available"):
+            usage = exported_usage
+        else:
+            usage["complete"] = False
+            usage["fallback_export"] = "unavailable"
     result["_planner_run_metadata"] = {
         "agent": agent,
         "model": model,
@@ -395,7 +570,8 @@ def _run_content_planner(
             f"session={','.join(usage.get('session_ids', [])) or 'unavailable'} "
             f"steps={usage.get('step_count')} "
             f"tokens={usage.get('tokens', {}).get('total')} "
-            f"cost_usd={usage.get('cost') if usage.get('cost_available') else 'not-reported'}"
+            f"cost_usd={usage.get('cost') if usage.get('cost_available') else 'not-reported'} "
+            f"complete={usage.get('complete', False)} source={usage.get('source')}"
         )
     else:
         print("[CONTENT PLANNER USAGE] Token/cost telemetry was not supplied by this OpenCode run.")
