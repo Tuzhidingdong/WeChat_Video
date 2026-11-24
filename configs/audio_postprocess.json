@@ -105,8 +105,16 @@
     "duck_db": 4,
     "fade_ms": 700,
     "edge_fade_ms": 120,
-    "only_during_speech": true,
+    "only_during_speech": false,
     "preserve_true_silence_in_cover_and_unit_gaps": true,
-    "note": "Generated locally from simple oscillators; no external music or random-noise bed."
+    "note": "Generated locally from simple oscillators; present on cover, speech and outro, ducked under narration, with true silence retained between narration units.",
+    "active_region_kinds": [
+      "cover",
+      "speech",
+      "outro"
+    ],
+    "preserve_true_silence_in_inter_unit_gaps": true,
+    "cover_opening_enabled": true,
+    "outro_fade_enabled": true
   }
 }

@@ -52,8 +52,16 @@ def test_edge_tts_generates_normalized_pcm_and_records_real_voice_parameters(
             self.text = text
             calls.append({"text": text, **kwargs})
 
-        async def save(self, path: str) -> None:
+        async def save(self, path: str, metadata_path: str | None = None) -> None:
             Path(path).write_bytes(b"x" * 2048)
+            if metadata_path:
+                Path(metadata_path).write_text(
+                    json.dumps({
+                        "type": "WordBoundary", "offset": 0,
+                        "duration": 10_000_000, "text": self.text,
+                    }) + "\n",
+                    encoding="utf-8",
+                )
 
     monkeypatch.setitem(
         sys.modules,
@@ -94,12 +102,18 @@ def test_edge_tts_generates_normalized_pcm_and_records_real_voice_parameters(
     assert unit["frames"] == 44100
     assert unit["duration_seconds"] == pytest.approx(1.0)
     assert unit["source_text_sha256"]
+    assert unit["subtitle_alignment_method"] == "edge_word_boundary"
+    assert unit["word_boundary_status"] == "word_boundaries_verified"
+    assert unit["word_boundaries"] == [{
+        "text": "反铁磁材料里的磁畴。", "start_ms": 0, "end_ms": 1000,
+    }]
     assert calls == [{
         "text": "反铁磁材料里的磁畴。",
         "voice": "zh-CN-XiaoxiaoNeural",
         "rate": "+0%",
         "volume": "+0%",
         "pitch": "+0Hz",
+        "boundary": "WordBoundary",
     }]
 
 
@@ -113,7 +127,7 @@ def test_edge_tts_failure_is_reported_without_retry_or_melo_fallback(
         def __init__(self, *_args, **_kwargs) -> None:
             pass
 
-        async def save(self, _path: str) -> None:
+        async def save(self, _path: str, _metadata_path: str | None = None) -> None:
             calls["count"] += 1
             raise ConnectionError("service unavailable")
 
@@ -184,6 +198,19 @@ def test_audio_timeline_requires_contiguous_sample_clock_and_matching_speech_cue
     assert report["authority"] == "measured_pcm_wav_sample_counts"
     assert report["speech_unit_count"] == 2
     assert report["total_sample_count"] == 45
+
+
+def test_edge_word_boundary_metadata_rejects_text_coverage_mismatch(tmp_path: Path) -> None:
+    metadata = tmp_path / "U01.jsonl"
+    metadata.write_text(
+        json.dumps({"type": "WordBoundary", "offset": 0, "duration": 100000, "text": "错字"}) + "\n",
+        encoding="utf-8",
+    )
+    boundaries, status = tts_provider._read_word_boundary_metadata(
+        metadata, "正确原文。", 1.0
+    )
+    assert boundaries == []
+    assert status == "text_coverage_mismatch"
 
 
 def test_audio_timeline_rejects_cue_that_runs_ahead_of_its_visual_segment() -> None:

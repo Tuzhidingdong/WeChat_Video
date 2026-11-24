@@ -202,6 +202,46 @@ def _inspect_pcm_wav(path: Path, unit_id: str) -> dict[str, Any]:
     }
 
 
+def _read_word_boundary_metadata(
+    metadata_path: Path,
+    spoken_text: str,
+    audio_duration_seconds: float,
+) -> tuple[list[dict[str, Any]], str]:
+    """Read Edge-TTS WordBoundary JSONL and verify exact text coverage."""
+    if not metadata_path.is_file():
+        return [], "metadata_missing"
+    expected = re.sub(r"\s+", "", spoken_text)
+    boundaries: list[dict[str, Any]] = []
+    emitted: list[str] = []
+    duration_ms = max(0, round(audio_duration_seconds * 1000))
+    try:
+        for line in metadata_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            if item.get("type") != "WordBoundary":
+                continue
+            text = str(item.get("text") or "")
+            if not text:
+                continue
+            offset_ticks = int(item.get("offset", 0))
+            duration_ticks = int(item.get("duration", 0))
+            start_ms = max(0, round(offset_ticks / 10_000))
+            end_ms = min(duration_ms, round((offset_ticks + duration_ticks) / 10_000))
+            if end_ms <= start_ms:
+                continue
+            boundaries.append({"text": text, "start_ms": start_ms, "end_ms": end_ms})
+            emitted.append(text)
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        return [], "metadata_invalid"
+    if not boundaries:
+        return [], "word_boundaries_missing"
+    actual = re.sub(r"\s+", "", "".join(emitted))
+    if actual != expected:
+        return [], "text_coverage_mismatch"
+    return boundaries, "word_boundaries_verified"
+
+
 def _generate_edge_tts(
     project_root: Path,
     settings: dict[str, Any],
@@ -235,6 +275,7 @@ def _generate_edge_tts(
             if not spoken_text:
                 raise ArticleSummaryTtsError(f"{unit_id} has no spoken_text.")
             raw_mp3 = raw_dir / f"{unit_id}.mp3"
+            raw_metadata = raw_dir / f"{unit_id}.jsonl"
             target_wav = audio_dir / f"{unit_id}.wav"
             started = time.monotonic()
             try:
@@ -244,8 +285,12 @@ def _generate_edge_tts(
                     rate=rate,
                     volume=volume,
                     pitch=pitch,
+                    boundary="WordBoundary",
                 )
-                await asyncio.wait_for(communicate.save(str(raw_mp3)), timeout=timeout)
+                await asyncio.wait_for(
+                    communicate.save(str(raw_mp3), str(raw_metadata)),
+                    timeout=timeout,
+                )
             except asyncio.TimeoutError as exc:
                 raise ArticleSummaryTtsError(
                     f"Edge-TTS timed out after {timeout}s for {unit_id}; no retry or fallback was attempted."
@@ -276,7 +321,16 @@ def _generate_edge_tts(
                 ) from exc
 
             measured = _inspect_pcm_wav(target_wav, unit_id)
+            word_boundaries, boundary_status = _read_word_boundary_metadata(
+                raw_metadata, spoken_text, float(measured["duration_seconds"])
+            )
             measured.update({
+                "word_boundaries": word_boundaries,
+                "subtitle_alignment_method": (
+                    "edge_word_boundary" if boundary_status == "word_boundaries_verified"
+                    else "speech_unit_envelope"
+                ),
+                "word_boundary_status": boundary_status,
                 "tts_engine": "Edge-TTS",
                 "tts_engine_version": version,
                 "provider": "Microsoft online endpoint via edge-tts community client",

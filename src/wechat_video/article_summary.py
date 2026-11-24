@@ -162,6 +162,7 @@ def _build_scene_beats(
                 {
                     "path": copied_images[image_id]["path"],
                     "caption": copied_images[image_id]["caption"],
+                    "source_context": copied_images[image_id].get("context") or copied_images[image_id]["caption"],
                     "image_aspect": copied_images[image_id]["image_aspect"],
                     "focus_region": focus_regions.get(image_id),
                 }
@@ -169,6 +170,46 @@ def _build_scene_beats(
             ]
         beats.append(resolved)
     return beats
+
+
+def _narration_rhythm_report(units: list[dict[str, Any]]) -> dict[str, Any]:
+    """Record reusable pacing risks without rewriting scientific narration."""
+    punctuation = set("。！？；：")
+    records: list[dict[str, Any]] = []
+    for unit in units:
+        text = str(unit.get("spoken_text") or "").strip()
+        cjk_count = len(re.findall(r"[\\u3400-\\u4dbf\\u4e00-\\u9fff]", text))
+        requested_pause = int(unit.get("requested_pause_after_ms", unit.get("pause_after_ms", 500)))
+        effective_pause = int(unit.get("pause_after_ms", 500))
+        warnings: list[str] = []
+        if cjk_count > 65:
+            warnings.append("long_speech_unit")
+        if text and text[-1] not in punctuation:
+            warnings.append("missing_sentence_or_clause_punctuation")
+        if effective_pause < 450:
+            warnings.append("short_comprehension_pause")
+        records.append({
+            "unit_id": str(unit.get("unit_id") or ""),
+            "spoken_cjk_characters": cjk_count,
+            "ends_with_pause_punctuation": bool(text and text[-1] in punctuation),
+            "requested_pause_after_ms": requested_pause,
+            "effective_pause_after_ms": effective_pause,
+            "warnings": warnings,
+        })
+    warnings = [
+        {"unit_id": item["unit_id"], "warning": warning}
+        for item in records for warning in item["warnings"]
+    ]
+    return {
+        "schema_version": 1,
+        "unit_count": len(records),
+        "minimum_pause_after_ms": min((item["effective_pause_after_ms"] for item in records), default=0),
+        "maximum_unit_cjk_characters": max((item["spoken_cjk_characters"] for item in records), default=0),
+        "overall_status": "WARN" if warnings else "PASS",
+        "warnings": warnings,
+        "speech_units": records,
+        "policy": "diagnostic_only_no_scientific_text_is_rewritten",
+    }
 
 
 def run_article_summary(
@@ -270,16 +311,33 @@ def run_article_summary(
     )
     tts_results = tts_generation["speech_units"]
     _write_json(run_dir / "audio_manifest.json", tts_generation)
+    rhythm_report = _narration_rhythm_report(units)
+    _write_json(run_dir / "narration_rhythm_report.json", rhythm_report)
+    tts_by_id = {str(item["unit_id"]): item for item in tts_results}
+    timeline_units = [
+        {
+            **unit,
+            "word_boundaries": tts_by_id.get(str(unit["unit_id"]), {}).get("word_boundaries", []),
+            "subtitle_alignment_method": tts_by_id.get(str(unit["unit_id"]), {}).get(
+                "subtitle_alignment_method", "speech_unit_envelope"
+            ),
+            "word_boundary_status": tts_by_id.get(str(unit["unit_id"]), {}).get(
+                "word_boundary_status", "unavailable"
+            ),
+        }
+        for unit in units
+    ]
     probes = {
         item["unit_id"]: probe_media(Path(item["audio_file"]))
         for item in tts_results
     }
     timeline = build_audio_timeline(
-        units,
+        timeline_units,
         audio_dir=run_dir / "audio",
         output_wav=run_dir / "narration.wav",
         ffprobe_records=probes,
         cover_duration_ms=int(summary.get("cover_duration_ms", 1500)),
+        outro_duration_ms=int(summary.get("outro_duration_ms", 900)),
     )
     timeline_validation = validate_audio_timeline(timeline)
     _write_json(run_dir / "audio_timeline_validation.json", timeline_validation)
@@ -293,7 +351,6 @@ def run_article_summary(
     timeline = attach_editorial_events(timeline, units, sfx_durations)
     for event in timeline["sfx_events"]:
         event["relative_level_db"] = -20.0
-    write_timeline(run_dir / "audio_timing.json", timeline)
     subtitle_count = write_chinese_subtitles(
         timeline,
         run_dir / "captions.srt",
@@ -301,6 +358,7 @@ def run_article_summary(
         layout,
         environment["font"]["family"],
     )
+    write_timeline(run_dir / "audio_timing.json", timeline)
 
     scene_beats = _build_scene_beats(summary, timeline, copied_images)
     scene_spec = {
@@ -310,6 +368,9 @@ def run_article_summary(
         "cover_subtitle": str(summary.get("cover_subtitle") or "一篇文章 · 一个关键发现"),
         "source_line": str(summary.get("source_line") or "成核生长 · 原文精读"),
         "cover_duration_ms": int(timeline["cover_duration_ms"]),
+        "outro_duration_ms": int(timeline["outro_duration_ms"]),
+        "transition_duration_ms": int(summary.get("transition_duration_ms", 220)),
+        "safe_zones": layout.get("safe_zones", {}),
         "cjk_font_family": environment["font"]["family"],
         "total_duration_ms": int(timeline["total_duration_ms"]),
         "speech_units": timeline["speech_units"],
@@ -318,6 +379,12 @@ def run_article_summary(
     }
     _write_json(run_dir / "article_scene_spec.json", scene_spec)
     scene_video = render_article_summary_scene(project_root, run_dir, scene_spec)
+    layout_report_path = run_dir / "scene_layout_report.json"
+    if not layout_report_path.is_file():
+        raise RuntimeError("Manim render did not produce mandatory scene_layout_report.json.")
+    scene_layout_report = json.loads(layout_report_path.read_text(encoding="utf-8"))
+    if scene_layout_report.get("overall_status") != "PASS":
+        raise RuntimeError("Article-summary scene failed camera/safe-zone layout QA.")
     _write_json(run_dir / "scene_render_manifest.json", {
         "template": "article_summary_editorial",
         "visual_identity": scene_spec["visual_identity"],
@@ -325,6 +392,8 @@ def run_article_summary(
         "resolution": [1080, 1920],
         "fps": 30,
         "article_images_contain_not_crop": True,
+        "layout_report": "scene_layout_report.json",
+        "layout_qa": scene_layout_report.get("overall_status"),
     })
 
     audio_master = audio_config(str(project_root))
@@ -387,6 +456,18 @@ def run_article_summary(
         "no_third_party_visuals_inserted": True,
         "measured_duration_seconds": round(duration, 3),
         "technical_qa": qa["overall_status"],
+        "audio_timeline_validation": timeline_validation["valid"],
+        "outro_tail_ms": timeline["outro_duration_ms"],
+        "subtitle_alignment": timeline.get("subtitle_alignment", {}),
+        "caption_cues_cover_all_units": {
+            unit_id: any(item["unit_id"] == unit_id for item in timeline.get("subtitle_cues", []))
+            for unit_id in [str(unit["unit_id"]) for unit in units]
+        },
+        "scene_layout_qa": scene_layout_report.get("overall_status"),
+        "music_cover_and_outro_audible": bool(mix_report.get("editorial_music_bed", {}).get("cover_opening_audible"))
+            and bool(mix_report.get("editorial_music_bed", {}).get("outro_fade_audible")),
+        "inter_unit_silence_preserved": bool(mix_report.get("editorial_music_bed", {}).get("inter_unit_silence_preserved")),
+        "narration_rhythm_report": rhythm_report.get("overall_status"),
         "upload_eligible": False,
         "upload_block_reason": (
             "The WeChat Channels extended-link UI has not yet been verified and "
@@ -419,8 +500,12 @@ def run_article_summary(
                 else "- 原文永久链接：尚未取得；本次仅生成本地预览，不能挂载扩展链接"
             ),
             "- 视频：final.mp4",
-            f"- 实测时长：{duration:.2f}s",
+            f"- 实测时长（含片尾）：{duration:.2f}s",
             f"- 技术 QA：{qa['overall_status']}",
+            f"- 画面布局 QA：{scene_layout_report.get('overall_status')}",
+            f"- 字幕逐词对齐：{timeline.get('subtitle_alignment', {})}",
+            f"- 片尾停留：{timeline['outro_duration_ms']} ms",
+            f"- 旁白节奏诊断：{rhythm_report.get('overall_status')}（不自动改写科研文本）",
             f"- 中文配音：{tts_generation['engine']} / {tts_generation.get('voice') or tts_generation.get('provider')}",
             f"- TTS 参数：rate={tts_generation.get('rate')}; pitch={tts_generation.get('pitch')}; volume={tts_generation.get('volume')}",
             "- TTS 自动回退：关闭；所选供应商失败即停止",

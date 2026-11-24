@@ -266,11 +266,13 @@ def validate_article_summary(
         if not refs or not set(refs).issubset(claim_map):
             raise ArticleSourceError(f"{unit_id} references missing or empty claim_ids.")
         try:
-            pause = int(unit.get("pause_after_ms", 250))
+            requested_pause = int(unit.get("pause_after_ms", 500))
         except (TypeError, ValueError) as exc:
             raise ArticleSourceError(f"{unit_id} pause_after_ms must be an integer.") from exc
-        if pause < 0 or pause > 1000:
+        if requested_pause < 0 or requested_pause > 1000:
             raise ArticleSourceError(f"{unit_id} pause_after_ms must be between 0 and 1000 ms.")
+        # Enforce a deliberate comprehension gap between visual beats.
+        pause = max(450, requested_pause)
         visual_ids = unit.get("visual_trigger_ids") or []
         if not isinstance(visual_ids, list) or not visual_ids:
             raise ArticleSourceError(f"{unit_id} must include visual_trigger_ids.")
@@ -283,6 +285,7 @@ def validate_article_summary(
             "claim_ids": refs,
             "visual_trigger_ids": [str(x) for x in visual_ids],
             "pause_after_ms": pause,
+            "requested_pause_after_ms": requested_pause,
         }
         unit_map[unit_id] = normalized
         spoken_parts.append(spoken)

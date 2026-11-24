@@ -117,14 +117,18 @@ def _speech_region_mask(
     sample_count: int,
     sample_rate: int,
     fade_ms: int = 120,
+    active_kinds: set[str] | None = None,
 ) -> np.ndarray:
-    """Return a smooth mask that keeps editorial music out of true-silence regions."""
+    """Activate editorial music regions while leaving explicit pauses silent."""
     mask = np.zeros(int(sample_count), dtype=np.float64)
     if not timeline:
         return mask
     fade_frames = max(0, int(sample_rate) * int(fade_ms) // 1000)
-    for segment in timeline.get("segments", []):
-        if segment.get("kind") != "speech":
+    segments = timeline.get("segments", [])
+    selected_kinds = active_kinds or {"cover", "speech", "outro"}
+    active_flags = [str(segment.get("kind")) in selected_kinds for segment in segments]
+    for index, segment in enumerate(segments):
+        if not active_flags[index]:
             continue
         start = max(0, min(len(mask), int(segment.get("start_sample", 0))))
         end = max(start, min(len(mask), int(segment.get("end_sample", 0))))
@@ -132,11 +136,14 @@ def _speech_region_mask(
             continue
         mask[start:end] = 1.0
         edge = min(fade_frames, (end - start) // 2)
-        if edge > 0:
+        previous_active = index > 0 and active_flags[index - 1]
+        next_active = index + 1 < len(segments) and active_flags[index + 1]
+        if edge > 0 and not previous_active:
             phase = np.linspace(0.0, np.pi / 2.0, edge, endpoint=True)
-            ramp = np.sin(phase) ** 2
-            mask[start:start + edge] *= ramp
-            mask[end - edge:end] *= ramp[::-1]
+            mask[start:start + edge] *= np.sin(phase) ** 2
+        if edge > 0 and not next_active:
+            phase = np.linspace(0.0, np.pi / 2.0, edge, endpoint=True)
+            mask[end - edge:end] *= (np.sin(phase) ** 2)[::-1]
     return mask
 
 
@@ -221,6 +228,7 @@ def mix_final_audio(
             len(voice),
             rate,
             int(music_cfg.get("edge_fade_ms", 120)),
+            set(music_cfg.get("active_region_kinds", ["cover", "speech", "outro"])),
         )
         duck_db = float(music_cfg.get("duck_db", 3.5))
         duck = _ducking_envelope(voice, rate, duck_db)
@@ -232,8 +240,10 @@ def mix_final_audio(
             "measured_source_rms_dbfs": round(_dbfs(float(np.sqrt(np.mean(music**2)))), 2),
             "duck_db": duck_db,
             "edge_fade_ms": int(music_cfg.get("edge_fade_ms", 120)),
-            "only_during_speech": True,
-            "silent_cover_and_unit_gaps_preserved": True,
+            "active_region_kinds": list(music_cfg.get("active_region_kinds", ["cover", "speech", "outro"])),
+            "cover_opening_audible": False,
+            "outro_fade_audible": False,
+            "inter_unit_silence_preserved": True,
             "texture": "original_deterministic_harmonic_synth_pad",
         }
 
@@ -319,7 +329,7 @@ def mix_final_audio(
     gap_voice: list[np.ndarray] = []
     gap_final: list[np.ndarray] = []
     for segment in (timeline or {}).get("segments", []):
-        if segment.get("kind") not in {"cover", "silence"}:
+        if segment.get("kind") != "silence":
             continue
         lo = max(0, int(segment["start_sample"]))
         hi = min(len(voice), int(segment["end_sample"]))
@@ -344,6 +354,24 @@ def mix_final_audio(
                 "final_gaps_near_digital_silence": bool(_dbfs(final_gap_rms) <= ceiling),
                 "gap_noise_ceiling_dbfs": ceiling,
             }
+        )
+
+    if timeline and music_report.get("enabled"):
+        for kind, report_key in (("cover", "cover_opening_audible"), ("outro", "outro_fade_audible")):
+            levels: list[float] = []
+            for segment in timeline.get("segments", []):
+                if segment.get("kind") != kind:
+                    continue
+                lo = max(0, int(segment["start_sample"]))
+                hi = min(len(music_mix), int(segment["end_sample"]))
+                if hi > lo:
+                    region = music_mix[lo:hi]
+                    levels.append(_dbfs(float(np.sqrt(np.mean(region ** 2)))))
+            measured_level = max(levels, default=-120.0)
+            music_report[report_key] = measured_level > -55.0
+            music_report[f"{kind}_music_rms_dbfs"] = round(measured_level, 2)
+        music_report["inter_unit_silence_preserved"] = bool(
+            silence_diagnostics.get("final_gaps_near_digital_silence", True)
         )
 
     output = np.clip(np.round(mixed * 32767), -32768, 32767).astype("<i2")

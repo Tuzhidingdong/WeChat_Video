@@ -135,6 +135,77 @@ def write_subtitles(
     return len(cues)
 
 
+def _caption_groups(cue: dict[str, Any], max_chars: int) -> list[dict[str, Any]]:
+    """Group verified TTS word boundaries into short, readable phrase cues."""
+    cue_start = int(cue["start_ms"])
+    cue_end = int(cue["end_ms"])
+    boundaries = cue.get("word_boundaries") or []
+    alignment = str(cue.get("subtitle_alignment_method") or "speech_unit_envelope")
+    if alignment != "edge_word_boundary" or not boundaries:
+        text = str(cue.get("spoken_text") or cue.get("display_text") or "").strip()
+        return [{
+            "unit_id": str(cue["unit_id"]), "text": text,
+            "start_ms": cue_start, "end_ms": cue_end,
+            "alignment_method": "speech_unit_envelope",
+        }] if text else []
+
+    groups: list[dict[str, Any]] = []
+    current_text: list[str] = []
+    current_start: int | None = None
+    current_end = cue_start
+    current_chars = 0
+
+    def flush() -> None:
+        nonlocal current_text, current_start, current_end, current_chars
+        text = "".join(current_text).strip()
+        if text and current_start is not None:
+            start = max(cue_start, current_start - 25)
+            end = min(cue_end, max(current_end + 70, start + 120))
+            if end > start:
+                groups.append({
+                    "unit_id": str(cue["unit_id"]), "text": text,
+                    "start_ms": start, "end_ms": end,
+                    "alignment_method": "edge_word_boundary",
+                })
+        current_text = []
+        current_start = None
+        current_end = cue_start
+        current_chars = 0
+
+    for boundary in boundaries:
+        text = str(boundary.get("text") or "")
+        if not text:
+            continue
+        try:
+            start_rel = max(0, int(boundary["start_ms"]))
+            end_rel = max(start_rel, int(boundary["end_ms"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        start = min(cue_end, cue_start + start_rel)
+        end = min(cue_end, cue_start + end_rel)
+        count = len(text.strip())
+        elapsed = max(0, end - (current_start if current_start is not None else start))
+        if current_text and (current_chars + count > max_chars or elapsed >= 2200):
+            flush()
+        if current_start is None:
+            current_start = start
+        current_text.append(text)
+        current_end = max(current_end, end)
+        current_chars += count
+        if text.rstrip().endswith(tuple("，。；！？、：")):
+            flush()
+    flush()
+
+    if not groups:
+        return [{
+            "unit_id": str(cue["unit_id"]),
+            "text": str(cue.get("spoken_text") or cue.get("display_text") or "").strip(),
+            "start_ms": cue_start, "end_ms": cue_end,
+            "alignment_method": "speech_unit_envelope",
+        }]
+    return groups
+
+
 def write_chinese_subtitles(
     timeline: dict[str, Any],
     srt_path: Path,
@@ -142,23 +213,26 @@ def write_chinese_subtitles(
     layout: dict[str, Any],
     cjk_font_family: str,
 ) -> int:
-    """Write a spoken-text subtitle cue synchronized to each measured WAV unit."""
+    """Write phrase-level Chinese captions synchronized to verified TTS word boundaries."""
     subtitle_config = layout["subtitle"]
-    limit = int(subtitle_config.get("max_line_chars_zh", 20))
+    limit = max(6, int(subtitle_config.get("max_line_chars_zh", 12)))
     canvas_width = int(layout["canvas"]["width"])
     canvas_height = int(layout["canvas"]["height"])
     y = round(canvas_height * float(subtitle_config.get("zh_y_percent", 72.5)) / 100)
     center_x = canvas_width // 2
+    caption_cues: list[dict[str, Any]] = []
+    for cue in timeline["speech_units"]:
+        caption_cues.extend(_caption_groups(cue, limit))
+    caption_cues.sort(key=lambda item: (item["start_ms"], item["end_ms"]))
+    for index, cue in enumerate(caption_cues):
+        if index + 1 < len(caption_cues) and cue["unit_id"] == caption_cues[index + 1]["unit_id"]:
+            cue["end_ms"] = min(cue["end_ms"], caption_cues[index + 1]["start_ms"])
+        cue["caption_id"] = f"{cue['unit_id']}_C{index + 1:02d}"
+
     srt_blocks: list[str] = []
     ass_events: list[str] = []
-    for index, cue in enumerate(timeline["speech_units"], start=1):
-        # The old article-summary renderer used display_text here, so the viewer
-        # saw a fixed slide takeaway rather than the words being spoken. Prefer
-        # the actual narrated sentence; display_text remains the scene headline.
-        spoken = str(cue.get("subtitle_text") or cue.get("spoken_text") or cue.get("display_text") or "").strip()
-        if not spoken:
-            raise ValueError(f"Subtitle cue {cue.get('unit_id')} has no spoken text.")
-        text = _wrap_text(spoken, limit)
+    for index, cue in enumerate(caption_cues, start=1):
+        text = _wrap_text(str(cue["text"]), limit)
         srt_blocks.append(
             f"{index}\n"
             f"{_srt_timestamp(cue['start_ms'])} --> {_srt_timestamp(cue['end_ms'])}\n"
@@ -166,13 +240,14 @@ def write_chinese_subtitles(
         )
         ass_events.append(
             f"Dialogue: 2,{_ass_timestamp(cue['start_ms'])},{_ass_timestamp(cue['end_ms'])},ZH,,0,0,0,,"
-            rf"{{\an5\fad(90,90)\pos({center_x},{y})}}{_ass_escape(text)}"
+            rf"{{\an5\fad(50,60)\pos({center_x},{y})}}{_ass_escape(text)}"
         )
+
     style = (
         f"Style: ZH,{cjk_font_family},{int(subtitle_config.get('cjk_font_size', 42))},"
-        "&H00FFFFFF,&H000000FF,&H00101820,&H700B1C2C,"
-        "0,0,0,0,100,100,0,0,3,"
-        "8,0,2,"
+        "&H00FFFFFF,&H000000FF,&H00101820,&H00000000,"
+        "0,0,0,0,100,100,0,0,1,"
+        "2,1,2,"
         f"{int(subtitle_config.get('margin_left', 75))},{int(subtitle_config.get('margin_right', 75))},0,1"
     )
     ass = "\n".join([
@@ -190,4 +265,16 @@ def write_chinese_subtitles(
     ])
     srt_path.write_text("\n".join(srt_blocks), encoding="utf-8-sig")
     ass_path.write_text(ass, encoding="utf-8-sig")
-    return len(ass_events)
+    timeline["subtitle_cues"] = caption_cues
+    timeline["subtitle_alignment"] = {
+        "caption_count": len(caption_cues),
+        "word_boundary_caption_count": sum(
+            1 for item in caption_cues if item["alignment_method"] == "edge_word_boundary"
+        ),
+        "speech_unit_envelope_fallback_count": sum(
+            1 for item in caption_cues if item["alignment_method"] == "speech_unit_envelope"
+        ),
+        "max_chars_per_caption": limit,
+        "style": "transparent_background_white_text_dark_outline",
+    }
+    return len(caption_cues)

@@ -9,8 +9,10 @@ import numpy as np
 
 
 COVER_DURATION_MS = 1000
-DEFAULT_INTER_UNIT_PAUSE_MS = 200
-UNIT_EDGE_FADE_MS = 12
+DEFAULT_INTER_UNIT_PAUSE_MS = 500
+UNIT_FADE_IN_MS = 2
+UNIT_FADE_OUT_MS = 10
+OUTRO_TAIL_MS = 900
 COMPREHENSION_PAUSE_MIN_MS = 500
 COMPREHENSION_PAUSE_MAX_MS = 800
 
@@ -30,17 +32,25 @@ def _silence_bytes(frames: int, channels: int, sample_width: int) -> bytes:
     return b"\x00" * (frames * channels * sample_width)
 
 
-def _fade_pcm_edges(pcm: bytes, sample_rate: int, fade_ms: int) -> bytes:
-    """Apply short equal-power edge fades to prevent clicks at phrase boundaries."""
+def _fade_pcm_edges(
+    pcm: bytes,
+    sample_rate: int,
+    fade_in_ms: int = UNIT_FADE_IN_MS,
+    fade_out_ms: int = UNIT_FADE_OUT_MS,
+) -> bytes:
+    """Protect initial speech transients while preventing release clicks."""
     samples = np.frombuffer(pcm, dtype="<i2")
-    fade_frames = min(samples.size // 2, max(0, sample_rate * fade_ms // 1000))
-    if fade_frames <= 0:
+    if samples.size < 2:
         return pcm
     values = samples.astype(np.float64)
-    phase = np.linspace(0.0, np.pi / 2.0, fade_frames, endpoint=True)
-    ramp = np.sin(phase) ** 2
-    values[:fade_frames] *= ramp
-    values[-fade_frames:] *= ramp[::-1]
+    in_frames = min(samples.size // 2, max(0, sample_rate * fade_in_ms // 1000))
+    out_frames = min(samples.size // 2, max(0, sample_rate * fade_out_ms // 1000))
+    if in_frames:
+        phase = np.linspace(0.0, np.pi / 2.0, in_frames, endpoint=True)
+        values[:in_frames] *= np.sin(phase) ** 2
+    if out_frames:
+        phase = np.linspace(0.0, np.pi / 2.0, out_frames, endpoint=True)
+        values[-out_frames:] *= (np.sin(phase) ** 2)[::-1]
     return np.clip(np.rint(values), -32768, 32767).astype("<i2").tobytes()
 
 
@@ -51,12 +61,16 @@ def build_audio_timeline(
     output_wav: Path,
     ffprobe_records: dict[str, dict[str, Any]],
     cover_duration_ms: int = COVER_DURATION_MS,
+    outro_duration_ms: int = OUTRO_TAIL_MS,
 ) -> dict[str, Any]:
     if not units:
         raise ValueError("无法为零个 speech unit 建立时间轴。")
     if not 1000 <= int(cover_duration_ms) <= 3000:
         raise ValueError("封面时长必须在 1000–3000 ms 之间。")
     cover_duration_ms = int(cover_duration_ms)
+    if not 600 <= int(outro_duration_ms) <= 2000:
+        raise ValueError("片尾停留时长必须在 600–2000 ms 之间。")
+    outro_duration_ms = int(outro_duration_ms)
 
     wav_info: list[dict[str, Any]] = []
     for unit in units:
@@ -117,7 +131,7 @@ def build_audio_timeline(
             expected_bytes = meta["frames"] * 2
             if len(pcm) != expected_bytes:
                 raise ValueError(f"{unit['unit_id']} WAV 数据长度与帧数不一致。")
-            pcm = _fade_pcm_edges(pcm, sample_rate, UNIT_EDGE_FADE_MS)
+            pcm = _fade_pcm_edges(pcm, sample_rate)
 
             start_sample = cursor
             end_sample = start_sample + meta["frames"]
@@ -151,6 +165,11 @@ def build_audio_timeline(
                     "visual_trigger_ids": unit["visual_trigger_ids"],
                     "rhythm_block_id": unit.get("rhythm_block_id"),
                     "sfx_trigger_id": unit.get("sfx_trigger_id"),
+                    "word_boundaries": list(unit.get("word_boundaries") or []),
+                    "subtitle_alignment_method": str(
+                        unit.get("subtitle_alignment_method") or "speech_unit_envelope"
+                    ),
+                    "word_boundary_status": str(unit.get("word_boundary_status") or "unavailable"),
                     "audio_file": str(path),
                     "sample_rate": sample_rate,
                     "channels": 1,
@@ -184,6 +203,25 @@ def build_audio_timeline(
                 )
                 cursor = gap_end
 
+        outro_frames = sample_rate * outro_duration_ms // 1000
+        outro_start = cursor
+        outro_end = outro_start + outro_frames
+        writer.writeframes(_silence_bytes(outro_frames, 1, 2))
+        segments.append(
+            {
+                "segment_id": "scene_99_outro",
+                "kind": "outro",
+                "start_sample": outro_start,
+                "end_sample": outro_end,
+                "start_ms": _round_samples_to_ms(outro_start, sample_rate),
+                "end_ms": _round_samples_to_ms(outro_end, sample_rate),
+                "duration_ms": outro_duration_ms,
+                "speech": False,
+                "subtitle": False,
+            }
+        )
+        cursor = outro_end
+
     total_frames = cursor
     if first_cue_start_sample != cover_frames:
         raise ValueError("第一条旁白必须在显式封面结束时开始。")
@@ -199,6 +237,8 @@ def build_audio_timeline(
         "audio_sample_width_bytes": 2,
         "cover": segments[0],
         "cover_duration_ms": cover_duration_ms,
+        "outro_duration_ms": outro_duration_ms,
+        "outro": segments[-1],
         "segments": segments,
         "speech_units": cue_records,
         "sfx_events": [],
@@ -209,7 +249,7 @@ def build_audio_timeline(
                 "kind": segment["kind"],
             }
             for segment in segments
-            if segment["kind"] in {"cover", "silence"}
+            if segment["kind"] in {"cover", "silence", "outro"}
         ],
         "rhythm_blocks": [],
         "total_sample_count": total_frames,
@@ -218,8 +258,10 @@ def build_audio_timeline(
         "cover_to_first_speech_gap_ms": 0,
         "audio_boundary_transition": {
             "inter_unit_pause_ms": DEFAULT_INTER_UNIT_PAUSE_MS,
-            "speech_edge_fade_ms": UNIT_EDGE_FADE_MS,
-            "fade_curve": "equal_power_sine_squared",
+            "speech_edge_fade_in_ms": UNIT_FADE_IN_MS,
+            "speech_edge_fade_out_ms": UNIT_FADE_OUT_MS,
+            "fade_curve": "asymmetric_equal_power_sine_squared",
+            "outro_tail_ms": outro_duration_ms,
         },
         "timing_authority": "measured WAV sample counts; ffprobe metadata retained per speech unit",
     }
@@ -288,6 +330,28 @@ def validate_audio_timeline(timeline: dict[str, Any]) -> dict[str, Any]:
         sample_count = int(cue.get("sample_count", -1))
         if sample_count != int(cue["end_sample"]) - int(cue["start_sample"]):
             raise ValueError(f"Speech cue {unit_id} sample_count disagrees with its boundaries.")
+        alignment = str(cue.get("subtitle_alignment_method") or "speech_unit_envelope")
+        word_boundaries = cue.get("word_boundaries") or []
+        if alignment == "edge_word_boundary":
+            if not isinstance(word_boundaries, list) or not word_boundaries:
+                raise ValueError(f"Speech cue {unit_id} claims word-boundary alignment but has no boundaries.")
+            speech_duration_ms = _round_samples_to_ms(sample_count, sample_rate)
+            last_end = -1
+            boundary_text: list[str] = []
+            for boundary in word_boundaries:
+                text = str(boundary.get("text") or "")
+                start_ms = int(boundary.get("start_ms", -1))
+                end_ms = int(boundary.get("end_ms", -1))
+                if not text or start_ms < 0 or end_ms <= start_ms or end_ms > speech_duration_ms + 1:
+                    raise ValueError(f"Speech cue {unit_id} has an invalid word-boundary interval.")
+                if start_ms < last_end:
+                    raise ValueError(f"Speech cue {unit_id} word boundaries are not ordered.")
+                last_end = end_ms
+                boundary_text.append(text)
+            normalized_boundary_text = "".join("".join(boundary_text).split())
+            normalized_spoken_text = "".join(str(cue.get("spoken_text", "")).split())
+            if normalized_boundary_text != normalized_spoken_text:
+                raise ValueError(f"Speech cue {unit_id} word boundaries do not cover the exact spoken text.")
     if cue_ids != set(speech_segments):
         raise ValueError("Speech cue IDs and speech segment IDs are not a one-to-one match.")
 
@@ -299,6 +363,10 @@ def validate_audio_timeline(timeline: dict[str, Any]) -> dict[str, Any]:
         "sample_rate": sample_rate,
         "total_sample_count": total_samples,
         "speech_unit_count": len(cues),
+        "word_boundary_aligned_unit_count": sum(
+            1 for cue in cues if cue.get("subtitle_alignment_method") == "edge_word_boundary"
+        ),
+        "outro_duration_ms": int(timeline.get("outro_duration_ms", 0)),
         "segment_count": len(segments),
         "authority": "measured_pcm_wav_sample_counts",
     }
@@ -316,8 +384,16 @@ def attach_editorial_events(
         if not trigger:
             continue
         duration_ms = int(sfx_durations_ms.get(trigger, 180))
-        start = int(cue["start_sample"])
-        end = min(total_samples, start + sample_rate * duration_ms // 1000)
+        onset_guard_ms = min(180, max(100, duration_ms))
+        start = min(
+            int(cue["end_sample"]) - 1,
+            int(cue["start_sample"]) + sample_rate * onset_guard_ms // 1000,
+        )
+        end = min(
+            total_samples,
+            int(cue["end_sample"]),
+            start + sample_rate * duration_ms // 1000,
+        )
         if end <= start:
             raise ValueError(f"SFX event {trigger} falls outside the global timeline")
         events.append(
@@ -330,6 +406,7 @@ def attach_editorial_events(
                 "start_ms": _round_samples_to_ms(start, sample_rate),
                 "end_ms": _round_samples_to_ms(end, sample_rate),
                 "duration_ms": _round_samples_to_ms(end - start, sample_rate),
+                "onset_guard_ms": onset_guard_ms,
                 "file": f"sfx/{trigger}.wav",
                 "peak_target": 0.06,
             }

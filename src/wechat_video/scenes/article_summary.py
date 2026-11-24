@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -71,8 +72,8 @@ def _image_objects(item: dict[str, Any]) -> list[Any]:
     picture = ImageMobject(str(path))
     region = item.get("focus_region")
     if not region:
-        _fit_box(picture, 7.0, 5.7)
-        picture.move_to(UP * 0.05)
+        _fit_box(picture, 7.0, 4.85)
+        picture.move_to(UP * 0.32)
         frame = RoundedRectangle(
             width=picture.width + 0.14,
             height=picture.height + 0.14,
@@ -93,8 +94,8 @@ def _image_objects(item: dict[str, Any]) -> list[Any]:
         bottom = max(top + 1, min(pixel_height, round((y + height) * pixel_height)))
         crop = np.asarray(source.convert("RGB").crop((left, top, right, bottom)))
 
-    _fit_box(picture, 4.15, 5.25)
-    picture.move_to(LEFT * 1.55 + DOWN * 0.05)
+    _fit_box(picture, 4.15, 4.7)
+    picture.move_to(LEFT * 1.55 + UP * 0.25)
     frame = RoundedRectangle(
         width=picture.width + 0.12,
         height=picture.height + 0.12,
@@ -119,8 +120,8 @@ def _image_objects(item: dict[str, Any]) -> list[Any]:
     ])
 
     zoom = ImageMobject(crop)
-    _fit_box(zoom, 2.75, 4.0)
-    zoom.move_to(RIGHT * 1.75 + DOWN * 0.05)
+    _fit_box(zoom, 2.75, 3.4)
+    zoom.move_to(RIGHT * 1.75 + UP * 0.25)
     zoom_frame = RoundedRectangle(
         width=zoom.width + 0.16,
         height=zoom.height + 0.16,
@@ -196,10 +197,19 @@ class ArticleSummaryScene(Scene):
             0.95,
         ).move_to(DOWN * 2.65)
         cover = Group(brand, paper_title, title_text, subtitle_text, accent, source_text)
+
+        transition_ms = max(100, min(350, int(spec.get("transition_duration_ms", 220))))
         self.play(FadeIn(cover, shift=UP * 0.12), run_time=0.30)
-        self.wait(cover_duration_ms / 1000)
-        cursor = cover_duration_ms
+        # The cover fade-in belongs to the measured cover duration. The first
+        # visual transition occupies its final interval and ends at speech t=0.
+        first_transition = min(transition_ms, max(0, cover_duration_ms - 300))
+        cover_hold_ms = max(0, cover_duration_ms - 300 - first_transition)
+        if cover_hold_ms:
+            self.wait(cover_hold_ms / 1000)
+        cursor = cover_duration_ms - first_transition
         current = cover
+        layout_records: list[dict[str, Any]] = []
+        self._record_layout(layout_records, "cover", "cover", cover, spec)
 
         for index, beat in enumerate(beats, start=1):
             start_ms = int(beat["start_ms"])
@@ -208,26 +218,61 @@ class ArticleSummaryScene(Scene):
                 raise RuntimeError(
                     f"Invalid or overlapping article beat timing: {beat.get('beat_id')}"
                 )
-            gap = (start_ms - cursor) / 1000
-            if gap > 0:
-                self.wait(gap)
-            group = self._build_beat(beat, index, len(beats), font)
-            duration = max(0.12, min(0.32, (end_ms - start_ms) / 1000 * 0.18))
-            self.play(FadeOut(current), FadeIn(group, shift=UP * 0.08), run_time=duration)
-            cursor = start_ms + round(duration * 1000)
-            remaining = end_ms - cursor
-            if remaining > 0:
-                self.wait(remaining / 1000)
+            gap = max(0, start_ms - cursor)
+            if gap >= 100:
+                transition = min(transition_ms, gap)
+                transition_start = start_ms - transition
+            else:
+                transition_start = start_ms
+                transition = max(80, min(transition_ms, end_ms - start_ms))
+            if transition_start > cursor:
+                self.wait((transition_start - cursor) / 1000)
+
+            group, choreography, core_group = self._build_beat(
+                beat, index, len(beats), font
+            )
+            self._record_layout(
+                layout_records,
+                str(beat.get("beat_id") or f"beat_{index}"),
+                str(beat.get("kind") or ""),
+                core_group,
+                spec,
+            )
+            self.play(
+                FadeOut(current),
+                FadeIn(group, shift=UP * 0.08),
+                run_time=transition / 1000,
+            )
+            cursor = transition_start + transition
+            if cursor < start_ms:
+                self.wait((start_ms - cursor) / 1000)
+                cursor = start_ms
+
+            choreography_budget_ms = max(0, end_ms - max(start_ms, cursor))
+            choreography_time_ms = self._animate_choreography(
+                choreography, choreography_budget_ms
+            )
+            cursor = max(cursor, start_ms + choreography_time_ms)
+            if end_ms > cursor:
+                self.wait((end_ms - cursor) / 1000)
             cursor = end_ms
             current = group
 
-        if total_ms > cursor:
-            self.wait((total_ms - cursor) / 1000)
-        self.play(FadeOut(current), run_time=0.18)
+        if total_ms < cursor:
+            raise RuntimeError(
+                f"Manim scene exceeded measured audio timeline by {cursor - total_ms} ms."
+            )
+        tail_remaining = total_ms - cursor
+        outro_fade_ms = min(260, tail_remaining)
+        if tail_remaining > outro_fade_ms:
+            self.wait((tail_remaining - outro_fade_ms) / 1000)
+        if outro_fade_ms:
+            self.play(FadeOut(current), run_time=outro_fade_ms / 1000)
+        self._write_layout_report(spec_path, layout_records)
 
     def _build_beat(
         self, beat: dict[str, Any], index: int, count: int, font: str
-    ) -> Group:
+    ) -> tuple[Group, dict[str, Any], Group]:
         kind = str(beat["kind"])
         headline = _fit_box(
             Text(
@@ -250,6 +295,7 @@ class ArticleSummaryScene(Scene):
         ).move_to(UP * 3.55)
         parts: list[Any] = [top, counter, separator, headline]
         body = str(beat.get("body") or "").strip()
+        choreography: dict[str, Any] = {"kind": kind}
 
         if kind == "image":
             images = beat.get("images") or []
@@ -257,8 +303,28 @@ class ArticleSummaryScene(Scene):
                 raise RuntimeError(
                     f"Image beat {beat.get('beat_id')} has no resolved image files."
                 )
+            image_parts: list[Any] = []
             for item in images:
-                parts.extend(_image_objects(item))
+                objects = _image_objects(item)
+                image_parts.extend(objects)
+                parts.extend(objects)
+            if image_parts:
+                choreography["image_focus_objects"] = image_parts[2:4] if len(image_parts) >= 6 else image_parts[:1]
+            source_captions = [
+                str(item.get("source_context") or item.get("caption") or "").strip()
+                for item in images
+                if str(item.get("source_context") or item.get("caption") or "").strip()
+            ]
+            if source_captions:
+                caption_text = "图示：" + " / ".join(source_captions)
+                caption_lines = "\n".join(textwrap.wrap(caption_text, width=30, break_long_words=True))
+                figure_caption = _fit_box(
+                    Text(caption_lines, font=font, font_size=24, color=MUTED, line_spacing=0.9),
+                    7.1,
+                    0.9,
+                )
+                figure_caption.move_to(DOWN * 2.55)
+                parts.append(figure_caption)
 
         elif kind == "stat":
             primary_value = _fit_box(
@@ -271,6 +337,7 @@ class ArticleSummaryScene(Scene):
                 3.1,
                 0.85,
             )
+            choreography["stat_values"] = [primary_value]
             if beat.get("stat_secondary_value"):
                 secondary_value = _fit_box(
                     Text(str(beat["stat_secondary_value"]), font=font, font_size=92, color=TEAL),
@@ -301,6 +368,7 @@ class ArticleSummaryScene(Scene):
                 primary_label.next_to(primary_value, DOWN, buff=0.38)
                 secondary_value.move_to(secondary_card.get_center() + UP * 0.55)
                 secondary_label.next_to(secondary_value, DOWN, buff=0.38)
+                choreography["stat_values"].append(secondary_value)
                 parts.extend([
                     primary_card, secondary_card,
                     primary_value, primary_label, secondary_value, secondary_label,
@@ -314,6 +382,7 @@ class ArticleSummaryScene(Scene):
             left_data = beat["left"]
             right_data = beat["right"]
             cards = []
+            compare_panels: list[Any] = []
             for x, data, tone in (
                 (-1.92, left_data, TEAL),
                 (1.92, right_data, ACCENT),
@@ -342,7 +411,9 @@ class ArticleSummaryScene(Scene):
                     2.95,
                     2.9,
                 ).move_to(panel.get_center() + DOWN * 0.45)
+                compare_panels.append(panel)
                 cards.extend([panel, label, detail])
+            choreography["compare_panels"] = compare_panels
             parts.extend(cards)
 
         elif kind == "mechanism":
@@ -356,14 +427,16 @@ class ArticleSummaryScene(Scene):
             total_width = count_steps * card_width + (count_steps - 1) * gap
             start_x = -total_width / 2 + card_width / 2
             cards = []
+            step_cards: list[Any] = []
+            step_numbers: list[Any] = []
             for node_index, step in enumerate(steps):
                 x = start_x + node_index * (card_width + gap)
                 card = RoundedRectangle(
                     width=card_width,
                     height=card_height,
                     corner_radius=0.16,
-                    stroke_color=ACCENT if node_index == 0 else PALE,
-                    stroke_width=3,
+                    stroke_color=PALE,
+                    stroke_width=2,
                     fill_color=CARD,
                     fill_opacity=1,
                 ).move_to(RIGHT * x + UP * 0.20)
@@ -371,13 +444,15 @@ class ArticleSummaryScene(Scene):
                     f"{node_index + 1:02d}",
                     font=font,
                     font_size=25,
-                    color=ACCENT if node_index == 0 else TEAL,
+                    color=MUTED,
                 ).move_to(card.get_center() + UP * 1.15)
                 label = _fit_box(
                     Text(str(step), font=font, font_size=25, color=INK, line_spacing=0.9),
                     1.43,
                     1.8,
                 ).move_to(card.get_center() + DOWN * 0.2)
+                step_cards.append(card)
+                step_numbers.append(number)
                 cards.extend([card, number, label])
                 if node_index < count_steps - 1:
                     start_x_arrow = x + card_width / 2 + 0.02
@@ -392,6 +467,8 @@ class ArticleSummaryScene(Scene):
                             max_tip_length_to_length_ratio=0.3,
                         )
                     )
+            choreography["step_cards"] = step_cards
+            choreography["step_numbers"] = step_numbers
             parts.extend(cards)
             if body:
                 detail = _fit_box(
@@ -428,10 +505,129 @@ class ArticleSummaryScene(Scene):
             detail.move_to(DOWN * 0.05)
             parts.append(detail)
 
+        core_group = Group(*parts)
         footer = _fit_width(
             Text("成核生长 · 精读一分钟", font=font, font_size=21, color=MUTED),
             7.2,
         )
         footer.to_edge(DOWN, buff=0.42)
-        parts.append(footer)
-        return Group(*parts)
+        group = Group(core_group, footer)
+        return group, choreography, core_group
+
+    def _animate_choreography(
+        self, choreography: dict[str, Any], budget_ms: int
+    ) -> int:
+        """Animate visual emphasis without extending the measured cue window."""
+        budget = max(0, int(budget_ms))
+        kind = choreography.get("kind")
+        if kind == "mechanism":
+            cards = choreography.get("step_cards", [])
+            numbers = choreography.get("step_numbers", [])
+            if not cards:
+                return 0
+            interval_ms = budget // len(cards)
+            animation_ms = min(180, max(60, interval_ms // 2))
+            for index, _ in enumerate(cards):
+                animations = [
+                    card.animate.set_stroke(
+                        color=ACCENT if card_index == index else PALE,
+                        width=4 if card_index == index else 2,
+                    )
+                    for card_index, card in enumerate(cards)
+                ]
+                animations.extend([
+                    number.animate.set_color(ACCENT if number_index == index else MUTED)
+                    for number_index, number in enumerate(numbers)
+                ])
+                self.play(*animations, run_time=animation_ms / 1000)
+                if interval_ms > animation_ms:
+                    self.wait((interval_ms - animation_ms) / 1000)
+            return interval_ms * len(cards)
+        if kind == "compare":
+            panels = choreography.get("compare_panels", [])
+            if not panels or budget <= 0:
+                return 0
+            interval_ms = budget // len(panels)
+            animation_ms = min(180, max(60, interval_ms // 2))
+            for index, panel in enumerate(panels):
+                self.play(
+                    panel.animate.set_stroke(color=TEAL if index == 0 else ACCENT, width=4),
+                    run_time=animation_ms / 1000,
+                )
+                if interval_ms > animation_ms:
+                    self.wait((interval_ms - animation_ms) / 1000)
+            return interval_ms * len(panels)
+        if kind == "stat":
+            values = choreography.get("stat_values", [])
+            if not values or budget <= 0:
+                return 0
+            animation_ms = min(180, budget // (2 * len(values)))
+            if animation_ms < 60:
+                return 0
+            for value in values:
+                self.play(value.animate.scale(1.06), run_time=animation_ms / 1000)
+                self.play(value.animate.scale(1 / 1.06), run_time=animation_ms / 1000)
+            return animation_ms * 2 * len(values)
+        if kind == "image":
+            focus = choreography.get("image_focus_objects", [])
+            if not focus or budget < 120:
+                return 0
+            animation_ms = min(180, budget // 3)
+            self.play(
+                *[item.animate.set_stroke(color=ACCENT, width=4) for item in focus],
+                run_time=animation_ms / 1000,
+            )
+            return animation_ms
+        return 0
+
+    def _record_layout(
+        self,
+        records: list[dict[str, Any]],
+        beat_id: str,
+        kind: str,
+        group: Group,
+        spec: dict[str, Any],
+    ) -> None:
+        left = float(group.get_left()[0])
+        right = float(group.get_right()[0])
+        top = float(group.get_top()[1])
+        bottom = float(group.get_bottom()[1])
+        safe = spec.get("safe_zones") or {}
+        subtitle_top_percent = float(safe.get("subtitle_top_percent", 68))
+        subtitle_top_y = 8.0 - 16.0 * subtitle_top_percent / 100.0
+        within_frame = left >= -4.25 and right <= 4.25 and top <= 7.65 and bottom >= -7.65
+        clear_of_subtitles = kind == "cover" or bottom >= subtitle_top_y - 0.20
+        records.append({
+            "beat_id": beat_id,
+            "kind": kind,
+            "bounds": {
+                "left": round(left, 3), "right": round(right, 3),
+                "top": round(top, 3), "bottom": round(bottom, 3),
+            },
+            "within_frame_safe_area": within_frame,
+            "clear_of_subtitle_band": clear_of_subtitles,
+            "status": "PASS" if within_frame and clear_of_subtitles else "FAIL",
+        })
+
+    def _write_layout_report(
+        self, spec_path: Path, records: list[dict[str, Any]]
+    ) -> None:
+        failures = [item for item in records if item["status"] != "PASS"]
+        report = {
+            "schema_version": 1,
+            "frame": {"width": 9, "height": 16, "resolution": [1080, 1920]},
+            "checked_beats": len(records),
+            "overall_status": "FAIL" if failures else "PASS",
+            "checks": records,
+            "failures": failures,
+            "scope": "Manim core-scene bounds; rendered subtitle timing is checked separately",
+        }
+        (spec_path.parent / "scene_layout_report.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        if failures:
+            raise RuntimeError(
+                "Article-summary scene violates portrait-frame or subtitle safe-area bounds: "
+                + ", ".join(item["beat_id"] for item in failures)
+            )

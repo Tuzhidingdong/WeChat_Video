@@ -147,3 +147,70 @@ When a verified URL exists, channels_draft.json carries the exact article URL, a
 The current local audit found the WeChat_control research_subscription session expired. No reliable article URL field was obtained. A local preview may still be rendered from the already-published article body and its article ID; the link is marked missing. No URL adapter or field selector is claimed to be production-ready. Before a future draft-only upload, the publishing workflow must export the actual URL using a verified response field and the Channels uploader must prove the extended link is saved and read back.
 
 No video is uploaded, saved as a draft, or published by run-article-summary. User review of the complete MP4 is required before any future draft-only integration is enabled.
+
+
+## Audiovisual pacing and delivery-quality contract
+
+The article-summary path uses one measured PCM sample clock for speech, captions,
+scene transitions, the opening and the ending. The following checks are part of
+the reusable production path; they are not per-video editing instructions.
+
+### Narration and caption timing
+
+- Edge-TTS is requested with `WordBoundary` metadata in the same synthesis call
+  that produces each speech-unit audio file. Metadata offsets are converted from
+  100-nanosecond ticks to milliseconds relative to the normalized WAV.
+- Word-boundary text must cover the exact `spoken_text` after whitespace
+  normalization. Missing, malformed or incomplete metadata is recorded; captions
+  then use the measured speech-unit envelope rather than fabricated word timings.
+- Captions are grouped into short phrases (normally no more than 12 CJK
+  characters per cue), split at punctuation or a 2.2-second reading window, and
+  constrained to the corresponding measured speech interval.
+- The default inter-unit pause is 500 ms. Explicit pauses shorter than 450 ms are
+  raised to the 450 ms comprehension minimum and retained in the rhythm report as
+  requested versus effective values.
+- Speech WAV edge treatment is asymmetric (2 ms onset / 10 ms release) to avoid
+  unnecessarily attenuating the first consonant. Editorial SFX are delayed from
+  the speech onset and remain within their corresponding speech interval.
+
+### Visual rhythm, safe areas and opening/ending
+
+- Cover fade-in time is included inside the configured cover duration. The first
+  visual transition uses the final cover interval, ending at the first narration
+  boundary; subsequent transitions are placed in the available inter-unit pause
+  wherever that pause is long enough.
+- Mechanism cards advance their focus one step at a time. Comparison panels,
+  statistic values and figure focus areas receive restrained, timed emphasis.
+- Scene core content is checked against the portrait frame and the configured
+  subtitle safe band. The Manim render must produce
+  `scene_layout_report.json`; a failed or missing report blocks final assembly.
+- A 900 ms outro segment is included in the measured audio clock. The final scene
+  holds through the speech ending and fades during the outro, so the fade is not
+  discarded by audio-length trimming.
+- The original deterministic editorial music bed is active on cover, speech and
+  outro, ducked under narration, and absent from intentional inter-unit silence.
+  The mix report measures cover/outro music and verifies that inter-unit gaps
+  remain near digital silence.
+
+### Automated delivery artifacts
+
+Each local run records:
+
+- `audio_manifest.json`: provider, voice, normalized WAV samples, word-boundary
+  status and alignment metadata.
+- `audio_timing.json` and `audio_timeline_validation.json`: a contiguous,
+  sample-count-derived timeline including the outro.
+- `captions.srt`, `captions.ass`, and `subtitle_alignment`: phrase-level
+  caption text, time bounds and alignment method.
+- `narration_rhythm_report.json`: unit-length, punctuation and pause diagnostics.
+  It is diagnostic only and never rewrites scientific narration.
+- `scene_layout_report.json`: per-beat camera bounds and subtitle safe-band checks.
+- `audio_mix_report.json`: measured music activity at cover/outro and true-silence
+  diagnostics for inter-unit pauses.
+- `content_qa_report.json`, `qa_report.json`, and `REVIEW.md`: source,
+  timeline, captions, visual layout, audio mix and technical delivery status.
+
+Automated QA is a release gate for structural and technical defects, not a
+replacement for listening to the voice, judging scientific fidelity, or the
+user's final visual review. Every output remains local-preview-only; no channel
+upload or publication is performed by this workflow.
