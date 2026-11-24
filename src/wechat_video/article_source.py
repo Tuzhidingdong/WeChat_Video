@@ -193,6 +193,25 @@ def _cjk_count(value: str) -> int:
     return len(re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff]", value))
 
 
+def _validate_normalized_rect(region: Any, *, field_name: str, beat_id: str) -> None:
+    if not isinstance(region, dict):
+        raise ArticleSourceError(f"{beat_id} {field_name} entries must be normalized rectangle objects.")
+    try:
+        x, y = float(region["x"]), float(region["y"])
+        width, height = float(region["width"]), float(region["height"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ArticleSourceError(
+            f"{beat_id} {field_name} requires numeric x, y, width and height."
+        ) from exc
+    if (
+        x < 0 or y < 0 or width <= 0 or height <= 0
+        or x + width > 1 or y + height > 1
+    ):
+        raise ArticleSourceError(
+            f"{beat_id} {field_name} must stay inside the normalized source-image bounds."
+        )
+
+
 def validate_article_summary(
     package: dict[str, Any],
     summary: dict[str, Any],
@@ -341,6 +360,44 @@ def validate_article_summary(
                 if image_id in used_images:
                     raise ArticleSourceError(f"Article image {image_id!r} is reused in multiple beats.")
                 used_images.add(image_id)
+
+            selected_image_ids = {str(image_id) for image_id in image_ids}
+            for field_name in ("focus_regions", "display_crop_regions"):
+                mapping = beat.get(field_name) or {}
+                if not isinstance(mapping, dict):
+                    raise ArticleSourceError(
+                        f"{beat_id} {field_name} must map image IDs to normalized rectangles."
+                    )
+                unknown_ids = set(str(key) for key in mapping) - selected_image_ids
+                if unknown_ids:
+                    raise ArticleSourceError(
+                        f"{beat_id} {field_name} references images not selected by this beat: {sorted(unknown_ids)}."
+                    )
+                for image_id, region in mapping.items():
+                    _validate_normalized_rect(
+                        region, field_name=f"{field_name}[{image_id}]", beat_id=beat_id
+                    )
+
+            axis_labels = beat.get("axis_labels_zh") or {}
+            if not isinstance(axis_labels, dict):
+                raise ArticleSourceError(
+                    f"{beat_id} axis_labels_zh must map image IDs to x/y label objects."
+                )
+            unknown_axis_ids = set(str(key) for key in axis_labels) - selected_image_ids
+            if unknown_axis_ids:
+                raise ArticleSourceError(
+                    f"{beat_id} axis_labels_zh references images not selected by this beat: {sorted(unknown_axis_ids)}."
+                )
+            for image_id, labels in axis_labels.items():
+                if not isinstance(labels, dict) or set(labels) - {"x", "y"}:
+                    raise ArticleSourceError(
+                        f"{beat_id} axis_labels_zh[{image_id}] may contain only x and y labels."
+                    )
+                for axis, label in labels.items():
+                    if not isinstance(label, str) or not label.strip() or len(label.strip()) > 40:
+                        raise ArticleSourceError(
+                            f"{beat_id} axis_labels_zh[{image_id}].{axis} must be a concise 1–40 character label."
+                        )
         elif beat.get("image_ids"):
             raise ArticleSourceError(f"{beat_id}: image_ids are only supported by image beats.")
         if kind == "quote":
