@@ -341,6 +341,37 @@ def test_unavailable_word_boundaries_fall_back_to_complete_unit_caption(tmp_path
 
 
 
+def test_single_short_word_boundary_fragment_uses_complete_unit_envelope(tmp_path: Path) -> None:
+    timeline = {
+        "speech_units": [{
+            "unit_id": "U01",
+            "spoken_text": "模板。后续还会继续优化。",
+            "start_ms": 1200,
+            "end_ms": 2600,
+            "subtitle_alignment_method": "edge_word_boundary",
+            "word_boundaries": [
+                {"text": "模板。", "start_ms": 0, "end_ms": 350},
+            ],
+        }]
+    }
+    layout = {
+        "canvas": {"width": 1080, "height": 1920},
+        "subtitle": {"max_line_chars_zh": 12, "cjk_font_size": 42},
+    }
+
+    write_chinese_subtitles(
+        timeline, tmp_path / "short.srt", tmp_path / "short.ass",
+        layout, "Microsoft YaHei",
+    )
+
+    cue = timeline["subtitle_cues"][0]
+    rendered = (tmp_path / "short.srt").read_text(encoding="utf-8-sig")
+    assert cue["alignment_method"] == "speech_unit_envelope"
+    assert cue["short_caption_guard"] == "complete_unit_fallback"
+    assert cue["start_ms"] == 1200 and cue["end_ms"] == 2600
+    assert "模板。后续还会继续优化" in rendered
+
+
 def test_word_boundary_subtitles_restore_authored_punctuation_without_changing_timing(
     tmp_path: Path,
 ) -> None:
