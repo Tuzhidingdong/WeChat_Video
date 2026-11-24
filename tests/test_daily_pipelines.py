@@ -199,6 +199,21 @@ def test_literature_discovery_excludes_articles_already_rendered(tmp_path: Path)
     assert rejected[0]["reason"] == "article_already_has_generated_run"
 
 
+def test_popularization_duration_gate_uses_measured_timeline(tmp_path: Path) -> None:
+    run_dir = tmp_path / "outputs" / "pop"
+    run_dir.mkdir(parents=True)
+    _write(run_dir / "audio_timing.json", {"total_duration_seconds": 60.0})
+
+    passed = daily._popularization_duration_gate(run_dir, [55, 65])
+    assert passed["status"] == "PASS"
+    assert passed["measurement_authority"] == "audio_timing.json measured PCM sample clock"
+
+    _write(run_dir / "audio_timing.json", {"total_duration_seconds": 67.2})
+    failed = daily._popularization_duration_gate(run_dir, [55, 65])
+    assert failed["status"] == "FAIL"
+    assert failed["measured_seconds"] == 67.2
+
+
 def test_pending_fact_cards_never_enter_approved_popularization_pool(tmp_path: Path) -> None:
     card_path, _ = _fact_card(tmp_path, status="DRAFT_PENDING_USER_REVIEW")
 
