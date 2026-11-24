@@ -213,7 +213,7 @@ def _caption_groups(cue: dict[str, Any], max_chars: int) -> list[dict[str, Any]]
 
 
 def _han_character_count(text: str) -> int:
-    return sum(1 for char in text if "\\u3400" <= char <= "\\u4dbf" or "\\u4e00" <= char <= "\\u9fff")
+    return sum(1 for char in text if "\u3400" <= char <= "\u4dbf" or "\u4e00" <= char <= "\u9fff")
 
 
 def _merge_short_caption_groups(
