@@ -5,6 +5,7 @@ import wave
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from wechat_video.media import (
     _frame_completion_filter,
@@ -139,6 +140,30 @@ def test_final_video_assembly_pads_short_scene_and_preserves_exact_muxed_frames(
     assert "tpad=stop_mode=clone:stop=6,trim=end_frame=2188" in video_filter
     mux_command = next(args for name, args in observed_commands if name == "final_mux")
     assert "-shortest" not in mux_command
+
+
+def test_assembly_rejects_scene_deficit_beyond_bounded_tail_padding(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from wechat_video import media
+
+    monkeypatch.setattr(media, "resolve_command", lambda name: name)
+    monkeypatch.setattr(media, "_video_frame_count", lambda _path: 2181)
+
+    with pytest.raises(media.ExternalProcessError, match="too short for bounded frame completion"):
+        assemble_final_video(
+            tmp_path / "scene.mp4",
+            tmp_path / "audio.wav",
+            tmp_path / "captions.ass",
+            tmp_path / "final.mp4",
+            tmp_path,
+            2188,
+            config={
+                "final_programme": {"integrated_lufs": -16.0, "true_peak_dbtp": -1.5},
+            },
+        )
+
+
 def test_timeline_has_a_measured_outro_and_a_single_sample_clock(tmp_path: Path) -> None:
     audio_dir = tmp_path / "audio"
     audio_dir.mkdir()
