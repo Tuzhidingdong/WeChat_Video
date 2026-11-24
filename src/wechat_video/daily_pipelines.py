@@ -818,10 +818,19 @@ def _approved_popularization_cards(project_root: Path, config: dict[str, Any]) -
     pop = config["popularization"]
     cards_root = _project_path(project_root, str(pop["fact_cards_dir"]))
     sources_path = _project_path(project_root, str(pop["sources_file"]))
+    # An absent or not-yet-populated topic pool is a normal safe-skip
+    # condition, not a pipeline exception. Never infer or generate a topic
+    # when the governed Fact Card registry is unavailable.
     if not cards_root.is_dir():
-        raise DailyPipelineError(f"Fact Card directory does not exist: {cards_root}")
+        return [], [{
+            "fact_card": str(cards_root),
+            "reason": "fact_cards_directory_missing_no_approved_topics",
+        }]
     if not sources_path.is_file():
-        raise DailyPipelineError(f"Fact Card sources file does not exist: {sources_path}")
+        return [], [{
+            "fact_card": str(sources_path),
+            "reason": "fact_card_sources_missing_no_approved_topics",
+        }]
     sources = _read_json(sources_path)
     approved: list[dict[str, Any]] = []
     rejected: list[dict[str, str]] = []
