@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .article_summary import run_article_summary
+from .daily_pipelines import run_daily_literature, run_daily_popularization, run_daily_two_videos
 from .channels_uploader import (
     UploadBlockedError,
     approve_latest_run,
@@ -201,6 +202,27 @@ def build_parser() -> argparse.ArgumentParser:
     article_summary.add_argument("--summary", type=Path, required=True)
     article_summary.add_argument("--output-root", type=Path, default=Path("outputs"))
 
+    literature_daily = sub.add_parser(
+        "run-literature-daily",
+        help="Select yesterday's published literature article, render it, QA it, and save the exact output as a draft.",
+    )
+    literature_daily.add_argument("--project-root", type=Path, default=root)
+    literature_daily.add_argument("--published-date", help="Optional Asia/Shanghai publication date YYYY-MM-DD.")
+
+    popularization_daily = sub.add_parser(
+        "run-popularization-daily",
+        help="Select one unused approved Fact Card, render it, QA it, and save the exact output as a draft.",
+    )
+    popularization_daily.add_argument("--project-root", type=Path, default=root)
+    popularization_daily.add_argument("--local-date", help="Optional Asia/Shanghai job date YYYY-MM-DD.")
+
+    daily_both = sub.add_parser(
+        "run-daily-two-videos",
+        help="Run literature and popularization pipelines sequentially and report each result independently.",
+    )
+    daily_both.add_argument("--project-root", type=Path, default=root)
+    daily_both.add_argument("--published-date", help="Optional Asia/Shanghai publication date YYYY-MM-DD.")
+
     return parser
 
 
@@ -247,6 +269,31 @@ def main(argv: list[str] | None = None) -> int:
             }, ensure_ascii=False, indent=2))
             print("Local article-summary preview created. No upload or publication was attempted.")
             return 0
+        if args.command == "run-literature-daily":
+            result = run_daily_literature(
+                args.project_root,
+                published_date=args.published_date,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result.get("state") in {
+                "DRAFT_SAVED", "SKIPPED_NO_ELIGIBLE_ARTICLE", "DISABLED"
+            } else 2 if result.get("state") == "UPLOAD_UNKNOWN" else 1
+        if args.command == "run-popularization-daily":
+            result = run_daily_popularization(
+                args.project_root,
+                local_date=args.local_date,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result.get("state") in {
+                "DRAFT_SAVED", "SKIPPED_NO_APPROVED_TOPIC", "DISABLED"
+            } else 2 if result.get("state") == "UPLOAD_UNKNOWN" else 1
+        if args.command == "run-daily-two-videos":
+            result = run_daily_two_videos(
+                args.project_root,
+                published_date=args.published_date,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result.get("overall_state") == "DRAFTS_SAVED" else 2
         if args.command == "run-slice-a":
             _validate_editorial_angle(args.fact_card, args.script)
             run_dir = run_slice_a(
