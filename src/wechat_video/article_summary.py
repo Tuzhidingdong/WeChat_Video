@@ -201,10 +201,17 @@ def _build_scene_beats(
         resolved["footer"] = str(beat.get("source_label") or "成核生长 · 精读一分钟")
         if beat["kind"] == "image":
             focus_regions = beat.get("focus_regions") or {}
-            if not isinstance(focus_regions, dict):
-                raise ArticleSourceError(
-                    f"{beat['beat_id']} focus_regions must map image IDs to normalized rectangles."
-                )
+            display_crop_regions = beat.get("display_crop_regions") or {}
+            axis_labels_by_image = beat.get("axis_labels_zh") or {}
+            for field_name, mapping in (
+                ("focus_regions", focus_regions),
+                ("display_crop_regions", display_crop_regions),
+                ("axis_labels_zh", axis_labels_by_image),
+            ):
+                if not isinstance(mapping, dict):
+                    raise ArticleSourceError(
+                        f"{beat['beat_id']} {field_name} must map image IDs to image-specific display metadata."
+                    )
             resolved["images"] = [
                 {
                     "path": copied_images[image_id]["path"],
@@ -212,6 +219,8 @@ def _build_scene_beats(
                     "source_context": copied_images[image_id].get("context") or copied_images[image_id]["caption"],
                     "image_aspect": copied_images[image_id]["image_aspect"],
                     "focus_region": focus_regions.get(image_id),
+                    "display_crop_region": display_crop_regions.get(image_id),
+                    "axis_labels_zh": axis_labels_by_image.get(image_id, {}),
                 }
                 for image_id in beat["image_ids"]
             ]
