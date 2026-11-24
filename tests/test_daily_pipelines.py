@@ -199,7 +199,8 @@ def test_extract_model_usage_sums_opencode_step_finish_telemetry() -> None:
         "reasoning": 15,
         "cache_read": 60,
         "cache_write": 5,
-        "total": 420,
+        "total": 355,
+        "total_including_cache_io": 420,
     }
     assert usage["cost"] == 0.003
     assert usage["cost_currency"] == "USD"
