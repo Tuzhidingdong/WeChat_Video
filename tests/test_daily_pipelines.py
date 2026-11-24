@@ -191,6 +191,7 @@ def test_extract_model_usage_sums_opencode_step_finish_telemetry() -> None:
     usage = daily._extract_model_usage("\n".join(json.dumps(item) for item in events))
 
     assert usage["available"] is True
+    assert usage["complete"] is True
     assert usage["session_ids"] == ["ses_fixture"]
     assert usage["step_count"] == 2
     assert usage["tokens"] == {
@@ -204,6 +205,65 @@ def test_extract_model_usage_sums_opencode_step_finish_telemetry() -> None:
     }
     assert usage["cost"] == 0.003
     assert usage["cost_currency"] == "USD"
+
+
+def test_model_usage_marks_jsonl_without_terminal_step_as_incomplete() -> None:
+    event = {
+        "type": "step_finish",
+        "sessionID": "ses_partial",
+        "part": {
+            "reason": "tool-calls",
+            "cost": 0.001,
+            "tokens": {"input": 80, "output": 5, "reasoning": 0},
+        },
+    }
+    usage = daily._extract_model_usage(json.dumps(event))
+
+    assert usage["available"] is True
+    assert usage["complete"] is False
+
+
+def test_extract_exported_model_usage_recovers_aggregated_assistant_counters() -> None:
+    exported = {
+        "info": {"id": "ses_exported"},
+        "messages": [
+            {"info": {"role": "user"}, "parts": [{"type": "text", "text": "prompt"}]},
+            {
+                "info": {
+                    "role": "assistant",
+                    "tokens": {
+                        "input": 150,
+                        "output": 20,
+                        "reasoning": 4,
+                        "cache": {"read": 500, "write": 6},
+                    },
+                    "cost": 0.0042,
+                },
+                "parts": [{"type": "text", "text": "{\\"ok\\":true}"}],
+            },
+        ],
+    }
+
+    usage = daily._extract_exported_model_usage(
+        exported,
+        fallback_session_id="ses_fallback",
+    )
+
+    assert usage["available"] is True
+    assert usage["complete"] is True
+    assert usage["session_ids"] == ["ses_exported"]
+    assert usage["step_count"] == 1
+    assert usage["tokens"] == {
+        "input": 150,
+        "output": 20,
+        "reasoning": 4,
+        "cache_read": 500,
+        "cache_write": 6,
+        "total": 174,
+        "total_including_cache_io": 680,
+    }
+    assert usage["cost"] == 0.0042
+    assert usage["source"] == "OpenCode opencode session export"
 
 
 def test_extract_model_text_accepts_opencode_jsonl_text_events() -> None:
