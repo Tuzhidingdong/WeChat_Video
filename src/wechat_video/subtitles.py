@@ -212,6 +212,63 @@ def _caption_groups(cue: dict[str, Any], max_chars: int) -> list[dict[str, Any]]
     return groups
 
 
+def _han_character_count(text: str) -> int:
+    return sum(1 for char in text if "\\u3400" <= char <= "\\u4dbf" or "\\u4e00" <= char <= "\\u9fff")
+
+
+def _merge_short_caption_groups(
+    groups: list[dict[str, Any]],
+    *,
+    minimum_han_characters: int = 5,
+) -> list[dict[str, Any]]:
+    """Merge orphan CJK fragments into an adjacent cue within the same speech unit."""
+    merged = [dict(item) for item in groups]
+    index = 0
+    while index < len(merged):
+        current = merged[index]
+        if _han_character_count(str(current.get("text") or "")) >= minimum_han_characters:
+            index += 1
+            continue
+
+        previous_ok = index > 0 and merged[index - 1].get("unit_id") == current.get("unit_id")
+        next_ok = index + 1 < len(merged) and merged[index + 1].get("unit_id") == current.get("unit_id")
+        if not previous_ok and not next_ok:
+            index += 1
+            continue
+
+        # Prefer the temporally closer neighbour; ties merge backwards so
+        # leading short fragments naturally merge forwards.
+        previous_gap = (
+            max(0, int(current["start_ms"]) - int(merged[index - 1]["end_ms"]))
+            if previous_ok else 10**9
+        )
+        next_gap = (
+            max(0, int(merged[index + 1]["start_ms"]) - int(current["end_ms"]))
+            if next_ok else 10**9
+        )
+        merge_previous = previous_ok and (not next_ok or previous_gap <= next_gap)
+        neighbour_index = index - 1 if merge_previous else index + 1
+        neighbour = merged[neighbour_index]
+        if merge_previous:
+            neighbour["text"] = str(neighbour.get("text") or "") + str(current.get("text") or "")
+        else:
+            neighbour["text"] = str(current.get("text") or "") + str(neighbour.get("text") or "")
+        neighbour["start_ms"] = min(int(neighbour["start_ms"]), int(current["start_ms"]))
+        neighbour["end_ms"] = max(int(neighbour["end_ms"]), int(current["end_ms"]))
+        neighbour["merged_short_fragment_count"] = int(
+            neighbour.get("merged_short_fragment_count", 0)
+        ) + int(current.get("merged_short_fragment_count", 0)) + 1
+        merged.pop(index)
+        if merge_previous:
+            index = max(0, index - 1)
+    return merged
+
+
+def _strip_trailing_caption_punctuation(text: str) -> str:
+    """Remove only visual end punctuation; authored narration remains untouched."""
+    return text.rstrip().rstrip("，。,.").rstrip()
+
+
 def write_chinese_subtitles(
     timeline: dict[str, Any],
     srt_path: Path,
@@ -230,7 +287,15 @@ def write_chinese_subtitles(
     for cue in timeline["speech_units"]:
         caption_cues.extend(_caption_groups(cue, limit))
     caption_cues.sort(key=lambda item: (item["start_ms"], item["end_ms"]))
+    caption_cues = _merge_short_caption_groups(
+        caption_cues,
+        minimum_han_characters=max(1, int(subtitle_config.get("minimum_han_characters_per_caption", 5))),
+    )
     for index, cue in enumerate(caption_cues):
+        original_text = str(cue.get("text") or "").strip()
+        cue["source_text"] = original_text
+        if subtitle_config.get("strip_trailing_caption_punctuation", True):
+            cue["text"] = _strip_trailing_caption_punctuation(original_text)
         if index + 1 < len(caption_cues) and cue["unit_id"] == caption_cues[index + 1]["unit_id"]:
             cue["end_ms"] = min(cue["end_ms"], caption_cues[index + 1]["start_ms"])
         cue["caption_id"] = f"{cue['unit_id']}_C{index + 1:02d}"
@@ -249,11 +314,23 @@ def write_chinese_subtitles(
             rf"{{\an5\fad(50,60)\pos({center_x},{y})}}{_ass_escape(text)}"
         )
 
+    base_font_size = int(subtitle_config.get("cjk_font_size", 42))
+    font_scale = float(subtitle_config.get("caption_font_scale", 1.18))
+    if not 1.0 <= font_scale <= 1.3:
+        raise ValueError("caption_font_scale must remain between 1.0 and 1.3.")
+    font_size = round(base_font_size * font_scale)
+    text_color = str(subtitle_config.get("caption_color", "#222222")).lstrip("#").upper()
+    if len(text_color) != 6 or any(char not in "0123456789ABCDEF" for char in text_color):
+        raise ValueError("caption_color must be a six-digit RGB hex value.")
+    red, green, blue = text_color[0:2], text_color[2:4], text_color[4:6]
+    ass_color = f"&H00{blue}{green}{red}"
+    outline = int(subtitle_config.get("caption_outline", 0))
+    shadow = int(subtitle_config.get("caption_shadow", 0))
     style = (
-        f"Style: ZH,{cjk_font_family},{int(subtitle_config.get('cjk_font_size', 42))},"
-        "&H00FFFFFF,&H000000FF,&H00101820,&H00000000,"
+        f"Style: ZH,{cjk_font_family},{font_size},"
+        f"{ass_color},{ass_color},{ass_color},&H00000000,"
         "0,0,0,0,100,100,0,0,1,"
-        "2,1,2,"
+        f"{outline},{shadow},2,"
         f"{int(subtitle_config.get('margin_left', 75))},{int(subtitle_config.get('margin_right', 75))},0,1"
     )
     ass = "\n".join([
@@ -281,6 +358,12 @@ def write_chinese_subtitles(
             1 for item in caption_cues if item["alignment_method"] == "speech_unit_envelope"
         ),
         "max_chars_per_caption": limit,
-        "style": "transparent_background_white_text_dark_outline",
+        "minimum_han_characters_per_caption": int(subtitle_config.get("minimum_han_characters_per_caption", 5)),
+        "font_size": font_size,
+        "font_scale": font_scale,
+        "caption_color": f"#{text_color}",
+        "outline": outline,
+        "shadow": shadow,
+        "style": "transparent_background_charcoal_text_no_outline",
     }
     return len(caption_cues)
