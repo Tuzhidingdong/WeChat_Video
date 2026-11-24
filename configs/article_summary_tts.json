@@ -32,14 +32,15 @@
     "minimum_programme_seconds": 58,
     "maximum_programme_seconds": 62,
     "target_cjk_characters": {
-      "minimum": 220,
+      "minimum": 222,
       "maximum": 235
     },
     "expected_cjk_characters_per_second_at_default_rate": 4.2,
     "rate_adjustment": {
       "default_percent": 5,
       "maximum_percent": 8,
-      "automatic_adaptation": false
+      "automatic_adaptation": false,
+      "reference_rate_percent": 5
     },
     "measured_pcm_duration_is_release_authority": true
   }
