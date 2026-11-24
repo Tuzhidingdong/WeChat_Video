@@ -409,18 +409,25 @@ def _mark_daily_job(
     content_type: str,
     state: str,
     error: str,
-) -> None:
+) -> str:
     job_path = _job_paths(project_root, config, local_date) / f"{content_type}.json"
     if not job_path.is_file():
-        return
+        return state
     try:
         record = _read_json(job_path)
-        if record.get("state") != "DRAFT_SAVED":
-            _update_job(job_path, record, state, error=error)
+        existing_state = str(record.get("state") or "")
+        if existing_state == "DRAFT_SAVED":
+            return "DRAFT_SAVED"
+        # Once the job has entered UPLOADING, a later exception cannot prove
+        # that Save was not accepted. Preserve uncertainty and require the
+        # uploader's read-only reconciliation rather than retrying.
+        final_state = "UPLOAD_UNKNOWN" if existing_state in {"UPLOADING", "UPLOAD_UNKNOWN"} else state
+        _update_job(job_path, record, final_state, error=error)
+        return final_state
     except Exception:
         # The uploader's own job journal remains the authoritative recovery
         # record if this higher-level daily summary cannot be updated.
-        return
+        return state
 
 
 def _record_daily_report(
@@ -769,8 +776,8 @@ def run_daily_literature(
             result = {"state": "UPLOAD_UNKNOWN", "content_type": "literature", "error": str(exc)}
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
-            _mark_daily_job(project_root, config, target, "literature", "FAILED", message)
-            result = {"state": "FAILED", "content_type": "literature", "error": message}
+            failed_state = _mark_daily_job(project_root, config, target, "literature", "FAILED", message)
+            result = {"state": failed_state, "content_type": "literature", "error": message}
         _record_daily_report(project_root, config, target, {"literature": result})
         return result
 
@@ -794,8 +801,8 @@ def run_daily_popularization(
             result = {"state": "UPLOAD_UNKNOWN", "content_type": "popularization", "error": str(exc)}
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
-            _mark_daily_job(project_root, config, target, "popularization", "FAILED", message)
-            result = {"state": "FAILED", "content_type": "popularization", "error": message}
+            failed_state = _mark_daily_job(project_root, config, target, "popularization", "FAILED", message)
+            result = {"state": failed_state, "content_type": "popularization", "error": message}
         _record_daily_report(project_root, config, target, {"popularization": result})
         return result
 
@@ -829,8 +836,8 @@ def run_daily_two_videos(project_root: Path, *, published_date: str | None = Non
                 results[key] = {"state": "UPLOAD_UNKNOWN", "error": str(exc)}
             except Exception as exc:
                 message = f"{type(exc).__name__}: {exc}"
-                _mark_daily_job(project_root, config, target, key, "FAILED", message)
-                results[key] = {"state": "FAILED", "error": message}
+                failed_state = _mark_daily_job(project_root, config, target, key, "FAILED", message)
+                results[key] = {"state": failed_state, "error": message}
     states = [
         results[key].get("state")
         for key in ("literature", "popularization")
