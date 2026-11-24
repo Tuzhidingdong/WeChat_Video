@@ -79,7 +79,7 @@ def _narration_duration_budget(
             "Revise the content plan before TTS; do not accelerate or truncate the finished audio."
         )
 
-    base_rate = float(policy.get("expected_cjk_characters_per_second_at_default_rate", 0))
+    base_rate = float(policy.get("expected_cjk_characters_per_second_at_reference_rate", 0))
     rate_settings = policy.get("rate_adjustment") or {}
     reference_rate = float(rate_settings.get("reference_rate_percent", 0))
     configured_rate = str(
