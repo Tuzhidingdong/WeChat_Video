@@ -3403,9 +3403,10 @@ def test_article_summary_run_is_eligible_without_wechat_extended_link(tmp_path: 
     assert qa["overall_status"] == "PASS"
     assert metadata["source_article_id"] == "article-1"
     assert metadata["source_cta_text"] == "更多详细解读见【成核生长】同名公众号"
-    assert metadata["extended_link_required"] is True
-    assert metadata["extended_link"]["url"] == "https://mp.weixin.qq.com/s/article-1"
-    assert metadata["external_article_link_used"] is True
+    assert metadata["extended_link_required"] is False
+    assert metadata["extended_link"] is None
+    assert metadata["extended_link_status"] == "NOT_REQUIRED_CTA_ONLY"
+    assert metadata["external_article_link_used"] is False
     assert approval["approval_type"] == "standing_user_draft_only_authorization"
 
 
