@@ -178,7 +178,7 @@ def _narration_rhythm_report(units: list[dict[str, Any]]) -> dict[str, Any]:
     records: list[dict[str, Any]] = []
     for unit in units:
         text = str(unit.get("spoken_text") or "").strip()
-        cjk_count = len(re.findall(r"[\\u3400-\\u4dbf\\u4e00-\\u9fff]", text))
+        cjk_count = len(re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff]", text))
         requested_pause = int(unit.get("requested_pause_after_ms", unit.get("pause_after_ms", 500)))
         effective_pause = int(unit.get("pause_after_ms", 500))
         warnings: list[str] = []

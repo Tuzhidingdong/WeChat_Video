@@ -526,7 +526,9 @@ class ArticleSummaryScene(Scene):
             if not cards:
                 return 0
             interval_ms = budget // len(cards)
-            animation_ms = min(180, max(60, interval_ms // 2))
+            if interval_ms < 60:
+                return 0
+            animation_ms = min(180, interval_ms // 2)
             for index, _ in enumerate(cards):
                 animations = [
                     card.animate.set_stroke(
@@ -548,7 +550,9 @@ class ArticleSummaryScene(Scene):
             if not panels or budget <= 0:
                 return 0
             interval_ms = budget // len(panels)
-            animation_ms = min(180, max(60, interval_ms // 2))
+            if interval_ms < 60:
+                return 0
+            animation_ms = min(180, interval_ms // 2)
             for index, panel in enumerate(panels):
                 self.play(
                     panel.animate.set_stroke(color=TEAL if index == 0 else ACCENT, width=4),

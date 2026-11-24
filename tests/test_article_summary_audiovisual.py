@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from wechat_video.media import _speech_region_mask
+from wechat_video.article_summary import _narration_rhythm_report
 from wechat_video.subtitles import write_chinese_subtitles
 from wechat_video.timeline import (
     _fade_pcm_edges,
@@ -145,6 +146,23 @@ def test_word_boundary_subtitles_are_phrase_timed_and_have_no_filled_black_box(t
     assert ",1,2,1,2," in ass or ",1,2,1," in ass
     assert "BorderStyle" in ass
     assert "Dialogue: 2," in ass
+
+
+
+def test_narration_rhythm_report_counts_cjk_and_preserves_authored_pause_values() -> None:
+    spoken = "科研团队通过系统实验验证关键机制及其适用边界" * 3 + "。"
+    report = _narration_rhythm_report([{
+        "unit_id": "U01",
+        "spoken_text": spoken,
+        "requested_pause_after_ms": 250,
+        "pause_after_ms": 450,
+    }])
+
+    assert report["speech_units"][0]["spoken_cjk_characters"] == len(spoken)
+    assert report["speech_units"][0]["requested_pause_after_ms"] == 250
+    assert report["speech_units"][0]["effective_pause_after_ms"] == 450
+    assert "long_speech_unit" in report["speech_units"][0]["warnings"]
+    assert report["policy"] == "diagnostic_only_no_scientific_text_is_rewritten"
 
 
 def test_unavailable_word_boundaries_fall_back_to_complete_unit_caption(tmp_path: Path) -> None:
