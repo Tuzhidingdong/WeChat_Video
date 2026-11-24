@@ -585,7 +585,9 @@ def _mark_daily_job(
                 error=error,
             )
             return "DRAFT_SAVED"
-        if upload_state in {"SAVE_REQUESTED", "UPLOAD_UNKNOWN", "UPLOADING", "PREPARED"}:
+        if upload_state == "BLOCKED_LINK_NOT_PERSISTED":
+            final_state = "BLOCKED_LINK_NOT_PERSISTED"
+        elif upload_state in {"SAVE_REQUESTED", "UPLOAD_UNKNOWN", "UPLOADING", "PREPARED"}:
             final_state = "UPLOAD_UNKNOWN"
         elif upload_state in {"CREATED", "FAILED_BEFORE_SAVE", "BLOCKED_DUPLICATE_TITLE"}:
             # The uploader journal proves no draft-save result was confirmed.
