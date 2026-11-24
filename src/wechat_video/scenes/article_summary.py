@@ -161,15 +161,18 @@ def _image_objects(item: dict[str, Any]) -> list[Any]:
         axis_parts.append(f"横轴：{str(axis_labels['x']).strip()}")
     if str(axis_labels.get("y") or "").strip():
         axis_parts.append(f"纵轴：{str(axis_labels['y']).strip()}")
-    axis_label = Text(
-        "  ·  ".join(axis_parts),
-        font="Microsoft YaHei",
-        font_size=18,
-        color=INK,
-    )
-    _fit_width(axis_label, 2.75)
-    axis_label.next_to(zoom, DOWN, buff=0.12)
-    return [frame, picture, focus_frame, zoom_frame, zoom, zoom_label, axis_label]
+    parts: list[Any] = [frame, picture, focus_frame, zoom_frame, zoom, zoom_label]
+    if axis_parts:
+        axis_label = Text(
+            "  ·  ".join(axis_parts),
+            font="Microsoft YaHei",
+            font_size=18,
+            color=INK,
+        )
+        _fit_width(axis_label, 2.75)
+        axis_label.next_to(zoom, DOWN, buff=0.12)
+        parts.append(axis_label)
+    return parts
 
 
 class ArticleSummaryScene(Scene):
