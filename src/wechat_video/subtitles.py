@@ -198,7 +198,7 @@ def _caption_groups(cue: dict[str, Any], max_chars: int) -> list[dict[str, Any]]
         current_text.append(text)
         current_end = max(current_end, end)
         current_chars += count
-        if any(mark in text for mark in "，。；！？、："):
+        if text.rstrip().endswith(tuple("，。；！？、：")):
             flush()
     flush()
 

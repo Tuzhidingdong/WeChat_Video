@@ -214,7 +214,7 @@ def test_word_boundary_subtitles_restore_authored_punctuation_without_changing_t
     layout = {
         "canvas": {"width": 1080, "height": 1920},
         "subtitle": {
-            "max_line_chars_zh": 8,
+            "max_line_chars_zh": 12,
             "cjk_font_size": 42,
             "zh_y_percent": 72.5,
             "margin_left": 75,
@@ -228,7 +228,7 @@ def test_word_boundary_subtitles_restore_authored_punctuation_without_changing_t
     )
 
     srt = (tmp_path / "restored.srt").read_text(encoding="utf-8-sig")
-    assert "研究团队，观察" in srt
+    assert "研究团队，观察到关键界面" in srt
     assert "明显变化。" in srt
     assert timeline["speech_units"][0]["word_boundaries"] == original_boundaries
 
