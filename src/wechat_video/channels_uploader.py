@@ -3536,18 +3536,66 @@ def _validate_run_for_upload(
     card = _read_json(card_path)
     source_doc = _read_json(source_path)
     script = _read_json(script_path)
-    approval: dict[str, Any] = {
-        "approval_type": "standing_user_draft_only_authorization",
-        "approved_by": None,
-        "approved_at": None,
-        "channels_title": None,
+
+    # Reconcile the output package against the canonical, locally approved
+    # Fact Card and source registry. A copied output JSON file is not itself
+    # proof of human approval.
+    canonical_cards_root = project_root / "fact_cards"
+    canonical_sources_path = canonical_cards_root / "sources.json"
+    if not canonical_sources_path.is_file():
+        raise UploadBlockedError("Canonical fact_cards/sources.json is missing.")
+    if _sha256(source_path) != _sha256(canonical_sources_path):
+        raise UploadBlockedError(
+            "Output source_record.json differs from the current canonical Fact Card source registry."
+        )
+    fact_card_id = str(card.get("fact_card_id") or "").strip()
+    if not fact_card_id:
+        raise UploadBlockedError("Output Fact Card has no fact_card_id.")
+    canonical_matches: list[Path] = []
+    for candidate in canonical_cards_root.glob("*.json"):
+        if candidate.resolve() == canonical_sources_path.resolve():
+            continue
+        try:
+            candidate_card = _read_json(candidate)
+        except UploadBlockedError:
+            continue
+        if str(candidate_card.get("fact_card_id") or "").strip() == fact_card_id:
+            canonical_matches.append(candidate)
+    if len(canonical_matches) != 1:
+        raise UploadBlockedError(
+            f"Expected exactly one canonical Fact Card for {fact_card_id!r}; "
+            f"found {len(canonical_matches)}."
+        )
+    canonical_card_path = canonical_matches[0]
+    canonical_card = _read_json(canonical_card_path)
+    package_science = {key: value for key, value in card.items() if key != "channels_title"}
+    canonical_science = {
+        key: value for key, value in canonical_card.items() if key != "channels_title"
     }
+    if package_science != canonical_science:
+        raise UploadBlockedError(
+            "Output Fact Card scientific content differs from the canonical Fact Card."
+        )
     try:
-        topic_approval = verify_fact_card_approval(project_root, card_path, source_path)
-    except TopicApprovalError:
-        topic_approval = None
-    if topic_approval is not None:
-        approval["channels_title"] = topic_approval.get("channels_title")
+        topic_approval = verify_fact_card_approval(
+            project_root,
+            canonical_card_path,
+            canonical_sources_path,
+        )
+    except TopicApprovalError as exc:
+        raise UploadBlockedError(
+            f"Fact Card approval verification failed: {exc}"
+        ) from exc
+    if topic_approval is None:
+        raise UploadBlockedError(
+            "Fact Card has not been explicitly human-approved; draft upload is blocked."
+        )
+    approval: dict[str, Any] = {
+        "approval_type": str(topic_approval.get("approval_type") or "verified_fact_card_approval"),
+        "approved_by": topic_approval.get("approved_by"),
+        "approved_at": topic_approval.get("approved_at"),
+        "channels_title": topic_approval.get("channels_title") or canonical_card.get("channels_title"),
+    }
     metadata_path = run_dir / "channels_draft.json"
     metadata_card = dict(card)
     if approval.get("channels_title") and not metadata_card.get("channels_title"):
