@@ -1358,7 +1358,7 @@ def test_fact_card_approval_is_one_time_and_hash_bound_to_sources(tmp_path: Path
         verify_fact_card_approval(tmp_path, card_path, source_path)
 
 
-def test_upload_validation_uses_standing_draft_authorization_without_topic_approval(
+def test_upload_validation_rejects_unapproved_fact_card_even_with_strict_qa(
     tmp_path: Path,
 ) -> None:
     run_dir = _make_run(tmp_path)
@@ -1366,14 +1366,10 @@ def test_upload_validation_uses_standing_draft_authorization_without_topic_appro
         (tmp_path / "config" / "channels_upload.json").read_text(encoding="utf-8")
     )
 
-    metadata, qa, authorization = _validate_run_for_upload(tmp_path, run_dir, config)
+    with pytest.raises(UploadBlockedError, match="not been explicitly human-approved"):
+        _validate_run_for_upload(tmp_path, run_dir, config)
 
-    assert metadata["title"] == "临界半径如何决定成核"
-    assert qa["overall_status"] == "PASS"
-    assert authorization["approval_type"] == "standing_user_draft_only_authorization"
-    assert authorization["approved_by"] is None
     assert not (tmp_path / "runtime" / "topic_approvals" / "TEST-001.json").exists()
-    assert not (tmp_path / "runtime" / "approvals" / f"{run_dir.name}.json").exists()
 
 
 def test_upload_validation_still_requires_strict_qa_pass_without_approval(
@@ -1458,7 +1454,8 @@ def test_preexisting_output_without_new_short_title_uses_approved_card_title(
     metadata, qa, approval = _validate_run_for_upload(tmp_path, run_dir, config)
     assert metadata["title"] == "临界半径如何决定成核"
     assert qa["overall_status"] == "PASS"
-    assert approval["approval_type"] == "standing_user_draft_only_authorization"
+    assert approval["approval_type"] == "local_hash_bound"
+    assert approval["approved_by"] == "test-user"
     assert approval["channels_title"] == "临界半径如何决定成核"
 
 
