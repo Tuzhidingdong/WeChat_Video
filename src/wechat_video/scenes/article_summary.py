@@ -66,9 +66,30 @@ def _normalized_region(region: dict[str, Any]) -> tuple[float, float, float, flo
     return x, y, width, height
 
 
+def _axis_labels_object(item: dict[str, Any], *, width: float) -> Any | None:
+    axis_labels = item.get("axis_labels_zh") or {}
+    if not isinstance(axis_labels, dict):
+        raise RuntimeError("axis_labels_zh must be an object with optional x and y labels.")
+    axis_parts = []
+    if str(axis_labels.get("x") or "").strip():
+        axis_parts.append(f"横轴：{str(axis_labels['x']).strip()}")
+    if str(axis_labels.get("y") or "").strip():
+        axis_parts.append(f"纵轴：{str(axis_labels['y']).strip()}")
+    if not axis_parts:
+        return None
+    label = Text(
+        "  ·  ".join(axis_parts),
+        font="Microsoft YaHei",
+        font_size=18,
+        color=INK,
+    )
+    return _fit_width(label, width)
+
+
 def _image_objects(item: dict[str, Any]) -> list[Any]:
     """Render an evidence-preserving crop and optional focus zoom from local source imagery."""
     path = Path(str(item["path"]))
+    axis_label = _axis_labels_object(item, width=2.75)
     with Image.open(path) as source:
         display_image = source.convert("RGB")
         display_region = item.get("display_crop_region")
@@ -105,7 +126,12 @@ def _image_objects(item: dict[str, Any]) -> list[Any]:
             fill_color=CARD,
             fill_opacity=1,
         ).move_to(picture)
-        return [frame, picture]
+        objects = [frame, picture]
+        if axis_label is not None:
+            _fit_width(axis_label, 7.0)
+            axis_label.next_to(picture, DOWN, buff=0.12)
+            objects.append(axis_label)
+        return objects
 
     x, y, width, height = _normalized_region(region)
     _fit_box(picture, 4.15, 4.7)
@@ -153,23 +179,8 @@ def _image_objects(item: dict[str, Any]) -> list[Any]:
     )
     _fit_width(zoom_label, 2.8)
     zoom_label.next_to(zoom, UP, buff=0.16)
-    axis_labels = item.get("axis_labels_zh") or {}
-    if not isinstance(axis_labels, dict):
-        raise RuntimeError("axis_labels_zh must be an object with optional x and y labels.")
-    axis_parts = []
-    if str(axis_labels.get("x") or "").strip():
-        axis_parts.append(f"横轴：{str(axis_labels['x']).strip()}")
-    if str(axis_labels.get("y") or "").strip():
-        axis_parts.append(f"纵轴：{str(axis_labels['y']).strip()}")
     parts: list[Any] = [frame, picture, focus_frame, zoom_frame, zoom, zoom_label]
-    if axis_parts:
-        axis_label = Text(
-            "  ·  ".join(axis_parts),
-            font="Microsoft YaHei",
-            font_size=18,
-            color=INK,
-        )
-        _fit_width(axis_label, 2.75)
+    if axis_label is not None:
         axis_label.next_to(zoom, DOWN, buff=0.12)
         parts.append(axis_label)
     return parts
