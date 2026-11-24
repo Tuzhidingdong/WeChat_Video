@@ -197,8 +197,10 @@ the reusable production path; they are not per-video editing instructions.
 The Manim scene may finish a small number of frames before the audio-derived
 programme boundary because individual scene timings are quantized to video
 frames. Final assembly therefore converts to the target constant frame rate,
-clones the final scene frame only when needed, and then trims to the exact frame
-count calculated from the global PCM sample clock. The video-only encode and
+clones the final scene frame only when needed (with a strict six-frame maximum),
+and then trims to the exact frame count calculated from the global PCM sample
+clock. A larger scene deficit fails rather than being hidden by a long frozen
+tail. The video-only encode and
 the final stream-copy mux are both probed and must contain exactly that frame
 count. The mux does not use `-shortest`, which could discard a valid final
 video frame when the audio duration falls fractionally before the rounded video
