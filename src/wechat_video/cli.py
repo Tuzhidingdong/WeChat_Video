@@ -263,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
                 "video": str(run_dir / "final.mp4"),
                 "qa_report": str(run_dir / "qa_report.json"),
                 "channels_metadata": str(run_dir / "channels_draft.json"),
-                "upload_eligible": False,
+                "upload_eligible": _read_json(run_dir / "content_qa_report.json").get("upload_eligible") is True,
                 "automatic_upload": False,
                 "automatic_publication": False,
             }, ensure_ascii=False, indent=2))
