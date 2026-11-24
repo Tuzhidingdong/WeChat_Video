@@ -3342,14 +3342,69 @@ def test_creator_entry_dom_scan_comment_cannot_terminate_javascript_comment_earl
     assert "Class, id, data, aria, href and ancestor attributes" in expression
 
 
-def test_article_summary_run_is_blocked_until_extended_link_is_verified(tmp_path: Path) -> None:
+def _make_article_summary_upload_package(tmp_path: Path, *, eligible: bool = True):
+    from wechat_video.article_source import build_article_channels_metadata
+
     project_root = tmp_path
     run_dir = project_root / "outputs" / "article-summary"
     run_dir.mkdir(parents=True)
+    (run_dir / "final.mp4").write_bytes(b"v" * 150_000)
+    article = {
+        "article_id": "article-1",
+        "appmsgid": "appmsg-1",
+        "title": "已发表的文献精读文章",
+    }
+    summary = {
+        "article_id": "article-1",
+        "channels_title": "精读关键发现",
+        "core_thesis": "研究给出了有证据支持的关键发现。",
+    }
     (run_dir / "article_summary_manifest.json").write_text(
         json.dumps({"content_type": "article_summary", "article_id": "article-1"}),
         encoding="utf-8",
     )
+    (run_dir / "source_record.json").write_text(json.dumps(article), encoding="utf-8")
+    (run_dir / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    (run_dir / "qa_report.json").write_text(json.dumps({"overall_status": "PASS"}), encoding="utf-8")
+    content_qa = {
+        "upload_eligible": eligible,
+        "source_article_sha256_matched": True,
+        "all_claims_have_exact_source_excerpt": True,
+        "all_claims_referenced": True,
+        "all_visual_beats_have_narration": True,
+        "outro_cta_rendered": True,
+        "audio_timeline_validation": True,
+        "scene_layout_qa": "PASS",
+        "technical_qa": "PASS",
+    }
+    (run_dir / "content_qa_report.json").write_text(json.dumps(content_qa), encoding="utf-8")
+    metadata = build_article_channels_metadata(article, summary, run_dir.name)
+    (run_dir / "channels_draft.json").write_text(json.dumps(metadata), encoding="utf-8")
+    config = {
+        "account_name": "成核生长",
+        "title_min_chars": 6,
+        "title_max_chars": 16,
+        "description_max_chars": 1000,
+        "default_tags": [],
+    }
+    return project_root, run_dir, config
 
-    with pytest.raises(UploadBlockedError, match="extended-link control is verified"):
-        _validate_run_for_upload(project_root, run_dir, {})
+
+def test_article_summary_run_is_eligible_without_wechat_extended_link(tmp_path: Path) -> None:
+    project_root, run_dir, config = _make_article_summary_upload_package(tmp_path)
+
+    metadata, qa, approval = _validate_run_for_upload(project_root, run_dir, config)
+
+    assert qa["overall_status"] == "PASS"
+    assert metadata["source_article_id"] == "article-1"
+    assert metadata["source_cta_text"] == "更多详细解读见【成核生长】同名公众号"
+    assert metadata["external_article_link_used"] is False
+    assert "extended_link" not in metadata
+    assert approval["approval_type"] == "standing_user_draft_only_authorization"
+
+
+def test_article_summary_run_remains_blocked_when_content_qa_is_not_eligible(tmp_path: Path) -> None:
+    project_root, run_dir, config = _make_article_summary_upload_package(tmp_path, eligible=False)
+
+    with pytest.raises(UploadBlockedError, match="content QA is not eligible"):
+        _validate_run_for_upload(project_root, run_dir, config)
