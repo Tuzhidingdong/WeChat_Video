@@ -240,6 +240,26 @@ def test_missing_daily_sources_return_safe_skip_without_model_or_upload(tmp_path
     assert popularization["state"] == "SKIPPED_NO_APPROVED_TOPIC"
 
 
+def test_missing_planner_model_does_not_create_a_poisoned_daily_job(tmp_path: Path) -> None:
+    _config(tmp_path)
+    inbox = tmp_path / "runtime" / "inbox" / "literature_articles"
+    _article_package(
+        inbox,
+        published_at="2026-11-23T10:00:00+08:00",
+        article_id="article-without-model",
+    )
+
+    result = daily.run_daily_literature(tmp_path, published_date="2026-11-23")
+    job_path = (
+        tmp_path / "runtime" / "daily_pipelines" / "jobs"
+        / "2026-11-23" / "literature.json"
+    )
+
+    assert result["state"] == "FAILED"
+    assert "No OpenCode model is explicitly configured" in result["error"]
+    assert not job_path.exists()
+
+
 def test_job_record_prevents_automatic_repeat_after_side_effect(tmp_path: Path) -> None:
     path = tmp_path / "jobs" / "literature.json"
     record = daily._start_job(
