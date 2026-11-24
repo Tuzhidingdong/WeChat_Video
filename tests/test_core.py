@@ -170,6 +170,7 @@ def test_final_video_assembly_runs_video_audio_and_mux_as_separate_stages(
     )
     monkeypatch.setattr(media_module, "resolve_command", lambda name: f"fake-{name}")
     monkeypatch.setattr(media_module, "_cfr_flag", lambda _exe: ["-fps_mode", "cfr"])
+    monkeypatch.setattr(media_module, "_video_frame_count", lambda _path: 1800)
 
     config = {
         "preset_id": "test-preset",
@@ -202,6 +203,8 @@ def test_final_video_assembly_runs_video_audio_and_mux_as_separate_stages(
     mux_command = calls[2][1]
 
     assert "-vf" in video_command and "-af" not in video_command
+    video_filter = video_command[video_command.index("-vf") + 1]
+    assert "tpad=stop_mode=clone:stop=6,trim=end_frame=1800" in video_filter
     assert "libx264" in video_command
     assert video_command[video_command.index("-preset") + 1] == "medium"
     assert video_command[video_command.index("-crf") + 1] == "19"
@@ -212,13 +215,16 @@ def test_final_video_assembly_runs_video_audio_and_mux_as_separate_stages(
     assert audio_command[audio_command.index("-c:a") + 1] == "aac"
 
     assert "-c" in mux_command and mux_command[mux_command.index("-c") + 1] == "copy"
-    assert "-shortest" in mux_command
+    assert "-shortest" not in mux_command
     assert "-vf" not in mux_command and "-af" not in mux_command
     assert final.is_file() and final.stat().st_size == 2048
     assert report["assembly_mode"] == (
         "separate_video_encode_audio_normalize_then_stream_copy_mux"
     )
     assert report["loudnorm_pass"] == "single_pass_full_programme_audio_only_stage"
+    assert report["video_frame_validation"]["video_only_encoded_frames"] == 1800
+    assert report["video_frame_validation"]["final_mux_frames"] == 1800
+    assert report["video_frame_validation"]["scene_tail_frames_padded"] == 0
     assert [stage["stage"] for stage in report["stages"]] == [
         "video_encode",
         "audio_normalize",
