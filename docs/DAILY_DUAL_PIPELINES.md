@@ -60,7 +60,7 @@ The topic history is keyed by Fact Card ID. Once selected for a production attem
 
 The configured OpenCode executable runs non-interactively with `opencode run --agent daily-content-planner --file ...`. The project agent has all tool permissions denied and is instructed to use only the explicitly attached source files. No web search, arbitrary shell, project browsing, editing, or delegation is part of content planning. OpenCode returns a JSON object; the application validates it before rendering.
 
-The default model is the user's currently configured OpenCode model. An explicit model may be set in `configs/daily_pipelines.json`. The planner timeout and model choice are recorded in daily task reports.
+An explicit model ID is required in `configs/daily_pipelines.json` (`opencode.model`). A null/empty model blocks planning; the pipeline never silently inherits a potentially different machine-default model. The launcher prints the Agent role, model, project root and attachment count before invoking the planner. The planner timeout and model choice are recorded in daily task reports.
 
 ## Shared engine and upload
 
