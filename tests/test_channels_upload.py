@@ -3355,6 +3355,8 @@ def _make_article_summary_upload_package(tmp_path: Path, *, eligible: bool = Tru
         "title": "已发表的文献精读文章",
         "source_type": "published_wechat_article",
         "article_markdown_sha256": "hash-1",
+        "canonical_url": "https://mp.weixin.qq.com/s/article-1",
+        "canonical_url_verified": True,
     }
     summary = {
         "article_id": "article-1",
@@ -3401,8 +3403,9 @@ def test_article_summary_run_is_eligible_without_wechat_extended_link(tmp_path: 
     assert qa["overall_status"] == "PASS"
     assert metadata["source_article_id"] == "article-1"
     assert metadata["source_cta_text"] == "更多详细解读见【成核生长】同名公众号"
-    assert metadata["external_article_link_used"] is False
-    assert "extended_link" not in metadata
+    assert metadata["extended_link_required"] is True
+    assert metadata["extended_link"]["url"] == "https://mp.weixin.qq.com/s/article-1"
+    assert metadata["external_article_link_used"] is True
     assert approval["approval_type"] == "standing_user_draft_only_authorization"
 
 
