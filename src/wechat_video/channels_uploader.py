@@ -3612,7 +3612,7 @@ def _finalize_draft_verification(
     verification_history: list[Any],
     title: str,
 ) -> None:
-    """Commit DRAFT_SAVED only for exactly one unique new DraftListManager row."""
+    """Record the new draft row, but do not mark an article-linked job complete until link readback passes."""
     if len(verified) != 1:
         job["state"] = "UPLOAD_UNKNOWN"
         job["post_upload_snapshot"] = after
@@ -3630,7 +3630,6 @@ def _finalize_draft_verification(
             "Inspect the target account's 草稿箱 and use the manual-review command to record the result."
         )
 
-    job["state"] = "DRAFT_SAVED"
     job["post_upload_snapshot"] = after
     job["verified_draft"] = {
         "title": title,
@@ -3645,6 +3644,23 @@ def _finalize_draft_verification(
         "mobile_app_visibility": "not_verified_by_desktop_browser",
     }
     job["automatic_publication"] = False
+
+    link_check = job.get("extended_link_persistence") or {}
+    if job.get("extended_link_required") is True and link_check.get("state") != "PERSISTED_AND_READ_BACK":
+        job["state"] = "BLOCKED_LINK_NOT_PERSISTED"
+        job["blocking_reason"] = (
+            "The unpublished video draft row exists, but the required official-account article link "
+            "has not been verified after reopening the draft editor."
+        )
+        job["extended_link_persistence"] = {
+            **link_check,
+            "readback_verified": False,
+            "required_state": "PERSISTED_AND_READ_BACK",
+        }
+        _save_job(job_path, job)
+        return
+
+    job["state"] = "DRAFT_SAVED"
     _save_job(job_path, job)
 
 
@@ -3665,6 +3681,17 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
         "job_id": job_id,
         "source_run_id": source_run_id,
         "upload_attempt": upload_attempt,
+        "content_type": str(metadata.get("content_type") or "science_popularization"),
+        "extended_link_required": metadata.get("extended_link_required") is True,
+        "extended_link_persistence": (
+            {
+                "state": "NOT_ATTEMPTED",
+                "readback_verified": False,
+                "required_state": "PERSISTED_AND_READ_BACK",
+            }
+            if metadata.get("extended_link_required") is True
+            else {"state": "NOT_REQUIRED", "readback_verified": True}
+        ),
         "state": "CREATED",
         "title": metadata["title"],
         "description": metadata["description"],
