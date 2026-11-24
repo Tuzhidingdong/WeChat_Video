@@ -92,7 +92,7 @@ Supported beat kinds:
 
 Three consecutive beats may not use the same visual type. Numeric values in stat_value must occur in the article source text. Quoted text must exactly match the article after whitespace normalization.
 
-The spoken script is constrained to 150–360 Chinese characters before TTS. The actual measured audio must be 45–75 seconds. It is never sped up or time-stretched to satisfy the limit.
+The source-grounded script remains 5–8 speech units, with every claim retained in the evidence map. For this one-minute editorial format, the calibrated planning target is **222–235 CJK characters**, with the final programme measured at **58–62 seconds**. The planning estimate is checked before TTS; the actual PCM sample-clock duration is checked after synthesis and before scene rendering. A mismatch stops the run and asks for a revised content plan. The engine does not time-stretch audio, silently remove claims, or repeatedly accelerate a completed narration.
 
 ## 4. Local commands
 
@@ -102,7 +102,7 @@ Install the optional provider once into the project .venv:
 
     .venv\Scripts\python.exe -m pip install -e ".[article-summary-tts]"
 
-The selected provider, voice, rate, pitch, volume and no-fallback policy are recorded in `configs/article_summary_tts.json`. The default is Edge-TTS at the same neutral settings used in the blind test (`rate=+0%`, `volume=+0%`, `pitch=+0Hz`). There are no automatic network retries and no silent fallback to MeloTTS. A provider/network failure stops the run with an explicit error.
+The selected provider, voice, rate, pitch, volume and no-fallback policy are recorded in `configs/article_summary_tts.json`. The current calibrated default is Edge-TTS at `rate=+5%`, `volume=+0%`, and `pitch=+0Hz`. Manual rate adjustment is bounded at +8%; the engine does not automatically change rate to force a duration pass. The 58–62 second release gate uses the normalized PCM sample clock, not estimated text length. There are no automatic network retries and no silent fallback to MeloTTS. A provider/network failure stops the run with an explicit error.
 
 MeloTTS remains available only as a deliberate local alternative by changing `default_provider` to `melo_onnx`; that choice requires the existing Chinese ONNX model and sherpa-onnx runtime. Do not set an automatic fallback provider.
 
@@ -166,12 +166,43 @@ the reusable production path; they are not per-video editing instructions.
 - Captions are grouped into short phrases (normally no more than 12 CJK
   characters per cue), split at punctuation or a 2.2-second reading window, and
   constrained to the corresponding measured speech interval.
+- Any cue containing fewer than five Han characters is merged with the nearest
+  adjacent cue in the same speech unit. A fragment is never merged across a
+  speech-unit boundary or assigned invented timestamps.
+- Trailing Chinese/Western commas and full stops are removed from the visual
+  caption only. Original spoken text, punctuation restoration and WordBoundary
+  timing remain unchanged in the evidence/timing records.
+- The mobile caption profile defaults to charcoal `#222222`, 1.18× the
+  configured CJK base font size, and zero outline/shadow on the warm-paper
+  background. Font size, colour, threshold and decoration remain configurable.
 - The default inter-unit pause is 500 ms. Explicit pauses shorter than 450 ms are
   raised to the 450 ms comprehension minimum and retained in the rhythm report as
   requested versus effective values.
 - Speech WAV edge treatment is asymmetric (2 ms onset / 10 ms release) to avoid
   unnecessarily attenuating the first consonant. Editorial SFX are delayed from
   the speech onset and remain within their corresponding speech interval.
+
+### Mobile-first figure, cover and sparse-page layouts
+
+- The cover does not repeat the full article title as a tiny kicker above the
+  main headline. Any optional kicker must add distinct information rather than
+  duplicate the title, source or brand.
+- Sparse `hook` and `takeaway` beats use a large, centered statement-card
+  template so the visual mass remains balanced on a 9:16 phone screen.
+- Four-step mechanism beats use a 2×2 grid. Two- and three-step mechanisms use
+  responsive layouts with the same sequence order. The existing timed highlight
+  advances in the original speech order; changing geometry never changes event
+  timing.
+- Figure display crops are declared per image using normalized
+  `display_crop_regions`. A crop applies only to the rendered display copy;
+  the original locally exported image and its checksum remain untouched.
+  `focus_regions` are measured relative to the displayed crop. The crop plan
+  must preserve axes, legends, units and data marks; the renderer must not
+  guess a crop from a caption or blindly trim the image bottom.
+- Optional `axis_labels_zh` supplies concise `x` and/or `y` labels per
+  selected image. These labels must be grounded in the figure and article
+  evidence. The engine renders supplied labels but never invents scientific
+  variable meanings or hardcodes a project-specific translation.
 
 ### Visual rhythm, safe areas and opening/ending
 
@@ -206,6 +237,28 @@ count. The mux does not use `-shortest`, which could discard a valid final
 video frame when the audio duration falls fractionally before the rounded video
 frame boundary. QA continues to require an exact frame-count match; no tolerance
 or duration threshold is relaxed.
+
+### Duration budget and plain-language narration
+
+- The configured one-minute profile records its target (60 seconds), release
+  interval (58–62 seconds), calibrated CJK character range (222–235), and
+  expected spoken-character rate in `configs/article_summary_tts.json`.
+  These are planning estimates only; measured PCM duration remains authoritative.
+- Script-length and estimated-duration preflight happen before Edge-TTS is
+  called. After synthesis, the measured complete programme must be 58–62
+  seconds. An out-of-range result stops before Manim rendering and writes
+  `duration_budget_report.json`; there is no silent retry or speed-up loop.
+- To improve audience comprehension, the content plan may introduce a
+  plain-language gloss before or alongside a technical term. This is a
+  presentation transformation, not permission to change scientific meaning.
+  Quantitative values, units, experimental conditions, mechanisms, comparisons,
+  uncertainty and limitations must remain traceable to the existing claims.
+  When a concept cannot be simplified without changing its meaning, retain the
+  term and explain it briefly instead of substituting an inaccurate analogy.
+- Length is reduced by removing repetition and rewriting dense syntax, not by
+  dropping evidence-backed results. If the target cannot be met without losing
+  a material claim, the plan must report that conflict rather than force a
+  one-minute cut.
 
 ### Automated delivery artifacts
 
