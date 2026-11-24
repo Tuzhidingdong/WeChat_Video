@@ -157,6 +157,22 @@ def test_published_local_date_converts_utc_to_shanghai_calendar_day() -> None:
     ) == date(2026, 11, 24)
 
 
+def test_asia_shanghai_timezone_falls_back_when_windows_has_no_iana_database(monkeypatch) -> None:
+    def missing_zoneinfo(name: str):
+        raise daily.ZoneInfoNotFoundError(name)
+
+    monkeypatch.setattr(daily, "ZoneInfo", missing_zoneinfo)
+
+    zone = daily._configured_timezone("Asia/Shanghai")
+    assert zone.utcoffset(None).total_seconds() == 8 * 60 * 60
+    assert daily._published_local_date(
+        "2026-11-23T17:00:00Z", "Asia/Shanghai"
+    ) == date(2026, 11, 24)
+
+    with pytest.raises(daily.DailyPipelineError, match="Invalid configured timezone"):
+        daily._configured_timezone("America/New_York")
+
+
 def test_extract_model_usage_sums_opencode_step_finish_telemetry() -> None:
     events = [
         {
