@@ -5,7 +5,10 @@ from pathlib import Path
 
 import numpy as np
 
-from wechat_video.media import _speech_region_mask
+from wechat_video.media import (
+    _frame_completion_filter,
+    _speech_region_mask,
+)
 from wechat_video.article_summary import _audio_duration_breakdown
 from wechat_video.article_summary import _narration_rhythm_report
 from wechat_video.subtitles import write_chinese_subtitles
@@ -42,6 +45,13 @@ def _unit(unit_id: str, word_boundaries: list[dict] | None = None) -> dict:
         "subtitle_alignment_method": "edge_word_boundary" if word_boundaries else "speech_unit_envelope",
         "word_boundary_status": "word_boundaries_verified" if word_boundaries else "unavailable",
     }
+
+
+def test_video_frame_completion_pads_tail_before_strict_frame_budget_trim() -> None:
+    filters = _frame_completion_filter(2188)
+
+    assert filters == "tpad=stop_mode=clone:stop=2188,trim=end_frame=2188"
+    assert filters.index("tpad=") < filters.index("trim=end_frame=")
 
 
 def test_timeline_has_a_measured_outro_and_a_single_sample_clock(tmp_path: Path) -> None:
