@@ -67,9 +67,31 @@ def _normalized_region(region: dict[str, Any]) -> tuple[float, float, float, flo
 
 
 def _image_objects(item: dict[str, Any]) -> list[Any]:
-    """Show the whole source figure and, when specified, a true crop beside it."""
+    """Render an evidence-preserving crop and optional focus zoom from local source imagery."""
     path = Path(str(item["path"]))
-    picture = ImageMobject(str(path))
+    with Image.open(path) as source:
+        display_image = source.convert("RGB")
+        display_region = item.get("display_crop_region")
+        if display_region:
+            x, y, width, height = _normalized_region(display_region)
+            pixel_width, pixel_height = display_image.size
+            left = max(0, min(pixel_width - 1, round(x * pixel_width)))
+            top = max(0, min(pixel_height - 1, round(y * pixel_height)))
+            right = max(left + 1, min(pixel_width, round((x + width) * pixel_width)))
+            bottom = max(top + 1, min(pixel_height, round((y + height) * pixel_height)))
+            display_image = display_image.crop((left, top, right, bottom))
+        display_array = np.asarray(display_image).copy()
+        picture = ImageMobject(display_array)
+        region = item.get("focus_region")
+        if region:
+            x, y, width, height = _normalized_region(region)
+            pixel_width, pixel_height = display_image.size
+            left = max(0, min(pixel_width - 1, round(x * pixel_width)))
+            top = max(0, min(pixel_height - 1, round(y * pixel_height)))
+            right = max(left + 1, min(pixel_width, round((x + width) * pixel_width)))
+            bottom = max(top + 1, min(pixel_height, round((y + height) * pixel_height)))
+            crop = np.asarray(display_image.crop((left, top, right, bottom))).copy()
+
     region = item.get("focus_region")
     if not region:
         _fit_box(picture, 7.0, 4.85)
@@ -86,14 +108,6 @@ def _image_objects(item: dict[str, Any]) -> list[Any]:
         return [frame, picture]
 
     x, y, width, height = _normalized_region(region)
-    with Image.open(path) as source:
-        pixel_width, pixel_height = source.size
-        left = max(0, min(pixel_width - 1, round(x * pixel_width)))
-        top = max(0, min(pixel_height - 1, round(y * pixel_height)))
-        right = max(left + 1, min(pixel_width, round((x + width) * pixel_width)))
-        bottom = max(top + 1, min(pixel_height, round((y + height) * pixel_height)))
-        crop = np.asarray(source.convert("RGB").crop((left, top, right, bottom)))
-
     _fit_box(picture, 4.15, 4.7)
     picture.move_to(LEFT * 1.55 + UP * 0.25)
     frame = RoundedRectangle(
@@ -139,7 +153,23 @@ def _image_objects(item: dict[str, Any]) -> list[Any]:
     )
     _fit_width(zoom_label, 2.8)
     zoom_label.next_to(zoom, UP, buff=0.16)
-    return [frame, picture, focus_frame, zoom_frame, zoom, zoom_label]
+    axis_labels = item.get("axis_labels_zh") or {}
+    if not isinstance(axis_labels, dict):
+        raise RuntimeError("axis_labels_zh must be an object with optional x and y labels.")
+    axis_parts = []
+    if str(axis_labels.get("x") or "").strip():
+        axis_parts.append(f"横轴：{str(axis_labels['x']).strip()}")
+    if str(axis_labels.get("y") or "").strip():
+        axis_parts.append(f"纵轴：{str(axis_labels['y']).strip()}")
+    axis_label = Text(
+        "  ·  ".join(axis_parts),
+        font="Microsoft YaHei",
+        font_size=18,
+        color=INK,
+    )
+    _fit_width(axis_label, 2.75)
+    axis_label.next_to(zoom, DOWN, buff=0.12)
+    return [frame, picture, focus_frame, zoom_frame, zoom, zoom_label, axis_label]
 
 
 class ArticleSummaryScene(Scene):
@@ -159,10 +189,6 @@ class ArticleSummaryScene(Scene):
         self.camera.background_color = PAPER
         brand = Text("成核生长  /  精读一分钟", font=font, font_size=28, color=INK)
         brand.to_edge(UP, buff=0.58).to_edge(LEFT, buff=0.62)
-        paper_title = _fit_width(
-            Text(article_title, font=font, font_size=27, color=MUTED),
-            7.35,
-        ).move_to(UP * 4.95)
         title_text = _fit_box(
             Text(
                 str(spec.get("cover_title") or article_title),
@@ -196,7 +222,7 @@ class ArticleSummaryScene(Scene):
             7.25,
             0.95,
         ).move_to(DOWN * 2.65)
-        cover = Group(brand, paper_title, title_text, subtitle_text, accent, source_text)
+        cover = Group(brand, title_text, subtitle_text, accent, source_text)
 
         transition_ms = max(100, min(350, int(spec.get("transition_duration_ms", 220))))
         self.play(FadeIn(cover, shift=UP * 0.12), run_time=0.30)
@@ -420,17 +446,25 @@ class ArticleSummaryScene(Scene):
             steps = beat["steps"]
             if not 2 <= len(steps) <= 4:
                 raise RuntimeError("Mechanism scenes require two to four steps.")
-            card_width = 1.72
-            card_height = 3.5
             count_steps = len(steps)
-            gap = 0.17
-            total_width = count_steps * card_width + (count_steps - 1) * gap
-            start_x = -total_width / 2 + card_width / 2
+            card_width = 3.42
+            card_height = 3.45 if count_steps == 2 else 2.12
+            column_gap = 0.22
+            if count_steps == 2:
+                centers = [(-1.82, 0.15), (1.82, 0.15)]
+            elif count_steps == 3:
+                centers = [(-1.82, 0.92), (1.82, 0.92), (0.0, -1.38)]
+            else:
+                # Four-step mechanisms use a phone-readable 2x2 grid.
+                centers = [
+                    (-1.82, 0.96), (1.82, 0.96),
+                    (-1.82, -1.42), (1.82, -1.42),
+                ]
             cards = []
             step_cards: list[Any] = []
             step_numbers: list[Any] = []
             for node_index, step in enumerate(steps):
-                x = start_x + node_index * (card_width + gap)
+                x, y = centers[node_index]
                 card = RoundedRectangle(
                     width=card_width,
                     height=card_height,
@@ -439,45 +473,32 @@ class ArticleSummaryScene(Scene):
                     stroke_width=2,
                     fill_color=CARD,
                     fill_opacity=1,
-                ).move_to(RIGHT * x + UP * 0.20)
+                ).move_to(RIGHT * x + UP * y)
                 number = Text(
                     f"{node_index + 1:02d}",
                     font=font,
-                    font_size=25,
+                    font_size=27,
                     color=MUTED,
-                ).move_to(card.get_center() + UP * 1.15)
+                ).move_to(card.get_center() + UP * (card_height * 0.28))
                 label = _fit_box(
-                    Text(str(step), font=font, font_size=25, color=INK, line_spacing=0.9),
-                    1.43,
-                    1.8,
-                ).move_to(card.get_center() + DOWN * 0.2)
+                    Text(str(step), font=font, font_size=34, color=INK, line_spacing=0.92),
+                    2.92,
+                    card_height * 0.62,
+                ).move_to(card.get_center() + DOWN * (card_height * 0.08))
                 step_cards.append(card)
                 step_numbers.append(number)
                 cards.extend([card, number, label])
-                if node_index < count_steps - 1:
-                    start_x_arrow = x + card_width / 2 + 0.02
-                    end_x_arrow = start_x_arrow + gap - 0.04
-                    cards.append(
-                        Arrow(
-                            RIGHT * start_x_arrow + UP * 0.20,
-                            RIGHT * end_x_arrow + UP * 0.20,
-                            buff=0,
-                            color=MUTED,
-                            stroke_width=2,
-                            max_tip_length_to_length_ratio=0.3,
-                        )
-                    )
             choreography["step_cards"] = step_cards
             choreography["step_numbers"] = step_numbers
             parts.extend(cards)
             if body:
                 detail = _fit_box(
-                    Text(body, font=font, font_size=25, color=MUTED),
+                    Text(body, font=font, font_size=23, color=MUTED),
                     7.1,
-                    0.75,
+                    0.36,
                 )
-                # Keep explanatory text above the dedicated dynamic-subtitle band.
-                detail.move_to(DOWN * 2.25)
+                # Explanatory line stays above the portrait subtitle safe band.
+                detail.move_to(DOWN * 2.82)
                 parts.append(detail)
 
         elif kind == "quote":
@@ -495,6 +516,26 @@ class ArticleSummaryScene(Scene):
             )
             quote_group.move_to(DOWN * 0.1)
             parts.append(quote_group)
+
+        elif kind in {"hook", "takeaway"}:
+            role = "核心问题" if kind == "hook" else "一句话结论"
+            statement_card = RoundedRectangle(
+                width=7.15,
+                height=4.75,
+                corner_radius=0.20,
+                stroke_color=PALE,
+                stroke_width=2,
+                fill_color=CARD,
+                fill_opacity=1,
+            ).move_to(DOWN * 0.10)
+            statement_role = Text(role, font=font, font_size=28, color=ACCENT)
+            statement_role.move_to(statement_card.get_top() + DOWN * 0.68)
+            statement = _fit_box(
+                Text(body, font=font, font_size=60, color=INK, line_spacing=1.08),
+                6.25,
+                3.25,
+            ).move_to(statement_card.get_center() + DOWN * 0.30)
+            parts.extend([statement_card, statement_role, statement])
 
         else:
             detail = _fit_box(
