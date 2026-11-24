@@ -202,6 +202,58 @@ def _discover_literature_packages(
     return candidates, rejected
 
 
+def _extract_model_usage(stdout: str) -> dict[str, Any]:
+    session_ids: set[str] = set()
+    step_count = 0
+    totals = {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+    }
+    cost_total = 0.0
+    cost_available = False
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        session_id = str(event.get("sessionID") or "").strip()
+        if session_id:
+            session_ids.add(session_id)
+        if event.get("type") != "step_finish":
+            continue
+        part = event.get("part") if isinstance(event.get("part"), dict) else {}
+        tokens = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
+        cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+        totals["input"] += int(tokens.get("input") or 0)
+        totals["output"] += int(tokens.get("output") or 0)
+        totals["reasoning"] += int(tokens.get("reasoning") or 0)
+        totals["cache_read"] += int(cache.get("read") or tokens.get("cache_read") or 0)
+        totals["cache_write"] += int(cache.get("write") or tokens.get("cache_write") or 0)
+        if part.get("cost") is not None:
+            try:
+                cost_total += float(part["cost"])
+                cost_available = True
+            except (TypeError, ValueError):
+                pass
+        step_count += 1
+    token_total = sum(totals.values())
+    return {
+        "available": step_count > 0 and token_total > 0,
+        "session_ids": sorted(session_ids),
+        "step_count": step_count,
+        "tokens": {**totals, "total": token_total},
+        "cost": round(cost_total, 8) if cost_available else None,
+        "cost_currency": "USD" if cost_available else None,
+        "cost_available": cost_available,
+        "source": "OpenCode --format json step_finish events",
+    }
+
+
 def _extract_model_text(stdout: str) -> str:
     """Accept plain JSON or OpenCode JSONL text events; reject empty/ambiguous output."""
     chunks: list[str] = []
@@ -312,6 +364,13 @@ def _run_content_planner(
         raise DailyPipelineError(f"Planner JSON is invalid: {exc}") from exc
     if not isinstance(result, dict):
         raise DailyPipelineError("Planner must return a JSON object.")
+    result["_planner_run_metadata"] = {
+        "agent": agent,
+        "model": model,
+        "project_root": str(project_root),
+        "attachments": [str(path.resolve()) for path in attachments],
+        "usage": _extract_model_usage(completed.stdout),
+    }
     return result
 
 
@@ -544,7 +603,7 @@ def _record_daily_report(
             for key in (
                 "state", "source_id", "selected_title", "run_dir", "video_path",
                 "video_sha256", "upload_job_id", "account_name", "verified_draft",
-                "error", "reason", "candidate_count", "approved_card_count",
+                "error", "reason", "candidate_count", "approved_card_count", "planner_metadata",
             )
             if key in value
         }
@@ -651,6 +710,7 @@ def _run_literature_locked(
         summary_path=str(summary_path),
         summary_or_script_sha256=_sha256(summary_path),
         spoken_cjk_characters=count,
+        planner_metadata=summary.get("_planner_run_metadata"),
     )
     from .article_summary import run_article_summary
     run_dir = run_article_summary(
@@ -841,7 +901,9 @@ def _run_popularization_locked(
         job_path, record, "CONTENT_READY",
         script_path=str(script_path),
         summary_or_script_sha256=_sha256(script_path),
+        planner_metadata=script.get("_planner_run_metadata"),
     )
+    _atomic_json(planner_dir / "planner_run_report.json", script["_planner_run_metadata"])
     run_dir = run_slice_a(
         project_root,
         card_path=Path(selected["path"]),
