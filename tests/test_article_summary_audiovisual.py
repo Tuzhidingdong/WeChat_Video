@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import wave
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import numpy as np
 from wechat_video.media import (
     _frame_completion_filter,
     _speech_region_mask,
+    assemble_final_video,
 )
 from wechat_video.article_summary import _audio_duration_breakdown
 from wechat_video.article_summary import _narration_rhythm_report
@@ -54,6 +56,88 @@ def test_video_frame_completion_pads_tail_before_strict_frame_budget_trim() -> N
     assert filters.index("tpad=") < filters.index("trim=end_frame=")
 
 
+def test_final_video_assembly_pads_short_scene_and_preserves_exact_muxed_frames(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from wechat_video import media
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    scene_video = run_dir / "scene.mp4"
+    audio_wav = run_dir / "final_mix.wav"
+    captions_ass = run_dir / "captions.ass"
+    output_mp4 = run_dir / "final.mp4"
+    for path in (scene_video, audio_wav, captions_ass):
+        path.write_bytes(b"fixture")
+
+    observed_commands: list[tuple[str, list[str]]] = []
+    frame_counts = {
+        "scene.mp4": 2184,
+        "video_only.mp4": 2188,
+        "final.mp4": 2188,
+    }
+
+    def fake_probe(path: Path, *, count_frames: bool = False) -> dict:
+        assert count_frames is True
+        return {
+            "streams": [{
+                "codec_type": "video",
+                "nb_read_frames": str(frame_counts[Path(path).name]),
+            }]
+        }
+
+    def fake_ffmpeg_stage(args: list[str], **kwargs) -> subprocess.CompletedProcess:
+        stage_name = str(kwargs["stage_name"])
+        output = Path(str(args[-1]))
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"x" * 2048)
+        observed_commands.append((stage_name, list(args)))
+        return subprocess.CompletedProcess(args, 0, "progress=continue", "")
+
+    monkeypatch.setattr(media, "resolve_command", lambda name: name)
+    monkeypatch.setattr(media, "_cfr_flag", lambda _exe: ["-fps_mode", "cfr"])
+    monkeypatch.setattr(media, "tool_env", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(media, "probe_media", fake_probe)
+    monkeypatch.setattr(
+        media, "_loudnorm_measurement",
+        lambda *_args, **_kwargs: {"measured_I": "-20", "measured_TP": "-2"},
+    )
+    monkeypatch.setattr(media, "_run_ffmpeg_stage", fake_ffmpeg_stage)
+
+    report = assemble_final_video(
+        scene_video,
+        audio_wav,
+        captions_ass,
+        output_mp4,
+        run_dir,
+        2188,
+        config={
+            "preset_id": "test",
+            "final_programme": {
+                "integrated_lufs": -16.0,
+                "true_peak_dbtp": -1.5,
+                "codec": "aac",
+                "bitrate_kbps": 192,
+                "sample_rate": 44_100,
+                "channels": 1,
+            },
+        },
+    )
+
+    assert report["video_frame_validation"] == {
+        "scene_input_frames": 2184,
+        "video_only_encoded_frames": 2188,
+        "final_mux_frames": 2188,
+        "expected_frames": 2188,
+        "scene_tail_frames_padded": 4,
+        "status": "PASS",
+        "policy": "clone_last_scene_frame_if_needed_then_strictly_trim_to_audio_frame_budget",
+    }
+    video_command = next(args for name, args in observed_commands if name == "video_encode")
+    video_filter = video_command[video_command.index("-vf") + 1]
+    assert "tpad=stop_mode=clone:stop=2188,trim=end_frame=2188" in video_filter
+    mux_command = next(args for name, args in observed_commands if name == "final_mux")
+    assert "-shortest" not in mux_command
 def test_timeline_has_a_measured_outro_and_a_single_sample_clock(tmp_path: Path) -> None:
     audio_dir = tmp_path / "audio"
     audio_dir.mkdir()
