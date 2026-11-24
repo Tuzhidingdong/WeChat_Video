@@ -14,7 +14,12 @@ from wechat_video.media import (
 )
 from wechat_video.article_summary import _audio_duration_breakdown
 from wechat_video.article_summary import _narration_rhythm_report
-from wechat_video.subtitles import write_chinese_subtitles
+from wechat_video.subtitles import (
+    _han_character_count,
+    _merge_short_caption_groups,
+    _strip_trailing_caption_punctuation,
+    write_chinese_subtitles,
+)
 from wechat_video.timeline import (
     _fade_pcm_edges,
     build_audio_timeline,
@@ -262,12 +267,31 @@ def test_word_boundary_subtitles_are_phrase_timed_and_have_no_filled_black_box(t
     assert len(timeline["subtitle_cues"]) == count
     assert all(item["alignment_method"] == "edge_word_boundary" for item in timeline["subtitle_cues"])
     assert all(1000 <= item["start_ms"] < item["end_ms"] <= 4000 for item in timeline["subtitle_cues"])
-    assert "研究团队" in srt and "明显变化。" in srt
-    assert "Style: ZH" in ass
-    assert ",1,2,1,2," in ass or ",1,2,1," in ass
+    assert "研究团队" in srt and "明显变化" in srt
+    assert "明显变化。" not in srt
+    assert "Style: ZH,Microsoft YaHei,50," in ass
+    assert "&H00222222" in ass
     assert "BorderStyle" in ass
     assert "Dialogue: 2," in ass
+    assert timeline["subtitle_alignment"]["outline"] == 0
+    assert timeline["subtitle_alignment"]["shadow"] == 0
 
+
+
+def test_short_cjk_caption_fragments_merge_and_terminal_punctuation_is_display_only() -> None:
+    groups = [
+        {"unit_id": "U01", "text": "所以，", "start_ms": 1000, "end_ms": 1250, "alignment_method": "edge_word_boundary"},
+        {"unit_id": "U01", "text": "缺陷，", "start_ms": 1250, "end_ms": 1500, "alignment_method": "edge_word_boundary"},
+        {"unit_id": "U01", "text": "可以固定位置。", "start_ms": 1500, "end_ms": 2200, "alignment_method": "edge_word_boundary"},
+    ]
+
+    merged = _merge_short_caption_groups(groups)
+
+    assert len(merged) == 1
+    assert merged[0]["text"] == "所以，缺陷，可以固定位置。"
+    assert _han_character_count(merged[0]["text"]) >= 5
+    assert _strip_trailing_caption_punctuation(merged[0]["text"]) == "所以，缺陷，可以固定位置"
+    assert groups[0]["text"] == "所以，"
 
 
 def test_narration_rhythm_report_counts_cjk_and_preserves_authored_pause_values() -> None:
@@ -349,7 +373,9 @@ def test_word_boundary_subtitles_restore_authored_punctuation_without_changing_t
 
     srt = (tmp_path / "restored.srt").read_text(encoding="utf-8-sig")
     assert "研究团队，观察到关键界面" in srt
-    assert "明显变化。" in srt
+    assert "明显变化" in srt
+    assert "明显变化。" not in srt
+    assert timeline["subtitle_cues"][0]["source_text"].endswith("。")
     assert timeline["speech_units"][0]["word_boundaries"] == original_boundaries
 
 
