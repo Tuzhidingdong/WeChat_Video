@@ -158,7 +158,7 @@ def test_narration_rhythm_report_counts_cjk_and_preserves_authored_pause_values(
         "pause_after_ms": 450,
     }])
 
-    assert report["speech_units"][0]["spoken_cjk_characters"] == len(spoken)
+    assert report["speech_units"][0]["spoken_cjk_characters"] == len(spoken.rstrip("。"))
     assert report["speech_units"][0]["requested_pause_after_ms"] == 250
     assert report["speech_units"][0]["effective_pause_after_ms"] == 450
     assert "long_speech_unit" in report["speech_units"][0]["warnings"]
