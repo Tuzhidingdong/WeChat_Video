@@ -22,6 +22,7 @@ from typing import Any
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
+from .article_source import build_article_channels_metadata
 from .channels_metadata import build_channels_metadata_for_run_dir, validate_channels_metadata
 from .topic_approval import TopicApprovalError, verify_fact_card_approval
 
@@ -3427,12 +3428,6 @@ def _validate_run_for_upload(
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     project_root = project_root.resolve()
     run_dir = run_dir.resolve()
-    if (run_dir / "article_summary_manifest.json").is_file():
-        raise UploadBlockedError(
-            "Article-summary uploads are blocked until the actual WeChat Channels "
-            "extended-link control is verified and the saved article link is read back. "
-            "This run is local-preview-only; no upload was attempted."
-        )
     if not run_dir.is_relative_to((project_root / "outputs").resolve()):
         raise UploadBlockedError("Upload source must be a generated run under project outputs/.")
     final_mp4 = run_dir / "final.mp4"
@@ -3443,21 +3438,99 @@ def _validate_run_for_upload(
         raise UploadBlockedError(
             f"Upload is blocked unless qa_report.json is strict PASS; got {qa.get('overall_status')!r}."
         )
+
+    # Literature-reading videos use their own source-excerpt and article-identity
+    # contract. The unsupported WeChat extended-link feature is intentionally not
+    # part of this path; the original account name is rendered in the final outro.
+    manifest_path = run_dir / "article_summary_manifest.json"
+    if manifest_path.is_file():
+        manifest = _read_json(manifest_path)
+        source_path = run_dir / "source_record.json"
+        summary_path = run_dir / "summary.json"
+        content_qa_path = run_dir / "content_qa_report.json"
+        for path in (source_path, summary_path, content_qa_path):
+            if not path.is_file():
+                raise UploadBlockedError(
+                    f"Literature upload package is incomplete; missing {path.name}."
+                )
+        source = _read_json(source_path)
+        summary = _read_json(summary_path)
+        content_qa = _read_json(content_qa_path)
+        if str(manifest.get("article_id") or "") != str(source.get("article_id") or ""):
+            raise UploadBlockedError("Article manifest and source record identify different articles.")
+        if str(summary.get("article_id") or "") != str(source.get("article_id") or ""):
+            raise UploadBlockedError("Article summary is not bound to the source article ID.")
+        required_content_checks = {
+            "source_article_sha256_matched": True,
+            "all_claims_have_exact_source_excerpt": True,
+            "all_claims_referenced": True,
+            "all_visual_beats_have_narration": True,
+            "outro_cta_rendered": True,
+            "audio_timeline_validation": True,
+            "scene_layout_qa": "PASS",
+            "technical_qa": "PASS",
+        }
+        failed = [
+            key for key, expected in required_content_checks.items()
+            if content_qa.get(key) != expected
+        ]
+        if content_qa.get("upload_eligible") is not True or failed:
+            raise UploadBlockedError(
+                "Literature content QA is not eligible for draft upload; failed checks: "
+                + (", ".join(failed) if failed else "upload_eligible is not true")
+            )
+        if qa.get("overall_status") != "PASS":
+            raise UploadBlockedError("Literature video technical QA is not strict PASS.")
+        try:
+            expected_metadata = build_article_channels_metadata(
+                source,
+                summary,
+                run_dir.name,
+            )
+        except ValueError as exc:
+            raise UploadBlockedError(f"Article-derived Channels metadata is invalid: {exc}") from exc
+        metadata_path = run_dir / "channels_draft.json"
+        if not metadata_path.is_file():
+            raise UploadBlockedError("Literature package is missing channels_draft.json.")
+        metadata = _read_json(metadata_path)
+        if metadata != expected_metadata:
+            raise UploadBlockedError(
+                "channels_draft.json differs from the deterministic source-article metadata."
+            )
+        validate_channels_metadata(
+            metadata,
+            min_title_chars=int(config.get("title_min_chars", 6)),
+            max_title_chars=int(config.get("title_max_chars", 16)),
+            max_description_chars=int(config.get("description_max_chars", 1000)),
+        )
+        if metadata.get("job_id") != run_dir.name:
+            raise UploadBlockedError("Literature draft metadata job_id does not match its output directory.")
+        if metadata.get("account_name") != config.get("account_name"):
+            raise UploadBlockedError("Literature draft metadata account does not match configured target account.")
+        return metadata, qa, {
+            "approval_type": "standing_user_draft_only_authorization",
+            "approved_by": None,
+            "approved_at": None,
+            "channels_title": None,
+        }
+
+    # Fact Card / science-popularization path retains the existing governed
+    # Fact Card validation and metadata derivation.
     card_path = run_dir / "fact_card.json"
     source_path = run_dir / "source_record.json"
+    script_path = run_dir / "script.json"
+    for path in (card_path, source_path, script_path):
+        if not path.is_file():
+            raise UploadBlockedError(f"Science-popularization package is incomplete; missing {path.name}.")
     card = _read_json(card_path)
-    script = _read_json(run_dir / "script.json")
-    # The user has granted standing authorization for draft-only uploads.
-    # This is not a scientific approval and does not authorize publication.
+    source_doc = _read_json(source_path)
+    script = _read_json(script_path)
     approval: dict[str, Any] = {
         "approval_type": "standing_user_draft_only_authorization",
         "approved_by": None,
         "approved_at": None,
         "channels_title": None,
     }
-    # A valid one-time topic approval may still supply canonical metadata for
-    # older outputs, but neither topic nor per-run approval is required to
-    # create an unpublished review draft under the user's standing instruction.
     try:
         topic_approval = verify_fact_card_approval(project_root, card_path, source_path)
     except TopicApprovalError:
