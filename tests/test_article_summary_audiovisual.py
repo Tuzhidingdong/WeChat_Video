@@ -429,7 +429,7 @@ def test_one_minute_script_budget_is_checked_before_tts() -> None:
             "minimum_programme_seconds": 58,
             "maximum_programme_seconds": 62,
             "target_cjk_characters": {"minimum": 222, "maximum": 235},
-            "expected_cjk_characters_per_second_at_default_rate": 4.2,
+            "expected_cjk_characters_per_second_at_reference_rate": 4.2,
             "rate_adjustment": {"reference_rate_percent": 5, "maximum_percent": 8},
         },
     }
