@@ -8,6 +8,7 @@
     "executable": "opencode",
     "agent": "daily-content-planner",
     "model": null,
+    "require_explicit_model": true,
     "timeout_seconds": 1800
   },
   "literature": {
