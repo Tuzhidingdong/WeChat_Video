@@ -605,13 +605,30 @@ def run_article_summary(
     )
 
     claim_ids = {claim["claim_id"] for claim in summary["claims"]}
+    cta_rendered = any(
+        item.get("beat_id") == "outro_cta" and item.get("status") == "PASS"
+        for item in scene_layout_report.get("checks", [])
+    )
+    all_claims_referenced = claim_ids.issubset({
+        claim_id for unit in units for claim_id in unit["claim_ids"]
+    })
+    all_units_have_caption_coverage = all(
+        any(item["unit_id"] == unit_id for item in timeline.get("subtitle_cues", []))
+        for unit_id in [str(unit["unit_id"]) for unit in units]
+    )
+    upload_eligible = (
+        qa["overall_status"] == "PASS"
+        and timeline_validation["valid"] is True
+        and scene_layout_report.get("overall_status") == "PASS"
+        and cta_rendered
+        and all_claims_referenced
+        and all_units_have_caption_coverage
+    )
     content_qa = {
         "status": qa["overall_status"],
         "source_article_sha256_matched": True,
         "all_claims_have_exact_source_excerpt": True,
-        "all_claims_referenced": claim_ids.issubset({
-            claim_id for unit in units for claim_id in unit["claim_ids"]
-        }),
+        "all_claims_referenced": all_claims_referenced,
         "all_visual_beats_have_narration": True,
         "all_original_images_local_and_unique": True,
         "no_third_party_visuals_inserted": True,
@@ -625,33 +642,17 @@ def run_article_summary(
             for unit_id in [str(unit["unit_id"]) for unit in units]
         },
         "scene_layout_qa": scene_layout_report.get("overall_status"),
+        "outro_cta_text": "更多详细解读见【成核生长】同名公众号",
+        "outro_cta_rendered": cta_rendered,
+        "upload_eligible": upload_eligible,
+        "upload_block_reason": None if upload_eligible else (
+            "One or more technical, source-structure, subtitle-coverage, or CTA layout checks failed."
+        ),
+        "scientific_review_boundary": "Automated checks verify source excerpts and claim linkage; they do not replace human scientific review.",
         "music_cover_and_outro_audible": bool(mix_report.get("editorial_music_bed", {}).get("cover_opening_audible"))
             and bool(mix_report.get("editorial_music_bed", {}).get("outro_fade_audible")),
         "inter_unit_silence_preserved": bool(mix_report.get("editorial_music_bed", {}).get("inter_unit_silence_preserved")),
         "narration_rhythm_report": rhythm_report.get("overall_status"),
-        "outro_cta_text": "更多详细解读见【成核生长】同名公众号",
-        "outro_cta_rendered": any(
-            item.get("beat_id") == "outro_cta" and item.get("status") == "PASS"
-            for item in scene_layout_report.get("checks", [])
-        ),
-        "upload_eligible": (
-            qa["overall_status"] == "PASS"
-            and timeline_validation["valid"] is True
-            and scene_layout_report.get("overall_status") == "PASS"
-            and any(
-                item.get("beat_id") == "outro_cta" and item.get("status") == "PASS"
-                for item in scene_layout_report.get("checks", [])
-            )
-            and claim_ids.issubset({
-                claim_id for unit in units for claim_id in unit["claim_ids"]
-            })
-            and all(any(item["unit_id"] == unit_id for item in timeline.get("subtitle_cues", []))
-                    for unit_id in [str(unit["unit_id"]) for unit in units])
-        ),
-        "upload_block_reason": None if qa["overall_status"] == "PASS" and timeline_validation["valid"] is True
-            and scene_layout_report.get("overall_status") == "PASS"
-            else "One or more technical/content-structure gates did not pass.",
-        "scientific_review_boundary": "Automated checks verify source excerpts and claim linkage; they do not replace human scientific review.",
     }
     _write_json(run_dir / "content_qa_report.json", content_qa)
 
