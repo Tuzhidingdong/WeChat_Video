@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from wechat_video.article_source import ArticleSourceError
 from wechat_video.media import (
     _frame_completion_filter,
     _speech_region_mask,
@@ -333,7 +334,10 @@ def test_unavailable_word_boundaries_fall_back_to_complete_unit_caption(tmp_path
 
     assert count == 1
     assert timeline["subtitle_cues"][0]["alignment_method"] == "speech_unit_envelope"
-    assert "保留完整语音单元。" in (tmp_path / "fallback.srt").read_text(encoding="utf-8-sig")
+    assert timeline["subtitle_cues"][0]["source_text"] == "保留完整语音单元。"
+    fallback_srt = (tmp_path / "fallback.srt").read_text(encoding="utf-8-sig")
+    assert "保留完整语音单元" in fallback_srt
+    assert "保留完整语音单元。" not in fallback_srt
 
 
 
@@ -406,7 +410,17 @@ def test_one_minute_script_budget_is_checked_before_tts() -> None:
     assert report["automatic_rate_adaptation"] is False
 
     summary["spoken_cjk_characters"] = 271
-    with pytest.raises(Exception, match="calibrated one-minute planning range"):
+    with pytest.raises(ArticleSourceError, match="calibrated one-minute planning range"):
+        _narration_duration_budget(summary, tts_config)
+
+    summary["spoken_cjk_characters"] = 230
+    summary["cover_duration_ms"] = 6000
+    with pytest.raises(ArticleSourceError, match="Estimated programme duration"):
+        _narration_duration_budget(summary, tts_config)
+
+    summary["cover_duration_ms"] = 1500
+    tts_config["default_provider"] = "melo_onnx"
+    with pytest.raises(ArticleSourceError, match="provider-specific calibration"):
         _narration_duration_budget(summary, tts_config)
 
 
