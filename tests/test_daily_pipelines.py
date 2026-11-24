@@ -251,3 +251,26 @@ def test_job_record_prevents_automatic_repeat_after_side_effect(tmp_path: Path) 
         daily._start_job(
             path, content_type="literature", local_date=date(2026, 11, 24), source_id="article-1"
         )
+
+
+def test_two_pipeline_dispatcher_continues_after_one_pipeline_failure(tmp_path: Path, monkeypatch) -> None:
+    _config(tmp_path)
+    calls: list[str] = []
+
+    def fail_literature(_root, _config, *, published_date):
+        calls.append("literature")
+        raise RuntimeError("fixture literature failure")
+
+    def save_popularization(_root, _config, *, local_date):
+        calls.append("popularization")
+        return {"state": "DRAFT_SAVED", "source_id": "SCIENCE-001"}
+
+    monkeypatch.setattr(daily, "_run_literature_locked", fail_literature)
+    monkeypatch.setattr(daily, "_run_popularization_locked", save_popularization)
+
+    result = daily.run_daily_two_videos(tmp_path, published_date="2026-11-23")
+
+    assert calls == ["literature", "popularization"]
+    assert result["literature"]["state"] == "FAILED"
+    assert result["popularization"]["state"] == "DRAFT_SAVED"
+    assert result["overall_state"] == "PARTIAL_OR_BLOCKED"
