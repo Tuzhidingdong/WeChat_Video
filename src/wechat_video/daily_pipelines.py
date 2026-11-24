@@ -402,6 +402,27 @@ def _update_job(path: Path, record: dict[str, Any], state: str, **fields: Any) -
     return record
 
 
+def _mark_daily_job(
+    project_root: Path,
+    config: dict[str, Any],
+    local_date: date,
+    content_type: str,
+    state: str,
+    error: str,
+) -> None:
+    job_path = _job_paths(project_root, config, local_date) / f"{content_type}.json"
+    if not job_path.is_file():
+        return
+    try:
+        record = _read_json(job_path)
+        if record.get("state") != "DRAFT_SAVED":
+            _update_job(job_path, record, state, error=error)
+    except Exception:
+        # The uploader's own job journal remains the authoritative recovery
+        # record if this higher-level daily summary cannot be updated.
+        return
+
+
 def _write_run_manifest(run_dir: Path, record: dict[str, Any]) -> None:
     manifest = run_dir / "daily_pipeline_manifest.json"
     _atomic_json(manifest, {
@@ -704,9 +725,12 @@ def run_daily_literature(
         try:
             return _run_literature_locked(project_root, config, published_date=target)
         except UploadUnknownError as exc:
+            _mark_daily_job(project_root, config, target, "literature", "UPLOAD_UNKNOWN", str(exc))
             return {"state": "UPLOAD_UNKNOWN", "content_type": "literature", "error": str(exc)}
         except Exception as exc:
-            return {"state": "FAILED", "content_type": "literature", "error": f"{type(exc).__name__}: {exc}"}
+            message = f"{type(exc).__name__}: {exc}"
+            _mark_daily_job(project_root, config, target, "literature", "FAILED", message)
+            return {"state": "FAILED", "content_type": "literature", "error": message}
 
 
 def run_daily_popularization(
@@ -724,9 +748,12 @@ def run_daily_popularization(
         try:
             return _run_popularization_locked(project_root, config, local_date=target)
         except UploadUnknownError as exc:
+            _mark_daily_job(project_root, config, target, "popularization", "UPLOAD_UNKNOWN", str(exc))
             return {"state": "UPLOAD_UNKNOWN", "content_type": "popularization", "error": str(exc)}
         except Exception as exc:
-            return {"state": "FAILED", "content_type": "popularization", "error": f"{type(exc).__name__}: {exc}"}
+            message = f"{type(exc).__name__}: {exc}"
+            _mark_daily_job(project_root, config, target, "popularization", "FAILED", message)
+            return {"state": "FAILED", "content_type": "popularization", "error": message}
 
 
 def run_daily_two_videos(project_root: Path, *, published_date: str | None = None) -> dict[str, Any]:
@@ -754,9 +781,12 @@ def run_daily_two_videos(project_root: Path, *, published_date: str | None = Non
                 else:
                     results[key] = callback(project_root, config, local_date=target)
             except UploadUnknownError as exc:
+                _mark_daily_job(project_root, config, target, key, "UPLOAD_UNKNOWN", str(exc))
                 results[key] = {"state": "UPLOAD_UNKNOWN", "error": str(exc)}
             except Exception as exc:
-                results[key] = {"state": "FAILED", "error": f"{type(exc).__name__}: {exc}"}
+                message = f"{type(exc).__name__}: {exc}"
+                _mark_daily_job(project_root, config, target, key, "FAILED", message)
+                results[key] = {"state": "FAILED", "error": message}
     states = [
         results[key].get("state")
         for key in ("literature", "popularization")
