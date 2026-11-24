@@ -705,6 +705,7 @@ def _run_literature_locked(
     summary["source_line"] = "成核生长 · 文献精读"
     summary_path = planner_dir / "summary.json"
     _atomic_json(summary_path, summary)
+    _atomic_json(planner_dir / "planner_run_report.json", summary["_planner_run_metadata"])
     record = _update_job(
         job_path, record, "CONTENT_READY",
         summary_path=str(summary_path),
