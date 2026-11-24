@@ -104,7 +104,7 @@ def _narration_duration_budget(
         for unit in units[:-1]
     ) / 1000
     cover_seconds = int(summary.get("cover_duration_ms", 1500)) / 1000
-    outro_seconds = int(summary.get("outro_duration_ms", 900)) / 1000
+    outro_seconds = max(1800, int(summary.get("outro_duration_ms", 1800))) / 1000
     provider_id = str(tts_config.get("default_provider") or "")
     if provider_id != "edge_tts":
         raise ArticleSourceError(
@@ -477,7 +477,7 @@ def run_article_summary(
         output_wav=run_dir / "narration.wav",
         ffprobe_records=probes,
         cover_duration_ms=int(summary.get("cover_duration_ms", 1500)),
-        outro_duration_ms=int(summary.get("outro_duration_ms", 900)),
+        outro_duration_ms=max(1800, int(summary.get("outro_duration_ms", 1800))),
     )
     timeline_validation = validate_audio_timeline(timeline)
     _write_json(run_dir / "audio_timeline_validation.json", timeline_validation)
@@ -529,6 +529,7 @@ def run_article_summary(
         "source_line": str(summary.get("source_line") or "成核生长 · 原文精读"),
         "cover_duration_ms": int(timeline["cover_duration_ms"]),
         "outro_duration_ms": int(timeline["outro_duration_ms"]),
+        "outro_cta_text": "更多详细解读见\n【成核生长】同名公众号",
         "transition_duration_ms": int(summary.get("transition_duration_ms", 220)),
         "safe_zones": layout.get("safe_zones", {}),
         "cjk_font_family": environment["font"]["family"],
@@ -628,11 +629,22 @@ def run_article_summary(
             and bool(mix_report.get("editorial_music_bed", {}).get("outro_fade_audible")),
         "inter_unit_silence_preserved": bool(mix_report.get("editorial_music_bed", {}).get("inter_unit_silence_preserved")),
         "narration_rhythm_report": rhythm_report.get("overall_status"),
-        "upload_eligible": False,
-        "upload_block_reason": (
-            "The WeChat Channels extended-link UI has not yet been verified and "
-            "saved/read back. This article-summary run is local-preview-only."
+        "outro_cta_text": "更多详细解读见【成核生长】同名公众号",
+        "outro_cta_rendered": True,
+        "upload_eligible": (
+            qa["overall_status"] == "PASS"
+            and timeline_validation["valid"] is True
+            and scene_layout_report.get("overall_status") == "PASS"
+            and claim_ids.issubset({
+                claim_id for unit in units for claim_id in unit["claim_ids"]
+            })
+            and all(any(item["unit_id"] == unit_id for item in timeline.get("subtitle_cues", []))
+                    for unit_id in [str(unit["unit_id"]) for unit in units])
         ),
+        "upload_block_reason": None if qa["overall_status"] == "PASS" and timeline_validation["valid"] is True
+            and scene_layout_report.get("overall_status") == "PASS"
+            else "One or more technical/content-structure gates did not pass.",
+        "scientific_review_boundary": "Automated checks verify source excerpts and claim linkage; they do not replace human scientific review.",
     }
     _write_json(run_dir / "content_qa_report.json", content_qa)
 
@@ -640,10 +652,11 @@ def run_article_summary(
     _write_json(run_dir / "channels_draft.json", channels_metadata)
     review_status = {
         "content_type": "article_summary",
-        "sample_status": "LOCAL_PREVIEW_ONLY",
+        "sample_status": "QA_GATED_DRAFT_ELIGIBLE" if content_qa["upload_eligible"] else "NOT_UPLOAD_ELIGIBLE",
         "technical_qa": qa["overall_status"],
+        "content_qa_upload_eligible": content_qa["upload_eligible"],
         "user_video_acceptance": "PENDING",
-        "extended_link_status": channels_metadata["extended_link_status"],
+        "source_cta_status": "RENDERED_IN_FINAL_OUTRO",
         "automatic_upload": False,
         "automatic_publication": False,
     }
@@ -655,9 +668,9 @@ def run_article_summary(
             f"- 原文：{article['title']}",
             f"- 发表时间：{article['published_at']}",
             (
-                f"- 原文链接：{article['canonical_url']}"
+                f"- 原文永久链接：{article['canonical_url']}"
                 if article.get("canonical_url_verified")
-                else "- 原文永久链接：尚未取得；本次仅生成本地预览，不能挂载扩展链接"
+                else "- 原文永久链接：未使用（视频片尾显示公众号名称提示）"
             ),
             "- 视频：final.mp4",
             f"- 实测时长（含片尾）：{duration:.2f}s",
@@ -669,8 +682,10 @@ def run_article_summary(
             f"- 中文配音：{tts_generation['engine']} / {tts_generation.get('voice') or tts_generation.get('provider')}",
             f"- TTS 参数：rate={tts_generation.get('rate')}; pitch={tts_generation.get('pitch')}; volume={tts_generation.get('volume')}",
             "- TTS 自动回退：关闭；所选供应商失败即停止",
-            "- 扩展链接：待视频号页面实测；当前没有上传",
-            "- 发布状态：未上传、未发布",
+            "- 视频号公众号扩展链接：不使用（微信服务端对原文链接设置阅读量/发表时间门槛）",
+            "- 视频片尾：更多详细解读见【成核生长】同名公众号",
+            f"- 草稿资格：{'PASS' if content_qa['upload_eligible'] else 'BLOCKED'}",
+            "- 发布状态：未上传、未发布（由 daily pipeline 单独上传为草稿）",
             "",
             "请完整观看视频，并对摘要准确性、节奏、画面和配音进行人工验收。",
             "",
