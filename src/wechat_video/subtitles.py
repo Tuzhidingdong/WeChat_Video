@@ -287,10 +287,23 @@ def write_chinese_subtitles(
     for cue in timeline["speech_units"]:
         caption_cues.extend(_caption_groups(cue, limit))
     caption_cues.sort(key=lambda item: (item["start_ms"], item["end_ms"]))
+    minimum_han = max(1, int(subtitle_config.get("minimum_han_characters_per_caption", 5)))
     caption_cues = _merge_short_caption_groups(
         caption_cues,
-        minimum_han_characters=max(1, int(subtitle_config.get("minimum_han_characters_per_caption", 5))),
+        minimum_han_characters=minimum_han,
     )
+    # When a unit contains only one short fragment, there is no safe in-unit
+    # neighbour. Show the complete authored sentence against its measured
+    # speech envelope rather than leaving an orphaned partial word on screen.
+    speech_by_id = {str(item["unit_id"]): item for item in timeline["speech_units"]}
+    for unit_id, speech in speech_by_id.items():
+        unit_cues = [item for item in caption_cues if str(item.get("unit_id")) == unit_id]
+        if len(unit_cues) == 1 and _han_character_count(str(unit_cues[0].get("text") or "")) < minimum_han:
+            unit_cues[0]["text"] = str(speech.get("spoken_text") or speech.get("display_text") or "").strip()
+            unit_cues[0]["start_ms"] = int(speech["start_ms"])
+            unit_cues[0]["end_ms"] = int(speech["end_ms"])
+            unit_cues[0]["alignment_method"] = "speech_unit_envelope"
+            unit_cues[0]["short_caption_guard"] = "complete_unit_fallback"
     for index, cue in enumerate(caption_cues):
         original_text = str(cue.get("text") or "").strip()
         cue["source_text"] = original_text
