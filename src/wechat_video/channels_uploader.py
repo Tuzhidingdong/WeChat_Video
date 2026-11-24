@@ -3456,10 +3456,21 @@ def _validate_run_for_upload(
         source = _read_json(source_path)
         summary = _read_json(summary_path)
         content_qa = _read_json(content_qa_path)
+        if manifest.get("content_type") != "article_summary":
+            raise UploadBlockedError("Unrecognized article-summary manifest content_type.")
+        if source.get("source_type") != "published_wechat_article":
+            raise UploadBlockedError("Literature upload source_record is not a published WeChat article.")
         if str(manifest.get("article_id") or "") != str(source.get("article_id") or ""):
             raise UploadBlockedError("Article manifest and source record identify different articles.")
         if str(summary.get("article_id") or "") != str(source.get("article_id") or ""):
             raise UploadBlockedError("Article summary is not bound to the source article ID.")
+        if (
+            str(source.get("article_markdown_sha256") or "")
+            != str(manifest.get("source_article_sha256") or "")
+            or str(summary.get("source_article_sha256") or "")
+            != str(manifest.get("source_article_sha256") or "")
+        ):
+            raise UploadBlockedError("Manifest, article source and summary hashes do not agree.")
         required_content_checks = {
             "source_article_sha256_matched": True,
             "all_claims_have_exact_source_excerpt": True,
