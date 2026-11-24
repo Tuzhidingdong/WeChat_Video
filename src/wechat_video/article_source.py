@@ -460,8 +460,23 @@ def build_article_channels_metadata(
     )
     if not 6 <= len(title) <= 16 or len(description) > 1000:
         raise ArticleSourceError("Article-summary Channels metadata fails title/description length limits.")
+    canonical_url = (
+        str(article.get("canonical_url") or "").strip()
+        if article.get("canonical_url_verified") is True
+        else None
+    )
+    extended_link = (
+        {
+            "type": "official_account_article",
+            "url": canonical_url,
+            "article_id": str(article.get("article_id") or ""),
+            "title": article_title,
+        }
+        if canonical_url
+        else None
+    )
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "content_type": "article_summary",
         "job_id": job_id,
         "account_name": "成核生长",
@@ -471,6 +486,9 @@ def build_article_channels_metadata(
         "source_appmsgid": str(article.get("appmsgid") or ""),
         "source_article_title": article_title,
         "source_cta_text": "更多详细解读见【成核生长】同名公众号",
-        "external_article_link_used": False,
+        "extended_link_required": True,
+        "extended_link": extended_link,
+        "extended_link_status": "SOURCE_URL_VERIFIED" if extended_link else "MISSING_VERIFIED_SOURCE_URL",
+        "external_article_link_used": bool(extended_link),
         "automatic_publication": False,
     }
