@@ -332,6 +332,7 @@ def _generate_edge_tts(
                     else "speech_unit_envelope"
                 ),
                 "word_boundary_status": boundary_status,
+                "word_boundary_metadata_present": raw_metadata.is_file(),
                 "tts_engine": "Edge-TTS",
                 "tts_engine_version": version,
                 "provider": "Microsoft online endpoint via edge-tts community client",

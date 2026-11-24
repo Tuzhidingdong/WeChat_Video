@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from wechat_video import tts_provider
+from wechat_video.article_summary import _validate_edge_word_boundary_metadata
 from wechat_video.timeline import validate_audio_timeline
 
 
@@ -104,6 +105,7 @@ def test_edge_tts_generates_normalized_pcm_and_records_real_voice_parameters(
     assert unit["source_text_sha256"]
     assert unit["subtitle_alignment_method"] == "edge_word_boundary"
     assert unit["word_boundary_status"] == "word_boundaries_verified"
+    assert unit["word_boundary_metadata_present"] is True
     assert unit["word_boundaries"] == [{
         "text": "反铁磁材料里的磁畴。", "start_ms": 0, "end_ms": 1000,
     }]
@@ -272,3 +274,25 @@ def test_audio_timeline_reports_word_boundary_alignment_and_explicit_fallbacks()
     assert report["word_boundary_fallback_units"] == [
         {"unit_id": "U02", "status": "metadata_missing"}
     ]
+
+
+
+def test_existing_edge_metadata_with_unverified_coverage_is_a_hard_failure() -> None:
+    with pytest.raises(RuntimeError, match="U03\\(text_coverage_mismatch\\)"):
+        _validate_edge_word_boundary_metadata([{
+            "unit_id": "U03",
+            "word_boundary_metadata_present": True,
+            "word_boundary_status": "text_coverage_mismatch",
+            "subtitle_alignment_method": "speech_unit_envelope",
+            "word_boundaries": [],
+        }])
+
+
+def test_missing_edge_metadata_keeps_the_speech_unit_envelope_fallback() -> None:
+    _validate_edge_word_boundary_metadata([{
+        "unit_id": "U01",
+        "word_boundary_metadata_present": False,
+        "word_boundary_status": "metadata_missing",
+        "subtitle_alignment_method": "speech_unit_envelope",
+        "word_boundaries": [],
+    }])

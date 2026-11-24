@@ -58,6 +58,27 @@ def _audio_duration_breakdown(timeline: dict[str, Any]) -> dict[str, Any]:
     return totals
 
 
+def _validate_edge_word_boundary_metadata(tts_results: list[dict[str, Any]]) -> None:
+    """Fail closed when an existing Edge metadata file cannot prove lexical coverage."""
+    failures = []
+    for item in tts_results:
+        if not item.get("word_boundary_metadata_present"):
+            continue
+        if (
+            item.get("word_boundary_status") != "word_boundaries_verified"
+            or item.get("subtitle_alignment_method") != "edge_word_boundary"
+            or not item.get("word_boundaries")
+        ):
+            failures.append(
+                f"{item.get('unit_id', 'unknown')}({item.get('word_boundary_status', 'unavailable')})"
+            )
+    if failures:
+        raise RuntimeError(
+            "Edge-TTS metadata files were present but word-boundary coverage was not verified; "
+            "refusing silent speech_unit_envelope fallback: " + ", ".join(failures)
+        )
+
+
 def _write_json(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -337,6 +358,7 @@ def run_article_summary(
     )
     tts_results = tts_generation["speech_units"]
     _write_json(run_dir / "audio_manifest.json", tts_generation)
+    _validate_edge_word_boundary_metadata(tts_results)
     rhythm_report = _narration_rhythm_report(units)
     _write_json(run_dir / "narration_rhythm_report.json", rhythm_report)
     tts_by_id = {str(item["unit_id"]): item for item in tts_results}
