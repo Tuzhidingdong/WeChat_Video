@@ -293,6 +293,38 @@ def test_tracked_approved_fact_card_is_eligible_only_with_registered_strategy(tm
     assert rejected == []
 
 
+def test_hash_bound_approval_keeps_pending_fact_card_eligible_after_recheck(tmp_path: Path) -> None:
+    from wechat_video.topic_approval import approve_fact_card
+
+    card_path, sources_path = _fact_card(
+        tmp_path, status="DRAFT_PENDING_USER_REVIEW"
+    )
+    approve_fact_card(
+        tmp_path,
+        card_path,
+        approved_by="test-user",
+        confirmation="APPROVE FACT CARD SCIENCE-001",
+    )
+
+    approved, rejected = daily._approved_popularization_cards(tmp_path, {
+        "popularization": {
+            "fact_cards_dir": "fact_cards",
+            "sources_file": "fact_cards/sources.json",
+        }
+    })
+    assert len(approved) == 1
+    assert rejected == []
+
+    loaded = daily._load_selected_popularization_card(
+        tmp_path,
+        card_path,
+        sources_path,
+        expected_card_sha256=approved[0]["fact_card_sha256"],
+        expected_source_sha256=approved[0]["source_record_sha256"],
+    )
+    assert loaded["approval_status"] == "DRAFT_PENDING_USER_REVIEW"
+
+
 def test_missing_daily_sources_return_safe_skip_without_model_or_upload(tmp_path: Path) -> None:
     _config(tmp_path)
     (tmp_path / "runtime" / "inbox" / "literature_articles").mkdir(parents=True)
