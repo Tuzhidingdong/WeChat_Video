@@ -65,6 +65,14 @@ Image paths must remain inside the package directory. An image selected for a vi
 
 The model or editor creates a separate summary.json. Its source hash must match article.md. Every claim must include an exact source excerpt, and each spoken unit and visual beat must map to one or more of those claim IDs.
 
+Content-planning instructions for the reusable authoring prompt:
+
+- For each specialist concept that is important to the story, first formulate a short plain-language explanation, then introduce the exact scientific/professional term. Keep both grounded in the same claim IDs; the plain-language line must not imply a different mechanism or stronger certainty.
+- Keep technical terms, quantitative values, units, experimental conditions, comparison direction, uncertainty, limitations and causal wording traceable to the evidence map. Plain-language phrasing is an access layer, not a scientific rewrite.
+- Prefer removing repetition and simplifying sentence structure over deleting a result. If the 58–62 second target cannot be reached while retaining material evidence, report the conflict rather than dropping a claim.
+- For a figure that contains an embedded article caption or unreadable small-print block, propose a normalized `display_crop_regions` rectangle for that image. Preserve the axes, tick marks, legends, units, significant data marks and any evidence needed to understand the figure. The original asset remains unchanged.
+- When a graph is shown without clear Chinese explanation of its variables, provide grounded `axis_labels_zh` entries (`x` and/or `y`) for the relevant image. Never infer a variable meaning from the shape of a curve alone; use the figure's own labels and the linked source claims.
+
 Top-level fields:
 
 - schema_version: 1
@@ -83,7 +91,7 @@ Each speech unit includes unit_id, spoken_text, display_text, claim_ids, and vis
 Supported beat kinds:
 
 - hook: opening question or counter-intuitive finding
-- image: one or two actual article images, displayed with contain/no crop
+- image: one or two actual article images, displayed with contain by default; an evidence-preserving display crop may be declared per image when source-figure whitespace or embedded caption blocks impair mobile readability
 - stat: one article-grounded numerical result
 - compare: comparison supported by cited claims
 - mechanism: two to four explanatory steps
@@ -102,9 +110,9 @@ Install the optional provider once into the project .venv:
 
     .venv\Scripts\python.exe -m pip install -e ".[article-summary-tts]"
 
-The selected provider, voice, rate, pitch, volume and no-fallback policy are recorded in `configs/article_summary_tts.json`. The current calibrated default is Edge-TTS at `rate=+5%`, `volume=+0%`, and `pitch=+0Hz`. Manual rate adjustment is bounded at +8%; the engine does not automatically change rate to force a duration pass. The 58–62 second release gate uses the normalized PCM sample clock, not estimated text length. There are no automatic network retries and no silent fallback to MeloTTS. A provider/network failure stops the run with an explicit error.
+The selected provider, voice, rate, pitch, volume and no-fallback policy are recorded in `configs/article_summary_tts.json`. The current calibrated default is Edge-TTS at `rate=+5%`, `volume=+0%`, and `pitch=+0Hz`. Manual rate adjustment is bounded at +8%; the engine does not automatically change rate to force a duration pass. The one-minute preflight validates both script character range and the estimated total duration before the online synthesis request. The 58–62 second release gate then uses the normalized PCM sample clock, not estimated text length. There are no automatic network retries and no silent fallback to MeloTTS. A provider/network failure stops the run with an explicit error.
 
-MeloTTS remains available only as a deliberate local alternative by changing `default_provider` to `melo_onnx`; that choice requires the existing Chinese ONNX model and sherpa-onnx runtime. Do not set an automatic fallback provider.
+MeloTTS remains available only as a deliberate local alternative by changing `default_provider` to `melo_onnx`; that choice requires the existing Chinese ONNX model and sherpa-onnx runtime. The 58–62 second profile currently has a measured Edge-TTS calibration only; selecting MeloTTS for this delivery target is blocked until its speaking-rate calibration is measured and added explicitly. Do not set an automatic fallback provider.
 
 Generate a local review sample:
 
