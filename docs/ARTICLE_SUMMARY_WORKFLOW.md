@@ -1,6 +1,6 @@
 # 「精读一分钟」文章摘要视频工作流
 
-**Status:** local preview pipeline implemented; article URL export and WeChat Channels extended-link UI remain unverified.
+**Status:** daily literature pipeline is being integrated on `feat/daily-literature-and-popularization`; video draft upload no longer depends on the WeChat extended-link feature.
 
 ## 1. Product boundary
 
@@ -43,7 +43,7 @@ article.json:
       }
     }
 
-The canonical URL is optional for **local preview rendering**. When the published-article response has not yet yielded a verified URL, set canonical_url to null and canonical_url_verified to false, and omit url_provenance. The local preview can still be rendered from the real published article body. If a URL is supplied, it must be the exact HTTPS mp.weixin.qq.com/s/... link read from an observed published-article response, with canonical_url_verified=true and a complete read-only url_provenance. Never construct it from appmsgid. Never put tokens, cookies, credentials, or authenticated query parameters in the package. The endpoint field is the route only; field_path identifies the actual response property that carried the URL. A package containing a URL while canonical_url_verified is false is rejected.
+The canonical URL is optional for **video production and draft upload**. When the published-article response has not yet yielded a verified URL, set canonical_url to null and canonical_url_verified to false, and omit url_provenance. The video can be produced and saved as an unpublished draft from the real published article body; the final video contains a fixed public-account CTA instead of a clickable WeChat article card. If a URL is supplied, it must be the exact HTTPS mp.weixin.qq.com/s/... link read from an observed published-article response, with canonical_url_verified=true and a complete read-only url_provenance. Never construct it from appmsgid. Never put tokens, cookies, credentials, or authenticated query parameters in the package. The endpoint field is the route only; field_path identifies the actual response property that carried the URL. A package containing a URL while canonical_url_verified is false is rejected.
 
 article.md is the complete exported article text. images.json uses this structure:
 
@@ -146,15 +146,27 @@ The CLI refuses to render unless:
 
 A duplicate article ID is blocked if a prior article-summary run already exists.
 
-## 6. Extended-link status and upload safety
+## 6. Article source identity, fixed CTA and draft upload
 
-When a verified URL exists, channels_draft.json carries the exact article URL, article ID, and title in an extended_link object. If the URL is still missing, extended_link is null and the metadata status is MISSING_VERIFIED_ARTICLE_URL. In both cases this is only a local metadata payload; it does not mean the Channels Assistant has mounted the article card.
+The source article URL remains optional metadata. If a verified canonical URL is available in the source package, it is preserved in the local source record for provenance. It is **not** sent to the Channels extended-link control and is not required for draft upload. A URL must never be constructed from appmsgid.
 
-**All article-summary runs are explicitly blocked from the existing uploader.** The upload guard remains active until a live, read-only inspection identifies the actual extended-link control and a later authorized test proves that the article link is selected, saved, and read back from the resulting draft. Putting the URL in the ordinary description field is not accepted as a substitute.
+The final 1.8-second outro renders the fixed message:
 
-The current local audit found the WeChat_control research_subscription session expired. No reliable article URL field was obtained. A local preview may still be rendered from the already-published article body and its article ID; the link is marked missing. No URL adapter or field selector is claimed to be production-ready. Before a future draft-only upload, the publishing workflow must export the actual URL using a verified response field and the Channels uploader must prove the extended link is saved and read back.
+**更多详细解读见【成核生长】同名公众号**
 
-No video is uploaded, saved as a draft, or published by run-article-summary. User review of the complete MP4 is required before any future draft-only integration is enabled.
+The text is part of the video itself, not a clickable link. The 1.8 seconds are included in the measured PCM timeline and exact final-frame budget.
+
+The daily literature pipeline is allowed to upload the exact article-summary run only when:
+- `qa_report.json` reports strict PASS;
+- the source article ID in the manifest, source record and summary agree;
+- every claim excerpt is an exact excerpt from the original article Markdown;
+- every claim is linked to a speech unit and every beat is linked to a speech unit;
+- audio-timeline, subtitle-coverage, scene-layout and outro-CTA checks pass;
+- `channels_draft.json` matches the deterministic metadata derived from the original article and summary.
+
+The shared uploader uses the exact run directory and retains its existing target-account check, single-save behavior, duplicate protection and DraftListManager readback. It never clicks Publish, Send or Schedule. A successful save is reported only after exactly one new unpublished draft row is verified.
+
+Automated source-excerpt and structure checks do not replace the user's scientific review or viewing of the final MP4. The video remains an unpublished draft pending the user's final inspection and manual publication decision.
 
 
 ## Audiovisual pacing and delivery-quality contract
@@ -223,9 +235,7 @@ the reusable production path; they are not per-video editing instructions.
 - Scene core content is checked against the portrait frame and the configured
   subtitle safe band. The Manim render must produce
   `scene_layout_report.json`; a failed or missing report blocks final assembly.
-- A 900 ms outro segment is included in the measured audio clock. The final scene
-  holds through the speech ending and fades during the outro, so the fade is not
-  discarded by audio-length trimming.
+- A minimum 1,800 ms outro segment is included in the measured audio clock. The literature-reading end card remains visible through the final frame; its CTA text is rendered as video content, not a platform link.
 - The original deterministic editorial music bed is active on cover, speech and
   outro, ducked under narration, and absent from intentional inter-unit silence.
   The mix report measures cover/outro music and verifies that inter-unit gaps
