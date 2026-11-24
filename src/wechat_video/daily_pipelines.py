@@ -246,13 +246,7 @@ def _extract_model_text(stdout: str) -> str:
     raise DailyPipelineError("OpenCode output did not contain one valid JSON object.")
 
 
-def _run_content_planner(
-    project_root: Path,
-    config: dict[str, Any],
-    *,
-    prompt: str,
-    attachments: list[Path],
-) -> dict[str, Any]:
+def _planner_preflight(config: dict[str, Any]) -> tuple[str, str, str]:
     opencode_cfg = config.get("opencode") or {}
     executable = str(opencode_cfg.get("executable") or "opencode")
     agent = str(opencode_cfg.get("agent") or "daily-content-planner")
@@ -263,13 +257,27 @@ def _run_content_planner(
             "configs/daily_pipelines.json before automated content planning; "
             "the daily pipeline will not silently inherit a machine-default model."
         )
-    print(
-        f"[CONTENT PLANNER] agent={agent} model={model or 'OpenCode CLI default'} "
-        f"project={project_root} attachments={len(attachments)}"
-    )
     resolved = shutil.which(executable)
+    if not resolved and Path(executable).is_file():
+        resolved = str(Path(executable).resolve())
     if not resolved:
         raise DailyPipelineError(f"OpenCode executable not found on PATH: {executable}")
+    return resolved, agent, model
+
+
+def _run_content_planner(
+    project_root: Path,
+    config: dict[str, Any],
+    *,
+    prompt: str,
+    attachments: list[Path],
+) -> dict[str, Any]:
+    opencode_cfg = config.get("opencode") or {}
+    resolved, agent, model = _planner_preflight(config)
+    print(
+        f"[CONTENT PLANNER] agent={agent} model={model} "
+        f"project={project_root} attachments={len(attachments)}"
+    )
     cmd = [resolved, "run", "--format", "json", "--agent", agent]
     if model:
         cmd.extend(["--model", model])
@@ -529,6 +537,7 @@ def _run_literature_locked(
             "automatic_publication": False,
         }
     selected = candidates[0]
+    _planner_preflight(config)
     job_path = _job_paths(project_root, config, published_date) / "literature.json"
     record = _start_job(
         job_path,
@@ -693,6 +702,7 @@ def _run_popularization_locked(
             "automatic_publication": False,
         }
     selected = eligible[0]
+    _planner_preflight(config)
     job_path = _job_paths(project_root, config, local_date) / "popularization.json"
     record = _start_job(
         job_path,
