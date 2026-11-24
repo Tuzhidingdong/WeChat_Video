@@ -762,6 +762,18 @@ def _run_literature_locked(
         raise DailyPipelineError("Literature output did not meet technical and content upload gates.")
     record = _update_job(job_path, record, "UPLOADING")
     upload = upload_run_to_channels(project_root, run_dir)
+    if upload.get("state") == "BLOCKED_LINK_NOT_PERSISTED":
+        record = _update_job(
+            job_path, record, "BLOCKED_LINK_NOT_PERSISTED",
+            upload_job_id=upload.get("job_id"),
+            verified_draft=upload.get("verified_draft"),
+            account_name=upload.get("account_name"),
+            extended_link_persistence=upload.get("extended_link_persistence"),
+            blocking_reason=upload.get("blocking_reason"),
+            automatic_publication=False,
+        )
+        _write_run_manifest(run_dir, record)
+        return record
     if upload.get("state") != "DRAFT_SAVED":
         raise DailyPipelineError(f"Uploader returned unexpected state: {upload.get('state')}")
     record = _update_job(
@@ -769,6 +781,7 @@ def _run_literature_locked(
         upload_job_id=upload.get("job_id"),
         verified_draft=upload.get("verified_draft"),
         account_name=upload.get("account_name"),
+        extended_link_persistence=upload.get("extended_link_persistence"),
         automatic_publication=False,
     )
     _write_run_manifest(run_dir, record)
