@@ -543,15 +543,18 @@ def _approved_popularization_cards(project_root: Path, config: dict[str, Any]) -
             continue
         try:
             card, _, pending = load_fact_card(card_path, sources_path, allow_pending_review=True)
-            if pending:
+            approval = verify_fact_card_approval(project_root, card_path, sources_path)
+            # A hash-bound local approval is valid even when the tracked card
+            # remains marked DRAFT_PENDING_USER_REVIEW. Never infer approval
+            # from the status field alone.
+            if pending and approval is None:
                 rejected.append({"fact_card": str(card_path), "reason": "not_approved"})
+                continue
+            if approval is None:
+                rejected.append({"fact_card": str(card_path), "reason": "approval_record_not_verified"})
                 continue
             if str(card.get("editorial_angle_id") or "") not in VISUAL_STRATEGIES:
                 rejected.append({"fact_card": str(card_path), "reason": "no_registered_visual_strategy"})
-                continue
-            approval = verify_fact_card_approval(project_root, card_path, sources_path)
-            if approval is None:
-                rejected.append({"fact_card": str(card_path), "reason": "approval_record_not_verified"})
                 continue
             approved.append({
                 "path": card_path,
