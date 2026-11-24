@@ -36,6 +36,9 @@ def probe_media(path: Path, *, count_frames: bool = False) -> dict[str, Any]:
     return data
 
 
+MAX_SCENE_TAIL_PADDING_FRAMES = 6
+
+
 def _video_frame_count(path: Path) -> int:
     """Count decoded video frames; fail closed when ffprobe cannot prove the count."""
     probe = probe_media(path, count_frames=True)
@@ -55,14 +58,16 @@ def _video_frame_count(path: Path) -> int:
 
 
 def _frame_completion_filter(expected_frames: int) -> str:
-    """Clone the final scene frame as needed, then enforce the exact programme frame budget."""
+    """Clone at most a small tail, then enforce the exact programme frame budget."""
     target = int(expected_frames)
     if target <= 0:
         raise ValueError(f"Expected video frame count must be positive, got {target}.")
-    # tpad runs after CFR conversion so a Manim scene that ends a few frames
-    # early cannot shorten the muxed programme. The subsequent trim remains
-    # strict: it emits exactly the audio-derived global frame budget.
-    return f"tpad=stop_mode=clone:stop={target},trim=end_frame={target}"
+    # The six-frame cap repairs small Manim frame quantization deficits without
+    # hiding a materially truncated scene. The later frame-count probe is strict.
+    return (
+        "tpad=stop_mode=clone:"
+        f"stop={MAX_SCENE_TAIL_PADDING_FRAMES},trim=end_frame={target}"
+    )
 
 
 def _loudnorm_measurement(
@@ -651,6 +656,13 @@ def assemble_final_video(
     # video and normalized audio in separate FFmpeg processes. This removes the
     # combined video-filter/audio-loudnorm graph that repeatedly stalled at frame 0.
     scene_input_frames = _video_frame_count(scene_video)
+    scene_tail_deficit = max(0, int(expected_frames) - scene_input_frames)
+    if scene_tail_deficit > MAX_SCENE_TAIL_PADDING_FRAMES:
+        raise ExternalProcessError(
+            "Manim scene is too short for bounded frame completion: "
+            f"scene_input={scene_input_frames}; expected={int(expected_frames)}; "
+            f"deficit={scene_tail_deficit}; maximum_padding={MAX_SCENE_TAIL_PADDING_FRAMES}."
+        )
     measured = _loudnorm_measurement(audio_wav, run_dir, target_i, target_tp)
     loudnorm = (
         f"loudnorm=I={target_i}:TP={target_tp}:LRA=11:print_format=summary"
@@ -830,7 +842,8 @@ def assemble_final_video(
             "video_only_encoded_frames": video_only_frames,
             "final_mux_frames": final_mux_frames,
             "expected_frames": int(expected_frames),
-            "scene_tail_frames_padded": max(0, int(expected_frames) - scene_input_frames),
+            "scene_tail_frames_padded": scene_tail_deficit,
+            "maximum_allowed_tail_padding_frames": MAX_SCENE_TAIL_PADDING_FRAMES,
             "status": "PASS",
             "policy": "clone_last_scene_frame_if_needed_then_strictly_trim_to_audio_frame_budget",
         },
