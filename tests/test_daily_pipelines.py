@@ -157,6 +157,54 @@ def test_published_local_date_converts_utc_to_shanghai_calendar_day() -> None:
     ) == date(2026, 11, 24)
 
 
+def test_extract_model_usage_sums_opencode_step_finish_telemetry() -> None:
+    events = [
+        {
+            "type": "step_finish",
+            "sessionID": "ses_fixture",
+            "part": {
+                "reason": "tool-calls",
+                "cost": 0.001,
+                "tokens": {
+                    "input": 100,
+                    "output": 10,
+                    "reasoning": 5,
+                    "cache": {"read": 20, "write": 2},
+                },
+            },
+        },
+        {
+            "type": "step_finish",
+            "sessionID": "ses_fixture",
+            "part": {
+                "reason": "stop",
+                "cost": 0.002,
+                "tokens": {
+                    "input": 200,
+                    "output": 30,
+                    "reasoning": 10,
+                    "cache": {"read": 40, "write": 3},
+                },
+            },
+        },
+    ]
+    usage = daily._extract_model_usage("\n".join(json.dumps(item) for item in events))
+
+    assert usage["available"] is True
+    assert usage["session_ids"] == ["ses_fixture"]
+    assert usage["step_count"] == 2
+    assert usage["tokens"] == {
+        "input": 300,
+        "output": 40,
+        "reasoning": 15,
+        "cache_read": 60,
+        "cache_write": 5,
+        "total": 420,
+    }
+    assert usage["cost"] == 0.003
+    assert usage["cost_currency"] == "USD"
+
+
 def test_extract_model_text_accepts_opencode_jsonl_text_events() -> None:
     output = (
         '{"type":"text","part":{"type":"text","text":"{\\"schema_version\\":1,"}}\n'
