@@ -288,6 +288,50 @@ def test_job_record_prevents_automatic_repeat_after_side_effect(tmp_path: Path) 
         )
 
 
+def _read_json_for_test(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_daily_failure_reconciles_a_verified_draft_from_uploader_journal(tmp_path: Path) -> None:
+    _config(tmp_path)
+    _write(tmp_path / "config" / "channels_upload.json", {
+        "jobs_dir": "runtime/upload_jobs",
+    })
+    job_path = (
+        tmp_path / "runtime" / "daily_pipelines" / "jobs"
+        / "2026-11-24" / "literature.json"
+    )
+    _write(job_path, {
+        "content_type": "literature",
+        "state": "UPLOADING",
+        "run_dir": str(tmp_path / "outputs" / "run-001"),
+        "source_id": "article-001",
+    })
+    _write(tmp_path / "runtime" / "upload_jobs" / "run-001.json", {
+        "job_id": "run-001",
+        "source_run_id": "run-001",
+        "upload_attempt": 1,
+        "state": "DRAFT_SAVED",
+        "account_name": "成核生长",
+        "verified_draft": {"title": "已验证草稿"},
+    })
+
+    state = daily._mark_daily_job(
+        tmp_path,
+        _read_json_for_test(tmp_path / "configs" / "daily_pipelines.json"),
+        date(2026, 11, 24),
+        "literature",
+        "UPLOAD_UNKNOWN",
+        "simulated exception after uploader completed",
+    )
+    saved = json.loads(job_path.read_text(encoding="utf-8"))
+
+    assert state == "DRAFT_SAVED"
+    assert saved["state"] == "DRAFT_SAVED"
+    assert saved["recovered_from_upload_journal"] is True
+    assert saved["verified_draft"]["title"] == "已验证草稿"
+
+
 def test_two_pipeline_dispatcher_continues_after_one_pipeline_failure(tmp_path: Path, monkeypatch) -> None:
     _config(tmp_path)
     calls: list[str] = []
