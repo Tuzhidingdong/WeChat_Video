@@ -89,8 +89,11 @@ def _narration_duration_budget(
     if base_rate <= 0 or not match or 1 + reference_rate / 100 <= 0:
         raise ArticleSourceError("Duration calibration or configured Edge-TTS rate is invalid.")
     actual_rate = float(match.group(1))
-    if abs(actual_rate) > float(rate_settings.get("maximum_percent", 8)):
-        raise ArticleSourceError("Configured Edge-TTS speed exceeds the approved duration-policy limit.")
+    maximum_rate = float(rate_settings.get("maximum_percent", 8))
+    if not 0 <= actual_rate <= maximum_rate:
+        raise ArticleSourceError(
+            f"Configured Edge-TTS rate must be between +0% and +{maximum_rate:g}% for the calibrated one-minute profile."
+        )
     effective_rate = base_rate * (1 + actual_rate / 100) / (1 + reference_rate / 100)
     if effective_rate <= 0:
         raise ArticleSourceError("Effective narration character rate must be positive.")
@@ -112,6 +115,8 @@ def _narration_duration_budget(
     estimated_total = estimated_speech_seconds + cover_seconds + pause_seconds + outro_seconds
     minimum_seconds = float(policy.get("minimum_programme_seconds", 58))
     maximum_seconds = float(policy.get("maximum_programme_seconds", 62))
+    if minimum_seconds <= 0 or maximum_seconds < minimum_seconds:
+        raise ArticleSourceError("duration_policy programme time limits are invalid.")
     if not minimum_seconds <= estimated_total <= maximum_seconds:
         raise ArticleSourceError(
             f"Estimated programme duration is {estimated_total:.2f}s, outside the "
