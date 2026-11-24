@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from .article_source import ArticleSourceError, load_article_package
 from .channels_uploader import UploadBlockedError, UploadUnknownError, upload_run_to_channels
 from .fact_card import FactCardError, load_fact_card, read_json, validate_script_claim_links
-from .topic_approval import verify_fact_card_approval
+from .topic_approval import TopicApprovalError, verify_fact_card_approval
 from .pipeline import VISUAL_STRATEGIES, run_slice_a
 
 
@@ -423,6 +423,46 @@ def _mark_daily_job(
         return
 
 
+def _record_daily_report(
+    project_root: Path,
+    config: dict[str, Any],
+    local_date: date,
+    results: dict[str, Any],
+) -> None:
+    reports_root = _project_path(
+        project_root, str(config.get("runtime_root", "runtime/daily_pipelines"))
+    ) / "reports"
+    path = reports_root / f"{local_date.isoformat()}.json"
+    existing: dict[str, Any] = {}
+    if path.is_file():
+        try:
+            existing = _read_json(path)
+        except DailyPipelineError:
+            existing = {}
+    jobs = dict(existing.get("jobs") or {})
+    for content_type in ("literature", "popularization"):
+        value = results.get(content_type)
+        if not isinstance(value, dict):
+            continue
+        jobs[content_type] = {
+            key: value.get(key)
+            for key in (
+                "state", "source_id", "selected_title", "run_dir", "video_path",
+                "video_sha256", "upload_job_id", "account_name", "verified_draft",
+                "error", "reason", "candidate_count", "approved_card_count",
+            )
+            if key in value
+        }
+    _atomic_json(path, {
+        "schema_version": 1,
+        "timezone": str(config.get("timezone") or "Asia/Shanghai"),
+        "local_date": local_date.isoformat(),
+        "jobs": jobs,
+        "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "automatic_publication": False,
+    })
+
+
 def _write_run_manifest(run_dir: Path, record: dict[str, Any]) -> None:
     manifest = run_dir / "daily_pipeline_manifest.json"
     _atomic_json(manifest, {
@@ -587,7 +627,7 @@ def _approved_popularization_cards(project_root: Path, config: dict[str, Any]) -
                 "fact_card_sha256": _sha256(card_path),
                 "source_record_sha256": _sha256(sources_path),
             })
-        except (FactCardError, DailyPipelineError, ValueError) as exc:
+        except (FactCardError, TopicApprovalError, DailyPipelineError, ValueError) as exc:
             rejected.append({"fact_card": str(card_path), "reason": str(exc)})
     approved.sort(key=lambda item: (item["approved_at"], item["fact_card_id"], item["editorial_angle_id"]))
     return approved, rejected
@@ -723,14 +763,16 @@ def run_daily_literature(
     target = _target_article_date(config, published_date)
     with _pipeline_lock(project_root, config):
         try:
-            return _run_literature_locked(project_root, config, published_date=target)
+            result = _run_literature_locked(project_root, config, published_date=target)
         except UploadUnknownError as exc:
             _mark_daily_job(project_root, config, target, "literature", "UPLOAD_UNKNOWN", str(exc))
-            return {"state": "UPLOAD_UNKNOWN", "content_type": "literature", "error": str(exc)}
+            result = {"state": "UPLOAD_UNKNOWN", "content_type": "literature", "error": str(exc)}
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             _mark_daily_job(project_root, config, target, "literature", "FAILED", message)
-            return {"state": "FAILED", "content_type": "literature", "error": message}
+            result = {"state": "FAILED", "content_type": "literature", "error": message}
+        _record_daily_report(project_root, config, target, {"literature": result})
+        return result
 
 
 def run_daily_popularization(
@@ -746,14 +788,16 @@ def run_daily_popularization(
     target = date.fromisoformat(local_date) if local_date else datetime.now(zone).date()
     with _pipeline_lock(project_root, config):
         try:
-            return _run_popularization_locked(project_root, config, local_date=target)
+            result = _run_popularization_locked(project_root, config, local_date=target)
         except UploadUnknownError as exc:
             _mark_daily_job(project_root, config, target, "popularization", "UPLOAD_UNKNOWN", str(exc))
-            return {"state": "UPLOAD_UNKNOWN", "content_type": "popularization", "error": str(exc)}
+            result = {"state": "UPLOAD_UNKNOWN", "content_type": "popularization", "error": str(exc)}
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             _mark_daily_job(project_root, config, target, "popularization", "FAILED", message)
-            return {"state": "FAILED", "content_type": "popularization", "error": message}
+            result = {"state": "FAILED", "content_type": "popularization", "error": message}
+        _record_daily_report(project_root, config, target, {"popularization": result})
+        return result
 
 
 def run_daily_two_videos(project_root: Path, *, published_date: str | None = None) -> dict[str, Any]:
@@ -799,4 +843,9 @@ def run_daily_two_videos(project_root: Path, *, published_date: str | None = Non
         results["overall_state"] = "COMPLETED_WITH_SKIPS"
     else:
         results["overall_state"] = "PARTIAL_OR_BLOCKED"
+    _record_daily_report(project_root, config, pop_date, results)
+    if literature_date != pop_date:
+        _record_daily_report(project_root, config, literature_date, {
+            "literature": results.get("literature", {}),
+        })
     return results
