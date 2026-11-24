@@ -1362,6 +1362,12 @@ def test_upload_validation_rejects_unapproved_fact_card_even_with_strict_qa(
     tmp_path: Path,
 ) -> None:
     run_dir = _make_run(tmp_path)
+    fact_dir = tmp_path / "fact_cards"
+    fact_dir.mkdir(parents=True)
+    import shutil
+
+    shutil.copy2(run_dir / "fact_card.json", fact_dir / "test_card.json")
+    shutil.copy2(run_dir / "source_record.json", fact_dir / "sources.json")
     config = json.loads(
         (tmp_path / "config" / "channels_upload.json").read_text(encoding="utf-8")
     )
