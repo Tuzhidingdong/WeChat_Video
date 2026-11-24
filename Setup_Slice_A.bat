@@ -50,7 +50,7 @@ if errorlevel 1 (
   goto :finish
 )
 
-".venv\Scripts\python.exe" -X utf8 -c "import manim, sherpa_onnx, soundfile, pytest" >nul 2>nul
+".venv\Scripts\python.exe" -X utf8 -c "import manim, sherpa_onnx, soundfile, pytest, playwright, psutil, yaml" >nul 2>nul
 if errorlevel 1 (
   echo [2/4] Installing missing Python dependencies into .venv...
   ".venv\Scripts\python.exe" -X utf8 -m pip install --disable-pip-version-check --no-input -r "requirements-slice-a.txt" pytest

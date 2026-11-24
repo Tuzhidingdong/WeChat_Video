@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 import math
 import os
+import queue
 import re
+import subprocess
+import threading
+import time
 import wave
 from pathlib import Path
 from typing import Any
@@ -11,7 +15,7 @@ from typing import Any
 import numpy as np
 
 from .master_config import audio_config
-from .process import run_checked
+from .process import ExternalProcessError, run_checked
 from .sfx import generate_ambient
 from .tooling import resolve_command, tool_env
 
@@ -30,6 +34,40 @@ def probe_media(path: Path, *, count_frames: bool = False) -> dict[str, Any]:
     if not data.get("streams"):
         raise RuntimeError(f"媒体文件没有可识别的流：{path}")
     return data
+
+
+MAX_SCENE_TAIL_PADDING_FRAMES = 6
+
+
+def _video_frame_count(path: Path) -> int:
+    """Count decoded video frames; fail closed when ffprobe cannot prove the count."""
+    probe = probe_media(path, count_frames=True)
+    video = next(
+        (stream for stream in probe.get("streams", []) if stream.get("codec_type") == "video"),
+        None,
+    )
+    if video is None:
+        raise ExternalProcessError(f"视频文件没有可识别的视频流：{path}")
+    try:
+        count = int(video.get("nb_read_frames") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ExternalProcessError(f"无法读取视频帧数：{path}") from exc
+    if count <= 0:
+        raise ExternalProcessError(f"视频没有可验证的有效帧数：{path}")
+    return count
+
+
+def _frame_completion_filter(expected_frames: int) -> str:
+    """Clone at most a small tail, then enforce the exact programme frame budget."""
+    target = int(expected_frames)
+    if target <= 0:
+        raise ValueError(f"Expected video frame count must be positive, got {target}.")
+    # The six-frame cap repairs small Manim frame quantization deficits without
+    # hiding a materially truncated scene. The later frame-count probe is strict.
+    return (
+        "tpad=stop_mode=clone:"
+        f"stop={MAX_SCENE_TAIL_PADDING_FRAMES},trim=end_frame={target}"
+    )
 
 
 def _loudnorm_measurement(
@@ -75,6 +113,21 @@ def _dbfs(value: float) -> float:
     return 20 * math.log10(value) if value > 0 else -120.0
 
 
+def _fade_audio_edges(samples: np.ndarray, sample_rate: int, fade_ms: int) -> np.ndarray:
+    """Apply a short equal-power fade to an SFX clip without changing its duration."""
+    if fade_ms <= 0 or samples.size < 2:
+        return samples
+    fade_frames = min(samples.size // 2, sample_rate * fade_ms // 1000)
+    if fade_frames <= 0:
+        return samples
+    result = samples.copy()
+    phase = np.linspace(0.0, np.pi / 2.0, fade_frames, endpoint=True)
+    ramp = np.sin(phase) ** 2
+    result[:fade_frames] *= ramp
+    result[-fade_frames:] *= ramp[::-1]
+    return result
+
+
 def _ducking_envelope(voice: np.ndarray, sample_rate: int, duck_db: float) -> np.ndarray:
     """Smooth gain envelope: full bed in gaps, reduced under active narration."""
     frame = 1024
@@ -93,6 +146,41 @@ def _ducking_envelope(voice: np.ndarray, sample_rate: int, duck_db: float) -> np
     return np.interp(np.arange(len(voice)), np.arange(count) * frame, gain)
 
 
+def _speech_region_mask(
+    timeline: dict[str, Any] | None,
+    sample_count: int,
+    sample_rate: int,
+    fade_ms: int = 120,
+    active_kinds: set[str] | None = None,
+) -> np.ndarray:
+    """Activate editorial music regions while leaving explicit pauses silent."""
+    mask = np.zeros(int(sample_count), dtype=np.float64)
+    if not timeline:
+        return mask
+    fade_frames = max(0, int(sample_rate) * int(fade_ms) // 1000)
+    segments = timeline.get("segments", [])
+    selected_kinds = active_kinds or {"cover", "speech", "outro"}
+    active_flags = [str(segment.get("kind")) in selected_kinds for segment in segments]
+    for index, segment in enumerate(segments):
+        if not active_flags[index]:
+            continue
+        start = max(0, min(len(mask), int(segment.get("start_sample", 0))))
+        end = max(start, min(len(mask), int(segment.get("end_sample", 0))))
+        if end <= start:
+            continue
+        mask[start:end] = 1.0
+        edge = min(fade_frames, (end - start) // 2)
+        previous_active = index > 0 and active_flags[index - 1]
+        next_active = index + 1 < len(segments) and active_flags[index + 1]
+        if edge > 0 and not previous_active:
+            phase = np.linspace(0.0, np.pi / 2.0, edge, endpoint=True)
+            mask[start:start + edge] *= np.sin(phase) ** 2
+        if edge > 0 and not next_active:
+            phase = np.linspace(0.0, np.pi / 2.0, edge, endpoint=True)
+            mask[end - edge:end] *= (np.sin(phase) ** 2)[::-1]
+    return mask
+
+
 def mix_final_audio(
     narration_wav: Path,
     sfx_events: list[dict[str, Any]],
@@ -100,6 +188,7 @@ def mix_final_audio(
     output_wav: Path,
     config: dict[str, Any] | None = None,
     timeline: dict[str, Any] | None = None,
+    music_bed_path: Path | None = None,
 ) -> dict[str, Any]:
     """Mix narration, relative-level SFX and optional ducked ambient bed.
 
@@ -152,10 +241,53 @@ def mix_final_audio(
         ambient_report["duck_db"] = amb_cfg["duck_db"]
         ambient_report["continuous_through_gaps"] = True
 
+    music_mix = np.zeros_like(voice)
+    music_report: dict[str, Any] = {
+        "enabled": False,
+        "reason": "No original editorial music bed was supplied.",
+    }
+    if music_bed_path is not None:
+        music_cfg = cfg.get("article_summary_music", {})
+        with wave.open(str(music_bed_path), "rb") as reader:
+            if reader.getframerate() != rate or reader.getnchannels() != 1 or reader.getsampwidth() != 2:
+                raise RuntimeError("Editorial music bed must match narration mono PCM format.")
+            music = (
+                np.frombuffer(reader.readframes(reader.getnframes()), dtype="<i2").astype(np.float64)
+                / 32768.0
+            )
+        if len(music) != len(voice):
+            raise RuntimeError("Editorial music sample count does not match narration.")
+        speech_mask = _speech_region_mask(
+            timeline,
+            len(voice),
+            rate,
+            int(music_cfg.get("edge_fade_ms", 120)),
+            set(music_cfg.get("active_region_kinds", ["cover", "speech", "outro"])),
+        )
+        duck_db = float(music_cfg.get("duck_db", 3.5))
+        duck = _ducking_envelope(voice, rate, duck_db)
+        music_mix = music * speech_mask * duck
+        music_report = {
+            "enabled": True,
+            "file": str(music_bed_path),
+            "target_rms_dbfs": float(music_cfg.get("target_rms_dbfs", -28.0)),
+            "measured_source_rms_dbfs": round(_dbfs(float(np.sqrt(np.mean(music**2)))), 2),
+            "duck_db": duck_db,
+            "edge_fade_ms": int(music_cfg.get("edge_fade_ms", 120)),
+            "active_region_kinds": list(music_cfg.get("active_region_kinds", ["cover", "speech", "outro"])),
+            "cover_opening_audible": False,
+            "outro_fade_audible": False,
+            "inter_unit_silence_preserved": True,
+            "texture": "original_deterministic_harmonic_synth_pad",
+        }
+
     sfx_cfg = cfg["sfx"]
     relative_db = float(sfx_cfg["relative_level_db"])
     min_db = float(sfx_cfg["min_relative_db"])
     max_db = float(sfx_cfg["max_relative_db"])
+    sfx_edge_fade_ms = int(sfx_cfg.get("edge_fade_ms", 15))
+    if sfx_edge_fade_ms < 0 or sfx_edge_fade_ms > 100:
+        raise RuntimeError("Configured SFX edge fade must be between 0 and 100 ms.")
     if not min_db <= relative_db <= max_db:
         raise RuntimeError("Configured SFX relative level is outside the allowed range.")
     window = int(rate * float(sfx_cfg["measurement_window_ms"]) / 1000)
@@ -176,6 +308,7 @@ def mix_final_audio(
                 np.frombuffer(reader.readframes(reader.getnframes()), dtype="<i2").astype(np.float64)
                 / 32768.0
             )
+        clip = _fade_audio_edges(clip, rate, sfx_edge_fade_ms)
         start = int(event["start_sample"])
         end = min(len(voice), start + len(clip))
         if end <= start:
@@ -197,7 +330,12 @@ def mix_final_audio(
         local_rms = float(np.sqrt(np.mean(local**2))) if local.size else 0.0
         if local_rms <= 0:
             local_rms = float(np.sqrt(np.mean(voice**2))) or 1e-6
-        target_rms_db = _dbfs(local_rms) + relative_db
+        event_relative_db = float(event.get("relative_level_db", relative_db))
+        if not -30.0 <= event_relative_db <= -10.0:
+            raise RuntimeError(
+                f"SFX event relative level must be between -30 and -10 dB: {event_relative_db}"
+            )
+        target_rms_db = _dbfs(local_rms) + event_relative_db
         clip_rms = float(np.sqrt(np.mean(clip**2))) or 1e-6
         gain = 10 ** ((target_rms_db - _dbfs(clip_rms)) / 20.0)
         scaled = clip * gain
@@ -207,15 +345,16 @@ def mix_final_audio(
                 "event_id": event.get("event_id"),
                 "start_sample": start,
                 "local_voice_rms_dbfs": round(_dbfs(local_rms), 2),
-                "target_relative_db": relative_db,
+                "target_relative_db": event_relative_db,
                 "target_sfx_rms_dbfs": round(target_rms_db, 2),
                 "measured_sfx_rms_dbfs": round(_dbfs(float(np.sqrt(np.mean(scaled**2)))), 2),
                 "gain": round(gain, 4),
+                "edge_fade_ms": sfx_edge_fade_ms,
                 "peak_dbfs": round(_dbfs(float(np.max(np.abs(scaled)))), 2),
             }
         )
 
-    mixed = voice + bed + sfx_mix
+    mixed = voice + bed + music_mix + sfx_mix
     peak = float(np.max(np.abs(mixed))) if mixed.size else 0.0
     clipped = int(np.sum(np.abs(mixed) >= 1.0))
     if clipped:
@@ -224,7 +363,7 @@ def mix_final_audio(
     gap_voice: list[np.ndarray] = []
     gap_final: list[np.ndarray] = []
     for segment in (timeline or {}).get("segments", []):
-        if segment.get("kind") not in {"cover", "silence"}:
+        if segment.get("kind") != "silence":
             continue
         lo = max(0, int(segment["start_sample"]))
         hi = min(len(voice), int(segment["end_sample"]))
@@ -251,6 +390,24 @@ def mix_final_audio(
             }
         )
 
+    if timeline and music_report.get("enabled"):
+        for kind, report_key in (("cover", "cover_opening_audible"), ("outro", "outro_fade_audible")):
+            levels: list[float] = []
+            for segment in timeline.get("segments", []):
+                if segment.get("kind") != kind:
+                    continue
+                lo = max(0, int(segment["start_sample"]))
+                hi = min(len(music_mix), int(segment["end_sample"]))
+                if hi > lo:
+                    region = music_mix[lo:hi]
+                    levels.append(_dbfs(float(np.sqrt(np.mean(region ** 2)))))
+            measured_level = max(levels, default=-120.0)
+            music_report[report_key] = measured_level > -55.0
+            music_report[f"{kind}_music_rms_dbfs"] = round(measured_level, 2)
+        music_report["inter_unit_silence_preserved"] = bool(
+            silence_diagnostics.get("final_gaps_near_digital_silence", True)
+        )
+
     output = np.clip(np.round(mixed * 32767), -32768, 32767).astype("<i2")
     with wave.open(str(output_wav), "wb") as writer:
         writer.setnchannels(1)
@@ -264,9 +421,11 @@ def mix_final_audio(
         "voice_ceiling_dbfs": ceiling,
         "voice_ceiling_gain_db": round(ceiling_gain_db, 3),
         "ambient_bed": ambient_report,
+        "editorial_music_bed": music_report,
         "silence_diagnostics": silence_diagnostics,
         "sfx_events": sfx_reports,
         "sfx_relative_db": relative_db,
+        "sfx_edge_fade_ms": sfx_edge_fade_ms,
         "peak_dbfs": round(_dbfs(peak), 2),
         "clipped_samples": 0,
     }
@@ -277,6 +436,204 @@ def _cfr_flag(ffmpeg_exe: str) -> list[str]:
     match = re.search(r"ffmpeg version\s+(\d+)", output)
     major = int(match.group(1)) if match else 4
     return ["-fps_mode", "cfr"] if major >= 5 else ["-vsync", "cfr"]
+
+
+def _tail_text(path: Path, max_chars: int = 6000) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return text[-max_chars:]
+
+
+def _terminate_external_process(process: Any) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=5)
+    except Exception:
+        try:
+            process.kill()
+        except Exception:
+            pass
+        try:
+            process.wait(timeout=5)
+        except Exception:
+            pass
+
+
+def _run_ffmpeg_stage(
+    args: list[str],
+    *,
+    cwd: Path,
+    stage_name: str,
+    progress_path: Path,
+    timeout_seconds: int = 900,
+    stall_timeout_seconds: int = 120,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run one FFmpeg stage with machine-readable progress and a no-progress watchdog.
+
+    FFmpeg's progress stream is drained on a dedicated thread, while stderr is
+    written to a stage log file. This avoids pipe back-pressure and gives a
+    bounded failure when an encoder/filter graph stops advancing.
+    """
+    if not args:
+        raise ValueError("FFmpeg stage command must not be empty.")
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    stderr_path = progress_path.with_suffix(".stderr.log")
+    progress_path.write_text("", encoding="utf-8")
+    command = [
+        str(args[0]),
+        "-hide_banner",
+        "-nostats",
+        "-progress",
+        "pipe:1",
+        "-stats_period",
+        "1",
+        *[str(item) for item in args[1:]],
+    ]
+    output_path = Path(str(args[-1]))
+    output_queue: queue.Queue[str | None] = queue.Queue()
+    progress_lines: list[str] = []
+    state: dict[str, str] = {}
+    latest: dict[str, str] = {}
+    stdout_finished = False
+
+    try:
+        stderr_handle = stderr_path.open("w", encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise ExternalProcessError(
+            f"无法创建 FFmpeg 阶段日志（{stage_name}）：{stderr_path}；{exc}"
+        ) from exc
+
+    with stderr_handle:
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=str(cwd),
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=stderr_handle,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+                shell=False,
+            )
+        except OSError as exc:
+            raise ExternalProcessError(
+                f"无法启动 FFmpeg 阶段（{stage_name}）：{command[0]}；{exc}"
+            ) from exc
+
+        def _read_stdout() -> None:
+            try:
+                assert process.stdout is not None
+                for line in process.stdout:
+                    output_queue.put(line)
+            finally:
+                output_queue.put(None)
+
+        reader = threading.Thread(
+            target=_read_stdout,
+            name=f"ffmpeg-progress-{stage_name}",
+            daemon=True,
+        )
+        reader.start()
+        started = time.monotonic()
+        last_progress_at = started
+        last_signature: tuple[str | None, ...] | None = None
+        failure_reason: str | None = None
+
+        try:
+            while True:
+                try:
+                    line = output_queue.get(timeout=0.2)
+                    if line is None:
+                        stdout_finished = True
+                    else:
+                        progress_lines.append(line)
+                        stripped = line.strip()
+                        if "=" in stripped:
+                            key, value = stripped.split("=", 1)
+                            state[key] = value
+                            if key == "progress":
+                                latest = dict(state)
+                                signature = tuple(
+                                    latest.get(field)
+                                    for field in (
+                                        "frame",
+                                        "out_time_us",
+                                        "out_time_ms",
+                                        "out_time",
+                                        "total_size",
+                                    )
+                                )
+                                if any(value not in (None, "", "N/A") for value in signature):
+                                    if signature != last_signature:
+                                        last_signature = signature
+                                        last_progress_at = time.monotonic()
+                                state = {}
+                except queue.Empty:
+                    pass
+
+                return_code = process.poll()
+                now = time.monotonic()
+                if return_code is not None and stdout_finished:
+                    break
+                if now - started >= timeout_seconds:
+                    failure_reason = f"absolute timeout after {timeout_seconds}s"
+                    break
+                if now - last_progress_at >= stall_timeout_seconds:
+                    failure_reason = (
+                        f"no FFmpeg progress for {stall_timeout_seconds}s"
+                    )
+                    break
+        finally:
+            if failure_reason is not None:
+                _terminate_external_process(process)
+            if process.stdout is not None:
+                try:
+                    process.stdout.close()
+                except Exception:
+                    pass
+            reader.join(timeout=2)
+
+        return_code = process.wait()
+        progress_text = "".join(progress_lines)
+        progress_path.write_text(progress_text, encoding="utf-8")
+        stderr_text = _tail_text(stderr_path)
+        try:
+            output_bytes = output_path.stat().st_size
+        except OSError:
+            output_bytes = 0
+
+        last_progress = {
+            key: latest.get(key)
+            for key in ("frame", "out_time", "out_time_us", "total_size", "progress")
+            if latest.get(key) is not None
+        }
+        if failure_reason is not None:
+            raise ExternalProcessError(
+                f"FFmpeg 阶段停滞或超时（{stage_name}）：{failure_reason}；"
+                f"last_progress={last_progress}; output_bytes={output_bytes}; "
+                f"progress_log={progress_path}; stderr_log={stderr_path}\n{stderr_text}"
+            )
+        if return_code != 0:
+            raise ExternalProcessError(
+                f"FFmpeg 阶段失败（{stage_name}），退出码 {return_code}；"
+                f"last_progress={last_progress}; output_bytes={output_bytes}; "
+                f"progress_log={progress_path}; stderr_log={stderr_path}\n{stderr_text}"
+            )
+
+    return subprocess.CompletedProcess(
+        command,
+        int(return_code),
+        progress_text,
+        stderr_text,
+    )
 
 
 def assemble_final_video(
@@ -295,10 +652,17 @@ def assemble_final_video(
     ffmpeg_exe = resolve_command("ffmpeg")
     resolve_command("ffprobe")
 
-    # One full-programme loudnorm pass. Two-pass linear mode (measured_* plus
-    # linear=true) can deadlock this FFmpeg build with a denoise-free voice stem,
-    # so use a single-pass normalization in the same mux process. This is still a
-    # single loudness-normalization pass over the finished voice+SFX programme.
+    # Preserve the existing one-pass full-programme loudness target, but encode
+    # video and normalized audio in separate FFmpeg processes. This removes the
+    # combined video-filter/audio-loudnorm graph that repeatedly stalled at frame 0.
+    scene_input_frames = _video_frame_count(scene_video)
+    scene_tail_deficit = max(0, int(expected_frames) - scene_input_frames)
+    if scene_tail_deficit > MAX_SCENE_TAIL_PADDING_FRAMES:
+        raise ExternalProcessError(
+            "Manim scene is too short for bounded frame completion: "
+            f"scene_input={scene_input_frames}; expected={int(expected_frames)}; "
+            f"deficit={scene_tail_deficit}; maximum_padding={MAX_SCENE_TAIL_PADDING_FRAMES}."
+        )
     measured = _loudnorm_measurement(audio_wav, run_dir, target_i, target_tp)
     loudnorm = (
         f"loudnorm=I={target_i}:TP={target_tp}:LRA=11:print_format=summary"
@@ -307,40 +671,156 @@ def assemble_final_video(
         relative_ass = captions_ass.resolve().relative_to(run_dir.resolve())
     except ValueError as exc:
         raise RuntimeError("字幕文件必须位于当前运行目录内。") from exc
+
+    if output_mp4.exists():
+        raise RuntimeError(
+            f"拒绝覆盖已存在的最终视频：{output_mp4}。每次合成必须使用全新运行目录。"
+        )
+    work_dir = run_dir / "assembly_work"
+    work_dir.mkdir(parents=True, exist_ok=False)
+    video_only = work_dir / "video_only.mp4"
+    normalized_audio = work_dir / "normalized_audio.m4a"
+    if video_only.exists() or normalized_audio.exists():
+        raise RuntimeError("当前运行目录已有 FFmpeg 中间产物；拒绝覆盖。")
+
+    frame_completion = _frame_completion_filter(expected_frames)
     filter_chain = (
         "scale=1080:1920:force_original_aspect_ratio=decrease:flags=lanczos,"
         "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,"
         "fps=30,setsar=1,"
-        f"trim=end_frame={int(expected_frames)},setpts=PTS-STARTPTS,"
+        f"{frame_completion},setpts=PTS-STARTPTS,"
         f"format=yuv420p,subtitles={relative_ass.as_posix()}"
     )
     output_mp4.parent.mkdir(parents=True, exist_ok=True)
-    result = run_checked(
-        [
-            ffmpeg_exe, "-hide_banner", "-y",
-            "-i", str(scene_video),
-            "-i", str(audio_wav),
-            "-map", "0:v:0",
-            "-map", "1:a:0",
-            "-vf", filter_chain,
-            "-af", loudnorm,
-            "-c:v", "libx264",
-            "-preset", "medium",
-            "-crf", "19",
-            "-pix_fmt", "yuv420p",
-            "-r", "30",
-            *_cfr_flag(ffmpeg_exe),
-            "-c:a", str(final_cfg["codec"]),
-            "-b:a", f"{int(final_cfg['bitrate_kbps'])}k",
-            "-ar", str(int(final_cfg["sample_rate"])),
-            "-ac", str(int(final_cfg["channels"])),
-            "-shortest",
-            "-movflags", "+faststart",
-            str(output_mp4),
-        ],
-        cwd=run_dir,
-        timeout_seconds=900,
-    )
+    stage_reports: list[dict[str, Any]] = []
+
+    def run_stage(
+        stage_name: str,
+        command: list[str],
+        stage_output: Path,
+        *,
+        timeout_seconds: int = 900,
+        stall_timeout_seconds: int = 120,
+    ) -> subprocess.CompletedProcess[str]:
+        started = time.monotonic()
+        progress_path = work_dir / f"{stage_name}.progress.txt"
+        result = _run_ffmpeg_stage(
+            command,
+            cwd=run_dir,
+            stage_name=stage_name,
+            progress_path=progress_path,
+            timeout_seconds=timeout_seconds,
+            stall_timeout_seconds=stall_timeout_seconds,
+            env=tool_env(),
+        )
+        if not stage_output.is_file() or stage_output.stat().st_size < 1024:
+            raise ExternalProcessError(
+                f"FFmpeg 阶段 {stage_name} 返回成功，但输出文件缺失或过小：{stage_output}"
+            )
+        stage_reports.append(
+            {
+                "stage": stage_name,
+                "duration_seconds": round(time.monotonic() - started, 3),
+                "output": str(stage_output),
+                "output_bytes": stage_output.stat().st_size,
+                "progress_log": str(progress_path),
+                "stderr_log": str(progress_path.with_suffix(".stderr.log")),
+                "stderr_tail": result.stderr[-1200:],
+            }
+        )
+        return result
+
+    # Stage 1: subtitle burn-in and H.264 video encoding only.
+    video_command = [
+        ffmpeg_exe,
+        "-hide_banner",
+        "-y",
+        "-i",
+        str(scene_video),
+        "-map",
+        "0:v:0",
+        "-an",
+        "-vf",
+        filter_chain,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "19",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        "30",
+        *_cfr_flag(ffmpeg_exe),
+        "-frames:v",
+        str(int(expected_frames)),
+        str(video_only),
+    ]
+    run_stage("video_encode", video_command, video_only)
+    video_only_frames = _video_frame_count(video_only)
+    if video_only_frames != int(expected_frames):
+        raise ExternalProcessError(
+            "FFmpeg video_encode did not meet the exact global frame budget: "
+            f"encoded={video_only_frames}; expected={int(expected_frames)}; "
+            f"scene_input={scene_input_frames}."
+        )
+
+    # Stage 2: one full-programme loudnorm pass and AAC encode, independent of video.
+    audio_command = [
+        ffmpeg_exe,
+        "-hide_banner",
+        "-y",
+        "-i",
+        str(audio_wav),
+        "-map",
+        "0:a:0",
+        "-vn",
+        "-af",
+        loudnorm,
+        "-c:a",
+        str(final_cfg["codec"]),
+        "-b:a",
+        f"{int(final_cfg['bitrate_kbps'])}k",
+        "-ar",
+        str(int(final_cfg["sample_rate"])),
+        "-ac",
+        str(int(final_cfg["channels"])),
+        str(normalized_audio),
+    ]
+    run_stage("audio_normalize", audio_command, normalized_audio)
+
+    # Stage 3: stream-copy mux only; no filters or encoders run in this stage.
+    mux_command = [
+        ffmpeg_exe,
+        "-hide_banner",
+        "-y",
+        "-i",
+        str(video_only),
+        "-i",
+        str(normalized_audio),
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c",
+        "copy",
+        # Do not use -shortest here: the encoded audio and the nearest-frame
+        # video duration can differ by less than half a frame. Truncating to
+        # the shorter stream can discard a valid final video frame.
+        "-movflags",
+        "+faststart",
+        str(output_mp4),
+    ]
+    mux_result = run_stage("final_mux", mux_command, output_mp4)
+    final_mux_frames = _video_frame_count(output_mp4)
+    if final_mux_frames != int(expected_frames):
+        raise ExternalProcessError(
+            "Final mux did not preserve the exact global frame budget: "
+            f"muxed={final_mux_frames}; expected={int(expected_frames)}; "
+            f"video_only={video_only_frames}."
+        )
+
     return {
         "loudness_target": {
             "integrated_loudness_lufs": target_i,
@@ -349,10 +829,23 @@ def assemble_final_video(
         },
         "preset_id": cfg["preset_id"],
         "loudnorm_measurement": measured,
-        "ffmpeg_output_tail": result.stderr[-1200:],
+        "ffmpeg_output_tail": mux_result.stderr[-1200:],
         "subtitle_filter_path_mode": "relative filename from run directory",
         "audio_input": audio_wav.name,
-        "loudnorm_pass": "single_pass_full_programme",
+        "loudnorm_pass": "single_pass_full_programme_audio_only_stage",
+        "assembly_mode": "separate_video_encode_audio_normalize_then_stream_copy_mux",
+        "ffmpeg_no_progress_timeout_seconds": 120,
         "expected_frames": int(expected_frames),
         "video_trim": f"trim=end_frame={int(expected_frames)}",
+        "video_frame_validation": {
+            "scene_input_frames": scene_input_frames,
+            "video_only_encoded_frames": video_only_frames,
+            "final_mux_frames": final_mux_frames,
+            "expected_frames": int(expected_frames),
+            "scene_tail_frames_padded": scene_tail_deficit,
+            "maximum_allowed_tail_padding_frames": MAX_SCENE_TAIL_PADDING_FRAMES,
+            "status": "PASS",
+            "policy": "clone_last_scene_frame_if_needed_then_strictly_trim_to_audio_frame_budget",
+        },
+        "stages": stage_reports,
     }

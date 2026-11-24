@@ -3,7 +3,11 @@
   "preset_id": "clean_voice_no_denoise_no_bed",
   "default_profile": "clean_voice_no_denoise_no_bed",
   "legacy_eq_preset_id": "voice_clarity_v1",
-  "required_ffmpeg_filters": ["highpass", "equalizer", "highshelf"],
+  "required_ffmpeg_filters": [
+    "highpass",
+    "equalizer",
+    "highshelf"
+  ],
   "denoise_decision": {
     "same_text_ab_report": "outputs/audio_ab_v3/afftdn_ab_report.json (local, ignored)",
     "A_detail_energy_4k_to_10k": 0.000059,
@@ -19,8 +23,8 @@
     "preserve_true_silence_in_voice_track": true,
     "no_gate_expander_or_agc": true,
     "final_loudnorm_must_not_fill_gaps": true,
-    "gap_noise_ceiling_dbfs": -45.0,
-    "gap_to_speech_separation_db": 25.0
+    "gap_noise_ceiling_dbfs": -45,
+    "gap_to_speech_separation_db": 25
   },
   "denoise": {
     "enabled": false,
@@ -38,21 +42,22 @@
     "low_mid_gain_db": -2.5,
     "presence_hz": 4000,
     "presence_q": 1.2,
-    "presence_gain_db": 3.0,
+    "presence_gain_db": 3,
     "air_hz": 9500,
-    "air_gain_db": 2.0
+    "air_gain_db": 2
   },
   "voice_headroom": {
-    "premix_peak_ceiling_dbfs": -3.0,
+    "premix_peak_ceiling_dbfs": -3,
     "transparent_static_gain_only": true,
     "compression_enabled": false
   },
   "sfx": {
     "enabled": true,
     "relative_level_db": -13.5,
-    "min_relative_db": -15.0,
-    "max_relative_db": -12.0,
+    "min_relative_db": -15,
+    "max_relative_db": -12,
     "measurement_window_ms": 250,
+    "edge_fade_ms": 15,
     "soft_low_frequency_only": true
   },
   "ambient_bed": {
@@ -60,16 +65,16 @@
     "opt_in_required": true,
     "random_noise_voice_disabled": true,
     "diagnostic_only": true,
-    "rms_target_dbfs": -30.0,
-    "rms_min_dbfs": -33.0,
-    "rms_max_dbfs": -30.0,
+    "rms_target_dbfs": -30,
+    "rms_min_dbfs": -33,
+    "rms_max_dbfs": -30,
     "duck_db": 3.5,
     "fade_ms": 800,
     "texture": "soft_low_hiss_diagnostic_only",
     "continuous_through_gaps": false
   },
   "final_programme": {
-    "integrated_lufs": -16.0,
+    "integrated_lufs": -16,
     "true_peak_dbtp": -1.5,
     "sample_rate": 44100,
     "channels": 1,
@@ -92,5 +97,24 @@
     "dynamic_gate",
     "expander",
     "automatic_gain_control"
-  ]
+  ],
+  "article_summary_music": {
+    "enabled": true,
+    "texture": "original_deterministic_harmonic_synth_pad",
+    "target_rms_dbfs": -25,
+    "duck_db": 4,
+    "fade_ms": 700,
+    "edge_fade_ms": 120,
+    "only_during_speech": false,
+    "preserve_true_silence_in_cover_and_unit_gaps": true,
+    "note": "Generated locally from simple oscillators; present on cover, speech and outro, ducked under narration, with true silence retained between narration units.",
+    "active_region_kinds": [
+      "cover",
+      "speech",
+      "outro"
+    ],
+    "preserve_true_silence_in_inter_unit_gaps": true,
+    "cover_opening_enabled": true,
+    "outro_fade_enabled": true
+  }
 }

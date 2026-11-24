@@ -1,0 +1,109 @@
+# Semantic-first selectors for the official Channels Assistant UI.
+# These defaults deliberately avoid hashed/dynamic CSS class names.
+# Verify/adjust only after inspecting the current account UI. Never add a
+# Publish/Send selector: this automation is draft-save only.
+
+account_identity:
+  selector: null
+  exact_text: "成核生长"
+
+# The creator form may mount its file control asynchronously. The uploader
+# inspects every frame, including hidden file inputs, and waits this long for
+# the video-specific control to appear before failing closed.
+# The signed-in platform shell exposes the creator entry inside this
+# frame. The uploader activates this SPA entry before scanning for file inputs.
+create_nav_frame_path: "/micro/content/iframe/post-card.html"
+create_nav_button_text: "发表视频"
+create_nav_timeout_seconds: 15
+# The post-card can contain more than one visible "发表视频" button. The
+# uploader only clicks a button whose captured DOM structure proves a
+# navigation target to one of these creation routes (own href, ancestor anchor
+# href, or a URL-bearing data-*/aria-* value). Coordinates, DOM order, index
+# and geometry are never used to choose the entry. With no proven or with
+# multiple proven entries, the job fails closed.
+create_nav_target_paths:
+  - "/platform/post/create"
+  - "/micro/content/post/create"
+# The real WeChat SPA renders these buttons with JS click handlers and no URL
+# attribute, so an href-only rule can never qualify them. An ancestor class
+# token below positively proves the create action, but only inside a post-card
+# content list (create_nav_card_contexts). Priority is explicit: the persistent
+# list-header action is preferred over the empty-state action when both are
+# mounted. A tie at the same priority still fails closed. These tokens come
+# from observed production DOM (upload job 20261122_192030_critical_nucleus).
+create_nav_entry_contexts:
+  - "post-list-header"
+  - "none-post"
+create_nav_card_contexts:
+  - "post-list"
+  - "finder-card"
+# Activating the entry is only navigation: wait for the creation form frame to
+# mount before the video file input is scanned and verified (exactly one).
+creator_form_frame_path: "/micro/content/post/create"
+creator_form_ready_timeout_seconds: 15
+
+video_file_input_timeout_seconds: 15
+video_file_input:
+  - "input[type='file'][accept*='video']"
+  - "input[type='file']"
+
+title_input:
+  - "input[placeholder*='短标题']"
+  - "textarea[placeholder*='短标题']"
+  - "input[placeholder*='标题']"
+  - "textarea[placeholder*='标题']"
+
+description_input:
+  - "[contenteditable][data-placeholder='添加描述']"
+  - "[contenteditable][data-placeholder*='描述']"
+  - "[contenteditable][data-placeholder*='内容']"
+  - "textarea[placeholder*='描述']"
+  - "textarea[placeholder*='内容']"
+
+draft_save_button_text:
+  - "存草稿"
+  - "保存草稿"
+
+# These selectors are confirmed from the actual DraftListManager DOM.
+# The left-nav text "草稿箱" is not used as view evidence: it is present on
+# the ordinary video-management page too.
+draft_list_path: "/platform/post/draftListManager"
+# Observed SPA shell fallback: allowed only when the child frame and all
+# DraftListManager-specific DOM evidence independently match.
+draft_list_parent_shell_path: "/platform"
+draft_list_frame_path: "/micro/content/post/draftListManager"
+# The list is mounted by the platform SPA when opened from its left navigation.
+# The parent group expands on hover; the entry click is navigation, not proof.
+draft_list_nav_parent_selectors:
+  - ".finder-ui-desktop-menu__sub__wrp"
+draft_list_nav_entry_selectors:
+  - ".finder-ui-desktop-sub-menu__item"
+draft_list_nav_entry_text: "草稿箱"
+draft_list_nav_timeout_seconds: 20
+draft_list_root_selector: "div.finder-page.DraftListManager"
+draft_list_active_tab_selector: "li.weui-desktop-tab__nav_current"
+draft_list_header_selector: "div.post-list-header"
+draft_list_body_selector: "div.list-wrapper.draft-list-wrapper div.post-list-body"
+draft_list_ready_timeout_seconds: 15
+draft_list_rows_timeout_seconds: 15
+
+preview_selectors:
+  - "video"
+  - "[aria-label*='视频预览']"
+  - "[data-testid*='video-preview']"
+
+upload_complete_texts:
+  - "上传完成"
+  - "上传成功"
+  - "视频上传完成"
+
+upload_error_texts:
+  - "上传失败"
+  - "视频上传失败"
+  - "网络异常"
+  - "文件格式不支持"
+
+draft_status_texts:
+  - "草稿"
+  - "草稿箱"
+

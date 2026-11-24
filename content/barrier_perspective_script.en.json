@@ -1,0 +1,372 @@
+{
+  "script_id": "CNT-VIDEO-002-EN-ZH-BARRIER",
+  "editorial_angle_id": "free_energy_barrier_perspective",
+  "title": "Critical Radius Versus Free-Energy Barrier",
+  "language": "en-US",
+  "target_duration_seconds": [
+    55,
+    65
+  ],
+  "glossary": {
+    "nucleation": "成核",
+    "nucleus": "晶核",
+    "critical radius": "临界半径",
+    "free-energy barrier": "自由能垒",
+    "interfacial energy": "界面能",
+    "bulk driving force": "体相驱动力",
+    "free energy curve": "自由能曲线",
+    "homogeneous nucleation": "均匀成核",
+    "thermodynamic tendency": "热力学趋势"
+  },
+  "rhythm_blocks": [
+    {
+      "block_id": "HOOK",
+      "target_ms": [
+        0,
+        7000
+      ],
+      "purpose": "open on the curve and separate peak position from height"
+    },
+    {
+      "block_id": "CONFLICT",
+      "target_ms": [
+        7000,
+        24000
+      ],
+      "purpose": "derive the two scaling terms of the free energy curve"
+    },
+    {
+      "block_id": "MECHANISM",
+      "target_ms": [
+        24000,
+        46000
+      ],
+      "purpose": "contrast r-star with delta-G-star and show gamma-cubed / driving-force-squared"
+    },
+    {
+      "block_id": "APPLICATION",
+      "target_ms": [
+        46000,
+        56000
+      ],
+      "purpose": "model assumptions, limits and thermodynamic tendency"
+    },
+    {
+      "block_id": "TAKEAWAY",
+      "target_ms": [
+        56000,
+        62000
+      ],
+      "purpose": "remember position and height as different questions"
+    }
+  ],
+  "speech_units": [
+    {
+      "unit_id": "V01",
+      "raw_text": "A free-energy curve holds two different answers.",
+      "display_text": "A free-energy curve holds two different answers.",
+      "spoken_text": "A free-energy curve holds two different answers.",
+      "display_text_zh": "一条自由能曲线里，藏着两个不同的答案。",
+      "claim_ids": [
+        "CNT-01"
+      ],
+      "visual_trigger_ids": [
+        "CURVE_DRAW"
+      ],
+      "rhythm_block_id": "HOOK",
+      "visual_keyword": "free-energy curve",
+      "pause_after_ms": 240,
+      "sfx_trigger_id": "peak_reveal"
+    },
+    {
+      "unit_id": "V02",
+      "raw_text": "Its peak sits at the critical radius.",
+      "display_text": "Its peak sits at the critical radius.",
+      "spoken_text": "Its peak sits at the critical radius.",
+      "display_text_zh": "峰值所在的位置，就是临界半径。",
+      "claim_ids": [
+        "CNT-03"
+      ],
+      "visual_trigger_ids": [
+        "CRITICAL_PEAK"
+      ],
+      "rhythm_block_id": "HOOK",
+      "visual_keyword": "peak position",
+      "pause_after_ms": 220,
+      "sfx_trigger_id": "peak_reveal"
+    },
+    {
+      "unit_id": "V03",
+      "raw_text": "Its height is the barrier to forming a nucleus.",
+      "display_text": "Its height is the barrier to forming a nucleus.",
+      "spoken_text": "Its height is the barrier to forming a nucleus.",
+      "display_text_zh": "峰值的高度，才是形成晶核要跨过的能垒。",
+      "claim_ids": [
+        "CNT-03"
+      ],
+      "visual_trigger_ids": [
+        "BARRIER_EQ"
+      ],
+      "rhythm_block_id": "HOOK",
+      "visual_keyword": "peak height",
+      "pause_after_ms": 650,
+      "sfx_trigger_id": "peak_reveal"
+    },
+    {
+      "unit_id": "V04",
+      "raw_text": "The curve comes from two competing terms.",
+      "display_text": "The curve comes from two competing terms.",
+      "spoken_text": "The curve comes from two competing terms.",
+      "display_text_zh": "这条曲线，来自两项相互竞争的能量。",
+      "claim_ids": [
+        "CNT-01"
+      ],
+      "visual_trigger_ids": [
+        "TWO_TERMS"
+      ],
+      "rhythm_block_id": "CONFLICT",
+      "visual_keyword": "two terms",
+      "pause_after_ms": 200,
+      "sfx_trigger_id": "term_conflict"
+    },
+    {
+      "unit_id": "V05",
+      "raw_text": "An interface costs energy, and the cost is positive.",
+      "display_text": "An interface costs energy, and the cost is positive.",
+      "spoken_text": "An interface costs energy, and the cost is positive.",
+      "display_text_zh": "生成界面要付出能量，这一项是正的。",
+      "claim_ids": [
+        "CNT-01"
+      ],
+      "visual_trigger_ids": [
+        "SURFACE_COST"
+      ],
+      "rhythm_block_id": "CONFLICT",
+      "visual_keyword": "surface cost",
+      "pause_after_ms": 200,
+      "sfx_trigger_id": "term_conflict"
+    },
+    {
+      "unit_id": "V06",
+      "raw_text": "That cost grows with surface area, as r squared.",
+      "display_text": "That cost grows with surface area, as r squared.",
+      "spoken_text": "That cost grows with surface area, as r squared.",
+      "display_text_zh": "它随表面积增长，也就是半径的平方。",
+      "claim_ids": [
+        "CNT-02"
+      ],
+      "visual_trigger_ids": [
+        "AREA_SCALING"
+      ],
+      "rhythm_block_id": "CONFLICT",
+      "visual_keyword": "r squared",
+      "pause_after_ms": 200,
+      "sfx_trigger_id": "term_conflict"
+    },
+    {
+      "unit_id": "V07",
+      "raw_text": "Forming the bulk releases free energy instead.",
+      "display_text": "Forming the bulk releases free energy instead.",
+      "spoken_text": "Forming the bulk releases free energy instead.",
+      "display_text_zh": "形成体相反而释放自由能，这一项是负的。",
+      "claim_ids": [
+        "CNT-01"
+      ],
+      "visual_trigger_ids": [
+        "BULK_GAIN"
+      ],
+      "rhythm_block_id": "CONFLICT",
+      "visual_keyword": "bulk gain",
+      "pause_after_ms": 200,
+      "sfx_trigger_id": "term_conflict"
+    },
+    {
+      "unit_id": "V08",
+      "raw_text": "That release grows with volume, as r cubed.",
+      "display_text": "That release grows with volume, as r cubed.",
+      "spoken_text": "That release grows with volume, as r cubed.",
+      "display_text_zh": "这份收益随体积增长，也就是半径的立方。",
+      "claim_ids": [
+        "CNT-02"
+      ],
+      "visual_trigger_ids": [
+        "VOLUME_SCALING"
+      ],
+      "rhythm_block_id": "CONFLICT",
+      "visual_keyword": "r cubed",
+      "pause_after_ms": 200,
+      "sfx_trigger_id": "term_conflict"
+    },
+    {
+      "unit_id": "V09",
+      "raw_text": "So one question is where: the critical radius r star.",
+      "display_text": "So one question is where: the critical radius r star.",
+      "spoken_text": "So one question is where: the critical radius r star.",
+      "display_text_zh": "所以第一个问题是「在哪里」：临界半径 r 星。",
+      "claim_ids": [
+        "CNT-03"
+      ],
+      "visual_trigger_ids": [
+        "CRITICAL_PEAK"
+      ],
+      "rhythm_block_id": "MECHANISM",
+      "visual_keyword": "horizontal coordinate",
+      "pause_after_ms": 260,
+      "sfx_trigger_id": "peak_reveal"
+    },
+    {
+      "unit_id": "V10",
+      "raw_text": "The other question is how much: the barrier delta G star.",
+      "display_text": "The other question is how much: the barrier delta G star.",
+      "spoken_text": "The other question is how much: the barrier delta G star.",
+      "display_text_zh": "第二个问题是「有多高」：能垒 ΔG 星。",
+      "claim_ids": [
+        "CNT-03"
+      ],
+      "visual_trigger_ids": [
+        "BARRIER_EQ"
+      ],
+      "rhythm_block_id": "MECHANISM",
+      "visual_keyword": "vertical coordinate",
+      "pause_after_ms": 650,
+      "sfx_trigger_id": "peak_reveal"
+    },
+    {
+      "unit_id": "V11",
+      "raw_text": "The interface energy enters the barrier cubed.",
+      "display_text": "The interface energy enters the barrier cubed.",
+      "spoken_text": "The interface energy enters the barrier cubed.",
+      "display_text_zh": "界面能以三次方进入能垒。",
+      "claim_ids": [
+        "CNT-03"
+      ],
+      "visual_trigger_ids": [
+        "GAMMA_CUBED_PULSE"
+      ],
+      "rhythm_block_id": "MECHANISM",
+      "visual_keyword": "gamma cubed",
+      "pause_after_ms": 220,
+      "sfx_trigger_id": "crossover"
+    },
+    {
+      "unit_id": "V12",
+      "raw_text": "The bulk driving force enters squared, in the denominator.",
+      "display_text": "The bulk driving force enters squared, in the denominator.",
+      "spoken_text": "The bulk driving force enters squared, in the denominator.",
+      "display_text_zh": "体相驱动力以平方出现在分母里。",
+      "claim_ids": [
+        "CNT-03"
+      ],
+      "visual_trigger_ids": [
+        "DRIVING_FORCE_SQUARED_PULSE"
+      ],
+      "rhythm_block_id": "MECHANISM",
+      "visual_keyword": "driving force squared",
+      "pause_after_ms": 220,
+      "sfx_trigger_id": "crossover"
+    },
+    {
+      "unit_id": "V13",
+      "raw_text": "At small radius, the surface term dominates the curve.",
+      "display_text": "Left of the peak, the curve rises and shrinking is favored.",
+      "spoken_text": "Left of the peak, the curve rises and shrinking is favored.",
+      "display_text_zh": "峰点左侧，曲线上升，收缩更受青睐。",
+      "claim_ids": [
+        "CNT-04"
+      ],
+      "visual_trigger_ids": [
+        "SUBCRITICAL_RETURN"
+      ],
+      "rhythm_block_id": "MECHANISM",
+      "visual_keyword": "surface dominated",
+      "pause_after_ms": 200,
+      "sfx_trigger_id": "crossover"
+    },
+    {
+      "unit_id": "V14",
+      "raw_text": "At larger radius, the bulk term takes over.",
+      "display_text": "Right of the peak, the curve falls and growth lowers free energy.",
+      "spoken_text": "Right of the peak, the curve falls and growth lowers free energy.",
+      "display_text_zh": "峰点右侧，曲线下降，长大使自由能降低。",
+      "claim_ids": [
+        "CNT-04"
+      ],
+      "visual_trigger_ids": [
+        "SUPERCRITICAL_DESCENT"
+      ],
+      "rhythm_block_id": "MECHANISM",
+      "visual_keyword": "bulk dominated",
+      "pause_after_ms": 200,
+      "sfx_trigger_id": "crossover"
+    },
+    {
+      "unit_id": "V15",
+      "raw_text": "This model assumes a sharp, isotropic interface.",
+      "display_text": "This model assumes a sharp, isotropic interface.",
+      "spoken_text": "This model assumes a sharp, isotropic interface.",
+      "display_text_zh": "这个模型假设界面尖锐，且各向同性。",
+      "claim_ids": [
+        "CNT-05"
+      ],
+      "visual_trigger_ids": [
+        "MODEL_ASSUMPTION"
+      ],
+      "rhythm_block_id": "APPLICATION",
+      "visual_keyword": "model scope",
+      "pause_after_ms": 200,
+      "sfx_trigger_id": "resolve"
+    },
+    {
+      "unit_id": "V16",
+      "raw_text": "Real nuclei need not be spheres at small sizes.",
+      "display_text": "Real nuclei need not be spheres at small sizes.",
+      "spoken_text": "Real nuclei need not be spheres at small sizes.",
+      "display_text_zh": "真实晶核在极小尺度下未必是球形。",
+      "claim_ids": [
+        "CNT-05"
+      ],
+      "visual_trigger_ids": [
+        "REAL_SYSTEMS"
+      ],
+      "rhythm_block_id": "APPLICATION",
+      "visual_keyword": "model limit",
+      "pause_after_ms": 200,
+      "sfx_trigger_id": "resolve"
+    },
+    {
+      "unit_id": "V17",
+      "raw_text": "The curve gives a tendency, not a growth rate.",
+      "display_text": "The curve gives a tendency, not a growth rate.",
+      "spoken_text": "The curve gives a tendency, not a growth rate.",
+      "display_text_zh": "曲线给出的是热力学趋势，不是生长速率。",
+      "claim_ids": [
+        "CNT-04"
+      ],
+      "visual_trigger_ids": [
+        "THERMO_CAVEAT"
+      ],
+      "rhythm_block_id": "APPLICATION",
+      "visual_keyword": "tendency",
+      "pause_after_ms": 200,
+      "sfx_trigger_id": "resolve"
+    },
+    {
+      "unit_id": "V18",
+      "raw_text": "Position and height answer different questions.",
+      "display_text": "Position and height answer different questions.",
+      "spoken_text": "Position and height answer different questions.",
+      "display_text_zh": "位置与高度，回答的是两个不同的问题。",
+      "claim_ids": [
+        "CNT-03"
+      ],
+      "visual_trigger_ids": [
+        "TAKEAWAY"
+      ],
+      "rhythm_block_id": "TAKEAWAY",
+      "visual_keyword": "final principle",
+      "pause_after_ms": 240,
+      "sfx_trigger_id": "resolve"
+    }
+  ],
+  "pronunciation_review_text": "Free energy curve. Critical radius. Free-energy barrier. Interfacial energy. Bulk driving force. Delta G star. Thermodynamic tendency. Isotropic interface."
+}

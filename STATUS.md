@@ -69,3 +69,25 @@ The source was authored and committed through GitHub. This environment cannot ex
 ## Next step
 
 The user syncs this branch, runs Setup_Slice_A.bat once, then Run_Slice_A.bat. Use the resulting outputs/<run>/run.log, environment_report.json, qa_report.json, and REVIEW.md to fix only observed Slice A defects. Slice B remains unauthorized until Slice A has been reviewed and accepted.
+
+
+## Separate Channels draft-uploader implementation
+
+The independent branch feat/milestone-2-channels-draft-uploader contains a guarded local draft uploader. This records code presence only; it does not mark V5 milestone exit conditions or the live upload proof complete.
+
+- Deterministic channels_draft.json metadata uses the Fact Card's explicit channels_title (6–16 characters), scientific question and scope.
+- The user has granted standing authorization for strict-QA-PASS outputs to be saved as unpublished drafts without per-video or Fact Card approval prompts. This does not authorize publication.
+- approve-fact-card remains available for the separate topic-governance decision to admit a Fact Card into the human-approved Verified Topic Pool; it is not required for draft creation.
+- Every uploaded video must still pass strict QA PASS, metadata validation, account identity verification and duplicate checks.
+- The dedicated Edge/Playwright uploader uses a local session record, semantic selector config, pre-upload draft snapshot, single save click and post-save draft-list reconciliation.
+- Ambiguous save results become UPLOAD_UNKNOWN; reconciliation is read-only and never retries.
+- The save/publish boundary is draft-only. No Publish, Send, Schedule, Delete or Overwrite operation is implemented.
+- Local entry points: Open_Channels_Session.bat, Inspect_Channels_UI.bat, Save_To_Channels_Draft.bat and Run_And_Save_Slice_A_Draft.bat. The latter generates one Slice A review sample and uploads that exact run after strict QA PASS. Approve_Fact_Card.bat and Approve_Latest_Run.bat remain optional governance/audit routes.
+
+**Not yet verified:** Windows installation, Edge/CDP persistence, QR login, live selectors, actual video upload, save-draft behavior, draft-list row reconciliation and Edge persistence after CLI exit. Do not report a real Channels draft until the new entry has been read back from the real account.
+
+## Live Edge findings and frame-aware correction
+
+Local acceptance confirmed account 「成核生长」, the 6–16 character short-title input, the MP4 file input and the 「保存草稿」 control. It also found that the description editor is inside the content iframe and has an empty-valued contenteditable attribute. The uploader has now been updated to search every frame for title/description fields, save button, preview, account identity and draft-list controls. The description selector uses attribute presence rather than requiring contenteditable="true"; UI inspection waits up to 15 seconds for the SPA account node and reports controls by frame.
+
+The first Windows report predates this correction. The latest frame-aware revision still requires one local full pytest run and a read-only UI inspection. No approval or upload has occurred.

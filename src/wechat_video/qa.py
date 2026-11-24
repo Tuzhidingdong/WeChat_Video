@@ -215,15 +215,44 @@ def run_qa(
         audio_duration is not None and abs(video_duration - audio_duration) <= 0.35,
         f"video={video_duration:.3f}s; audio={audio_duration if audio_duration is not None else 'unavailable'}",
     )
+    caption_cues = timeline.get("subtitle_cues")
+    if isinstance(caption_cues, list):
+        speech_ids = {str(cue["unit_id"]) for cue in timeline["speech_units"]}
+        caption_ids = {str(item.get("unit_id") or "") for item in caption_cues}
+        coverage_ok = bool(caption_cues) and caption_ids == speech_ids
+        check(
+            "subtitle_phrase_coverage", coverage_ok,
+            f"covered={len(caption_ids & speech_ids)}/{len(speech_ids)}; captions={len(caption_cues)}",
+        )
+        speech_map = {str(cue["unit_id"]): cue for cue in timeline["speech_units"]}
+        timing_ok = all(
+            item.get("unit_id") in speech_map
+            and int(speech_map[str(item["unit_id"])]["start_ms"]) <= int(item.get("start_ms", -1))
+            < int(item.get("end_ms", -1))
+            <= int(speech_map[str(item["unit_id"])]["end_ms"])
+            and bool(str(item.get("text") or "").strip())
+            for item in caption_cues
+        )
+        check(
+            "subtitle_phrase_timing_within_speech", timing_ok,
+            "Each caption has source speech text and is bounded by its measured WAV cue.",
+        )
+        check(
+            "rendered_subtitle_cue_count", subtitle_count == len(caption_cues),
+            f"rendered={subtitle_count}; planned={len(caption_cues)}",
+        )
+    else:
+        check(
+            "one_subtitle_cue_per_speech_unit",
+            subtitle_count == len(timeline["speech_units"]),
+            f"{subtitle_count} vs {len(timeline['speech_units'])}",
+        )
+    expected_cover_ms = int(timeline.get("cover_duration_ms", 1000))
     check(
-        "one_subtitle_cue_per_speech_unit",
-        subtitle_count == len(timeline["speech_units"]),
-        f"{subtitle_count} vs {len(timeline['speech_units'])}",
-    )
-    check(
-        "explicit_one_second_cover",
-        timeline["cover"]["start_ms"] == 0 and timeline["cover"]["end_ms"] == 1000,
-        str(timeline["cover"]),
+        "explicit_cover_duration",
+        timeline["cover"]["start_ms"] == 0
+        and timeline["cover"]["end_ms"] == expected_cover_ms,
+        f"expected={expected_cover_ms} ms; actual={timeline['cover']}",
     )
     check(
         "first_speech_after_cover",

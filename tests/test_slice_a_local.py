@@ -32,6 +32,7 @@ def _english_script() -> dict:
     return json.loads((ROOT / "content" / "sample_script.en.json").read_text(encoding="utf-8"))
 
 
+
 def test_repository_fact_card_gate_blocks_pending_card() -> None:
     card = ROOT / "fact_cards" / "critical_nucleus_free_energy_candidate.json"
     sources = ROOT / "fact_cards" / "sources.json"
@@ -44,6 +45,18 @@ def test_repository_fact_card_gate_blocks_pending_card() -> None:
 
 def test_english_script_has_no_cjk_and_valid_claim_links() -> None:
     script = _english_script()
+    routine_pauses = [
+        int(unit.get("pause_after_ms", 200))
+        for unit in script["speech_units"][:-1]
+        if int(unit.get("pause_after_ms", 200)) < 500
+    ]
+    comprehension_pauses = [
+        int(unit.get("pause_after_ms", 200))
+        for unit in script["speech_units"][:-1]
+        if int(unit.get("pause_after_ms", 200)) >= 500
+    ]
+    assert routine_pauses and max(routine_pauses) <= 220
+    assert len(comprehension_pauses) >= 2
     assert script["language"] == "en-US"
     visible = [script["title"], script["pronunciation_review_text"]]
     for unit in script["speech_units"]:
@@ -74,6 +87,10 @@ def test_visual_stage_mapping_is_unique_and_manifest_consistent() -> None:
     assert all(stage["active_stage"] == stage["stage_id"] for stage in manifest["stages"])
     assert all(
         stage["transition_start_frame"] <= stage["transition_end_frame"] <= stage["end_frame"]
+        for stage in manifest["stages"]
+    )
+    assert all(
+        450 <= stage["transition_duration_ms"] <= 800
         for stage in manifest["stages"]
     )
     critical_unit = next(

@@ -9,11 +9,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import soundfile as sf
 
 
 class LocalTtsError(RuntimeError):
     pass
+
+
+def _soundfile_module():
+    """Load the audio I/O dependency only when a TTS job actually runs."""
+    try:
+        import soundfile
+    except ImportError as exc:
+        raise LocalTtsError(
+            "The soundfile package is required for offline audio generation. "
+            "Install the project's audio runtime dependencies."
+        ) from exc
+    return soundfile
 
 
 def engine_label(model_root: Path) -> str:
@@ -102,6 +113,7 @@ def _generate_with_personal_voice(
     audio_dir: Path,
     pronunciation_text: str,
 ) -> list[dict[str, Any]]:
+    sf = _soundfile_module()
     root, profile_dir, voice_python, worker = _voice_profile_paths()
     profile_json = profile_dir / "voice_profile.json"
     target_se = profile_dir / "target_se.pth"
@@ -227,6 +239,7 @@ def generate_speech_units(
             "Personal OpenVoice profile is required; generic/Piper fallback is disabled. "
             "Run enrollment before producing a Slice A sample."
         )
+    sf = _soundfile_module()
     return _generate_with_personal_voice(units, audio_dir, pronunciation_text)
     # Legacy sherpa path is intentionally unreachable in the daily production route.
     sherpa, engine = _create_engine(model_root)
@@ -288,4 +301,64 @@ def generate_speech_units(
         # The sherpa-onnx Python wrapper owns native resources; no network session is used.
         del engine
 
+    return results
+
+
+def generate_chinese_speech_units(
+    model_root: Path,
+    units: list[dict[str, Any]],
+    audio_dir: Path,
+) -> list[dict[str, Any]]:
+    """Generate local Chinese narration with the existing offline MeloTTS zh_en model.
+
+    This intentionally does not use the English-trained personal voice profile and
+    never falls back to a cloud provider or a different generic voice.
+    """
+    if not units:
+        raise LocalTtsError("Article-summary TTS received no speech units.")
+    sf = _soundfile_module()
+    sherpa, engine = _create_engine(model_root)
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    results: list[dict[str, Any]] = []
+    try:
+        for unit in units:
+            unit_id = str(unit.get("unit_id") or "")
+            spoken_text = str(unit.get("spoken_text") or "").strip()
+            if not unit_id or not spoken_text:
+                raise LocalTtsError("Every Chinese speech unit requires unit_id and spoken_text.")
+            if any(char in unit_id for char in ("/", "\\", ":", "..")):
+                raise LocalTtsError(f"Unsafe speech unit id: {unit_id!r}")
+            output = audio_dir / f"{unit_id}.wav"
+            generation = sherpa.GenerationConfig()
+            generation.sid = 0
+            generation.speed = 1.0
+            generation.silence_scale = 0.2
+            audio = engine.generate(spoken_text, generation)
+            if audio.samples is None or len(audio.samples) == 0:
+                raise LocalTtsError(f"{unit_id} produced no valid Chinese audio.")
+            sf.write(
+                str(output),
+                audio.samples,
+                samplerate=int(audio.sample_rate),
+                subtype="PCM_16",
+                format="WAV",
+            )
+            info = sf.info(str(output))
+            if info.frames <= 0 or info.samplerate <= 0 or info.channels != 1:
+                raise LocalTtsError(f"{unit_id} Chinese audio metadata is invalid: {info}")
+            results.append({
+                "unit_id": unit_id,
+                "audio_file": str(output),
+                "sample_rate": int(info.samplerate),
+                "channels": int(info.channels),
+                "frames": int(info.frames),
+                "duration_seconds": float(info.duration),
+                "tts_engine": "sherpa-onnx OfflineTts / VITS MeloTTS zh_en",
+                "tts_engine_version": importlib.metadata.version("sherpa-onnx"),
+                "provider": "cpu",
+                "voice_profile": None,
+                "speed": 1.0,
+            })
+    finally:
+        del engine
     return results

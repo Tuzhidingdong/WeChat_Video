@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "account_name": "成核生长",
+  "create_url": "https://channels.weixin.qq.com/platform/post/create",
+  "draft_list_url": "https://channels.weixin.qq.com/platform/post/draftListManager",
+  "platform_url": "https://channels.weixin.qq.com/platform",
+  "edge_executable": null,
+  "edge_profile_dir": "runtime/edge-profile",
+  "headless": true,
+  "session_file": "runtime/edge_session.json",
+  "jobs_dir": "runtime/upload_jobs",
+  "approvals_dir": "runtime/approvals",
+  "selectors_file": "config/selectors.yaml",
+  "login_wait_seconds": 180,
+  "edge_start_timeout_seconds": 30,
+  "upload_timeout_seconds": 1800,
+  "draft_verify_timeout_seconds": 90,
+  "draft_verify_poll_interval_seconds": 3,
+  "draft_verify_initial_settle_seconds": 3,
+  "require_preview_ready": true,
+  "title_min_chars": 6,
+  "title_max_chars": 16,
+  "description_max_chars": 1000,
+  "default_tags": [
+    "#成核生长",
+    "#科学动画",
+    "#材料科学"
+  ],
+  "safety": {
+    "allow_publish": false,
+    "allow_schedule": false,
+    "allow_delete": false,
+    "allow_overwrite": false,
+    "cdp_host": "127.0.0.1"
+  },
+  "ui_ready_timeout_seconds": 15,
+  "ui_settle_ms": 750
+}
