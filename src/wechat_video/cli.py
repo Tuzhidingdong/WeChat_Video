@@ -293,7 +293,7 @@ def main(argv: list[str] | None = None) -> int:
                 published_date=args.published_date,
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
-            return 0 if result.get("overall_state") == "DRAFTS_SAVED" else 2
+            return 0 if result.get("overall_state") in {"DRAFTS_SAVED", "COMPLETED_WITH_SKIPS"} else 2
         if args.command == "run-slice-a":
             _validate_editorial_angle(args.fact_card, args.script)
             run_dir = run_slice_a(
