@@ -900,8 +900,10 @@ def run_daily_literature(
         try:
             result = _run_literature_locked(project_root, config, published_date=target)
         except UploadUnknownError as exc:
-            _mark_daily_job(project_root, config, target, "literature", "UPLOAD_UNKNOWN", str(exc))
-            result = {"state": "UPLOAD_UNKNOWN", "content_type": "literature", "error": str(exc)}
+            recovered_state = _mark_daily_job(
+                project_root, config, target, "literature", "UPLOAD_UNKNOWN", str(exc)
+            )
+            result = {"state": recovered_state, "content_type": "literature", "error": str(exc)}
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             failed_state = _mark_daily_job(project_root, config, target, "literature", "FAILED", message)
@@ -925,8 +927,10 @@ def run_daily_popularization(
         try:
             result = _run_popularization_locked(project_root, config, local_date=target)
         except UploadUnknownError as exc:
-            _mark_daily_job(project_root, config, target, "popularization", "UPLOAD_UNKNOWN", str(exc))
-            result = {"state": "UPLOAD_UNKNOWN", "content_type": "popularization", "error": str(exc)}
+            recovered_state = _mark_daily_job(
+                project_root, config, target, "popularization", "UPLOAD_UNKNOWN", str(exc)
+            )
+            result = {"state": recovered_state, "content_type": "popularization", "error": str(exc)}
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             failed_state = _mark_daily_job(project_root, config, target, "popularization", "FAILED", message)
@@ -960,8 +964,10 @@ def run_daily_two_videos(project_root: Path, *, published_date: str | None = Non
                 else:
                     results[key] = callback(project_root, config, local_date=target)
             except UploadUnknownError as exc:
-                _mark_daily_job(project_root, config, target, key, "UPLOAD_UNKNOWN", str(exc))
-                results[key] = {"state": "UPLOAD_UNKNOWN", "error": str(exc)}
+                recovered_state = _mark_daily_job(
+                    project_root, config, target, key, "UPLOAD_UNKNOWN", str(exc)
+                )
+                results[key] = {"state": recovered_state, "error": str(exc)}
             except Exception as exc:
                 message = f"{type(exc).__name__}: {exc}"
                 failed_state = _mark_daily_job(project_root, config, target, key, "FAILED", message)
