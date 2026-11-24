@@ -232,8 +232,19 @@ def _extract_model_usage(stdout: str) -> dict[str, Any]:
         totals["input"] += int(tokens.get("input") or 0)
         totals["output"] += int(tokens.get("output") or 0)
         totals["reasoning"] += int(tokens.get("reasoning") or 0)
-        totals["cache_read"] += int(cache.get("read") or tokens.get("cache_read") or 0)
-        totals["cache_write"] += int(cache.get("write") or tokens.get("cache_write") or 0)
+        totals["cache_read"] += int(
+            cache.get("read")
+            or tokens.get("cache_read")
+            or tokens.get("cacheRead")
+            or 0
+        )
+        totals["cache_write"] += int(
+            cache.get("write")
+            or tokens.get("cache_write")
+            or tokens.get("cacheWrite")
+            or tokens.get("cache_write_5m")
+            or 0
+        ) + int(cache.get("write_5m") or cache.get("write_1h") or 0)
         if part.get("cost") is not None:
             try:
                 cost_total += float(part["cost"])
@@ -241,12 +252,18 @@ def _extract_model_usage(stdout: str) -> dict[str, Any]:
             except (TypeError, ValueError):
                 pass
         step_count += 1
-    token_total = sum(totals.values())
+    # Keep normal input/output/reasoning usage distinct from cache I/O.
+    # In particular, cache read/write is not added to the primary token total.
+    token_total = totals["input"] + totals["output"] + totals["reasoning"]
     return {
         "available": step_count > 0 and token_total > 0,
         "session_ids": sorted(session_ids),
         "step_count": step_count,
-        "tokens": {**totals, "total": token_total},
+        "tokens": {
+            **totals,
+            "total": token_total,
+            "total_including_cache_io": token_total + totals["cache_read"] + totals["cache_write"],
+        },
         "cost": round(cost_total, 8) if cost_available else None,
         "cost_currency": "USD" if cost_available else None,
         "cost_available": cost_available,
