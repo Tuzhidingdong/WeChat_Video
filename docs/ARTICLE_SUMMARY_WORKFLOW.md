@@ -192,6 +192,19 @@ the reusable production path; they are not per-video editing instructions.
   The mix report measures cover/outro music and verifies that inter-unit gaps
   remain near digital silence.
 
+### Exact final video frame budget
+
+The Manim scene may finish a small number of frames before the audio-derived
+programme boundary because individual scene timings are quantized to video
+frames. Final assembly therefore converts to the target constant frame rate,
+clones the final scene frame only when needed, and then trims to the exact frame
+count calculated from the global PCM sample clock. The video-only encode and
+the final stream-copy mux are both probed and must contain exactly that frame
+count. The mux does not use `-shortest`, which could discard a valid final
+video frame when the audio duration falls fractionally before the rounded video
+frame boundary. QA continues to require an exact frame-count match; no tolerance
+or duration threshold is relaxed.
+
 ### Automated delivery artifacts
 
 Each local run records:
