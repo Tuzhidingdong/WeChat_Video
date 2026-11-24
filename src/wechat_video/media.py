@@ -36,6 +36,35 @@ def probe_media(path: Path, *, count_frames: bool = False) -> dict[str, Any]:
     return data
 
 
+def _video_frame_count(path: Path) -> int:
+    """Count decoded video frames; fail closed when ffprobe cannot prove the count."""
+    probe = probe_media(path, count_frames=True)
+    video = next(
+        (stream for stream in probe.get("streams", []) if stream.get("codec_type") == "video"),
+        None,
+    )
+    if video is None:
+        raise ExternalProcessError(f"视频文件没有可识别的视频流：{path}")
+    try:
+        count = int(video.get("nb_read_frames") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ExternalProcessError(f"无法读取视频帧数：{path}") from exc
+    if count <= 0:
+        raise ExternalProcessError(f"视频没有可验证的有效帧数：{path}")
+    return count
+
+
+def _frame_completion_filter(expected_frames: int) -> str:
+    """Clone the final scene frame as needed, then enforce the exact programme frame budget."""
+    target = int(expected_frames)
+    if target <= 0:
+        raise ValueError(f"Expected video frame count must be positive, got {target}.")
+    # tpad runs after CFR conversion so a Manim scene that ends a few frames
+    # early cannot shorten the muxed programme. The subsequent trim remains
+    # strict: it emits exactly the audio-derived global frame budget.
+    return f"tpad=stop_mode=clone:stop={target},trim=end_frame={target}"
+
+
 def _loudnorm_measurement(
     audio_path: Path, run_dir: Path, target_i: float, target_tp: float
 ) -> dict[str, str]:
@@ -621,6 +650,7 @@ def assemble_final_video(
     # Preserve the existing one-pass full-programme loudness target, but encode
     # video and normalized audio in separate FFmpeg processes. This removes the
     # combined video-filter/audio-loudnorm graph that repeatedly stalled at frame 0.
+    scene_input_frames = _video_frame_count(scene_video)
     measured = _loudnorm_measurement(audio_wav, run_dir, target_i, target_tp)
     loudnorm = (
         f"loudnorm=I={target_i}:TP={target_tp}:LRA=11:print_format=summary"
@@ -641,11 +671,12 @@ def assemble_final_video(
     if video_only.exists() or normalized_audio.exists():
         raise RuntimeError("当前运行目录已有 FFmpeg 中间产物；拒绝覆盖。")
 
+    frame_completion = _frame_completion_filter(expected_frames)
     filter_chain = (
         "scale=1080:1920:force_original_aspect_ratio=decrease:flags=lanczos,"
         "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,"
         "fps=30,setsar=1,"
-        f"trim=end_frame={int(expected_frames)},setpts=PTS-STARTPTS,"
+        f"{frame_completion},setpts=PTS-STARTPTS,"
         f"format=yuv420p,subtitles={relative_ass.as_posix()}"
     )
     output_mp4.parent.mkdir(parents=True, exist_ok=True)
@@ -715,6 +746,13 @@ def assemble_final_video(
         str(video_only),
     ]
     run_stage("video_encode", video_command, video_only)
+    video_only_frames = _video_frame_count(video_only)
+    if video_only_frames != int(expected_frames):
+        raise ExternalProcessError(
+            "FFmpeg video_encode did not meet the exact global frame budget: "
+            f"encoded={video_only_frames}; expected={int(expected_frames)}; "
+            f"scene_input={scene_input_frames}."
+        )
 
     # Stage 2: one full-programme loudnorm pass and AAC encode, independent of video.
     audio_command = [
@@ -761,6 +799,13 @@ def assemble_final_video(
         str(output_mp4),
     ]
     mux_result = run_stage("final_mux", mux_command, output_mp4)
+    final_mux_frames = _video_frame_count(output_mp4)
+    if final_mux_frames != int(expected_frames):
+        raise ExternalProcessError(
+            "Final mux did not preserve the exact global frame budget: "
+            f"muxed={final_mux_frames}; expected={int(expected_frames)}; "
+            f"video_only={video_only_frames}."
+        )
 
     return {
         "loudness_target": {
@@ -778,5 +823,14 @@ def assemble_final_video(
         "ffmpeg_no_progress_timeout_seconds": 120,
         "expected_frames": int(expected_frames),
         "video_trim": f"trim=end_frame={int(expected_frames)}",
+        "video_frame_validation": {
+            "scene_input_frames": scene_input_frames,
+            "video_only_encoded_frames": video_only_frames,
+            "final_mux_frames": final_mux_frames,
+            "expected_frames": int(expected_frames),
+            "scene_tail_frames_padded": max(0, int(expected_frames) - scene_input_frames),
+            "status": "PASS",
+            "policy": "clone_last_scene_frame_if_needed_then_strictly_trim_to_audio_frame_budget",
+        },
         "stages": stage_reports,
     }
