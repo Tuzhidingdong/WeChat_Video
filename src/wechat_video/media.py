@@ -793,7 +793,9 @@ def assemble_final_video(
         "1:a:0",
         "-c",
         "copy",
-        "-shortest",
+        # Do not use -shortest here: the encoded audio and the nearest-frame
+        # video duration can differ by less than half a frame. Truncating to
+        # the shorter stream can discard a valid final video frame.
         "-movflags",
         "+faststart",
         str(output_mp4),
