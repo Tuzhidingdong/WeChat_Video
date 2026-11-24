@@ -52,7 +52,7 @@ def _unit(unit_id: str, word_boundaries: list[dict] | None = None) -> dict:
 def test_video_frame_completion_pads_tail_before_strict_frame_budget_trim() -> None:
     filters = _frame_completion_filter(2188)
 
-    assert filters == "tpad=stop_mode=clone:stop=2188,trim=end_frame=2188"
+    assert filters == "tpad=stop_mode=clone:stop=6,trim=end_frame=2188"
     assert filters.index("tpad=") < filters.index("trim=end_frame=")
 
 
@@ -130,12 +130,13 @@ def test_final_video_assembly_pads_short_scene_and_preserves_exact_muxed_frames(
         "final_mux_frames": 2188,
         "expected_frames": 2188,
         "scene_tail_frames_padded": 4,
+        "maximum_allowed_tail_padding_frames": 6,
         "status": "PASS",
         "policy": "clone_last_scene_frame_if_needed_then_strictly_trim_to_audio_frame_budget",
     }
     video_command = next(args for name, args in observed_commands if name == "video_encode")
     video_filter = video_command[video_command.index("-vf") + 1]
-    assert "tpad=stop_mode=clone:stop=2188,trim=end_frame=2188" in video_filter
+    assert "tpad=stop_mode=clone:stop=6,trim=end_frame=2188" in video_filter
     mux_command = next(args for name, args in observed_commands if name == "final_mux")
     assert "-shortest" not in mux_command
 def test_timeline_has_a_measured_outro_and_a_single_sample_clock(tmp_path: Path) -> None:
