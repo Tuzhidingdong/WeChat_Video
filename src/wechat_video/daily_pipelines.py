@@ -249,7 +249,7 @@ def _run_content_planner(
     if not resolved:
         raise DailyPipelineError(f"OpenCode executable not found on PATH: {executable}")
     agent = str(opencode_cfg.get("agent") or "daily-content-planner")
-    cmd = [resolved, "run", "--quiet", "--format", "json", "--agent", agent]
+    cmd = [resolved, "run", "--format", "json", "--agent", agent]
     model = opencode_cfg.get("model")
     if model:
         cmd.extend(["--model", str(model)])
