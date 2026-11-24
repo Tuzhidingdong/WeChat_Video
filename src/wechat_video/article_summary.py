@@ -58,6 +58,69 @@ def _audio_duration_breakdown(timeline: dict[str, Any]) -> dict[str, Any]:
     return totals
 
 
+def _narration_duration_budget(
+    summary: dict[str, Any],
+    tts_config: dict[str, Any],
+) -> dict[str, Any]:
+    """Estimate a one-minute script budget before any online TTS request."""
+    policy = tts_config.get("duration_policy") or {}
+    if not policy:
+        raise ArticleSourceError("Article-summary duration_policy is required.")
+    character_range = policy.get("target_cjk_characters") or {}
+    minimum_characters = int(character_range.get("minimum", 0))
+    maximum_characters = int(character_range.get("maximum", 0))
+    cjk_characters = int(summary.get("spoken_cjk_characters", 0))
+    if minimum_characters <= 0 or maximum_characters < minimum_characters:
+        raise ArticleSourceError("duration_policy target_cjk_characters is invalid.")
+    if not minimum_characters <= cjk_characters <= maximum_characters:
+        raise ArticleSourceError(
+            f"Spoken script has {cjk_characters} CJK characters; the calibrated "
+            f"one-minute planning range is {minimum_characters}–{maximum_characters}. "
+            "Revise the content plan before TTS; do not accelerate or truncate the finished audio."
+        )
+
+    base_rate = float(policy.get("expected_cjk_characters_per_second_at_default_rate", 0))
+    rate_settings = policy.get("rate_adjustment") or {}
+    reference_rate = float(rate_settings.get("reference_rate_percent", 0))
+    configured_rate = str(
+        (tts_config.get("providers") or {}).get("edge_tts", {}).get("rate", "+0%")
+    )
+    match = re.fullmatch(r"([+-]?\d+(?:\.\d+)?)%", configured_rate)
+    if base_rate <= 0 or not match or 1 + reference_rate / 100 <= 0:
+        raise ArticleSourceError("Duration calibration or configured Edge-TTS rate is invalid.")
+    actual_rate = float(match.group(1))
+    if abs(actual_rate) > float(rate_settings.get("maximum_percent", 8)):
+        raise ArticleSourceError("Configured Edge-TTS speed exceeds the approved duration-policy limit.")
+    effective_rate = base_rate * (1 + actual_rate / 100) / (1 + reference_rate / 100)
+    if effective_rate <= 0:
+        raise ArticleSourceError("Effective narration character rate must be positive.")
+
+    units = summary.get("speech_units") or []
+    pause_seconds = sum(
+        max(450, int(unit.get("pause_after_ms", 500)))
+        for unit in units[:-1]
+    ) / 1000
+    cover_seconds = int(summary.get("cover_duration_ms", 1500)) / 1000
+    outro_seconds = int(summary.get("outro_duration_ms", 900)) / 1000
+    estimated_speech_seconds = cjk_characters / effective_rate
+    estimated_total = estimated_speech_seconds + cover_seconds + pause_seconds + outro_seconds
+    return {
+        "target_seconds": float(policy.get("target_programme_seconds", 60)),
+        "minimum_seconds": float(policy.get("minimum_programme_seconds", 58)),
+        "maximum_seconds": float(policy.get("maximum_programme_seconds", 62)),
+        "spoken_cjk_characters": cjk_characters,
+        "estimated_cjk_characters_per_second": round(effective_rate, 3),
+        "estimated_speech_seconds": round(estimated_speech_seconds, 3),
+        "estimated_cover_seconds": round(cover_seconds, 3),
+        "estimated_pause_seconds": round(pause_seconds, 3),
+        "estimated_outro_seconds": round(outro_seconds, 3),
+        "estimated_programme_seconds": round(estimated_total, 3),
+        "configured_edge_rate": configured_rate,
+        "automatic_rate_adaptation": False,
+        "measurement_authority": "actual_normalized_pcm_sample_clock",
+    }
+
+
 def _validate_edge_word_boundary_metadata(tts_results: list[dict[str, Any]]) -> None:
     """Fail closed when an existing Edge metadata file cannot prove lexical coverage."""
     failures = []
@@ -292,6 +355,7 @@ def run_article_summary(
     article = package["article"]
     # Fail fast on missing TTS/runtime dependencies before creating an output run.
     environment = _runtime_preflight(project_root, str(article["title"]))
+    duration_plan = _narration_duration_budget(summary, environment["tts_config"])
 
     output_base = output_root if output_root.is_absolute() else project_root / output_root
     output_base = output_base.resolve()
@@ -399,33 +463,30 @@ def run_article_summary(
     timeline_validation = validate_audio_timeline(timeline)
     _write_json(run_dir / "audio_timeline_validation.json", timeline_validation)
     duration = float(timeline["total_duration_seconds"])
-    if not 45.0 <= duration <= 75.0:
-        breakdown = _audio_duration_breakdown(timeline)
-        non_speech_seconds = (
-            breakdown["cover_seconds"]
-            + breakdown["pause_seconds"]
-            + breakdown["outro_seconds"]
-        )
-        minimum_speech_seconds = max(0.0, 45.0 - non_speech_seconds)
-        maximum_speech_seconds = 75.0 - non_speech_seconds
-        unit_details = ", ".join(
-            f"{unit_id}={seconds:.2f}s"
-            for unit_id, seconds in breakdown["unit_durations_seconds"].items()
-        )
-        speech_budget = (
-            f"{minimum_speech_seconds:.2f}–{maximum_speech_seconds:.2f}s"
-            if maximum_speech_seconds >= 0
-            else f"no feasible speech budget (non-speech timing already exceeds 75s by {-maximum_speech_seconds:.2f}s)"
-        )
+    breakdown = _audio_duration_breakdown(timeline)
+    duration_report = {
+        **duration_plan,
+        "measured_programme_seconds": round(duration, 3),
+        "measured_speech_seconds": round(breakdown["speech_seconds"], 3),
+        "measured_cover_seconds": round(breakdown["cover_seconds"], 3),
+        "measured_pause_seconds": round(breakdown["pause_seconds"], 3),
+        "measured_outro_seconds": round(breakdown["outro_seconds"], 3),
+        "unit_durations_seconds": breakdown["unit_durations_seconds"],
+        "overall_status": (
+            "PASS" if duration_plan["minimum_seconds"] <= duration <= duration_plan["maximum_seconds"]
+            else "FAIL"
+        ),
+    }
+    _write_json(run_dir / "duration_budget_report.json", duration_report)
+    if duration_report["overall_status"] != "PASS":
         raise RuntimeError(
-            f"Measured programme audio is {duration:.2f}s; expected 45–75s. "
+            f"Measured programme audio is {duration:.2f}s; the one-minute target is "
+            f"{duration_plan['minimum_seconds']:.0f}–{duration_plan['maximum_seconds']:.0f}s. "
             f"Breakdown: speech={breakdown['speech_seconds']:.2f}s, "
             f"cover={breakdown['cover_seconds']:.2f}s, "
             f"inter-unit pauses={breakdown['pause_seconds']:.2f}s, "
             f"outro={breakdown['outro_seconds']:.2f}s. "
-            f"With cover, pauses, and outro unchanged, the speech budget is {speech_budget}; "
-            f"per-unit speech durations: {unit_details}. "
-            "Shorten authored spoken_text; TTS speed, cover, pauses, and outro were not altered."
+            "The run stops before scene rendering; revise the content plan without removing evidence-backed claims."
         )
     sfx_durations = generate_sfx(run_dir / "sfx")
     timeline = attach_editorial_events(timeline, units, sfx_durations)
