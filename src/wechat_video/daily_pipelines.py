@@ -757,9 +757,16 @@ def run_daily_two_videos(project_root: Path, *, published_date: str | None = Non
                 results[key] = {"state": "UPLOAD_UNKNOWN", "error": str(exc)}
             except Exception as exc:
                 results[key] = {"state": "FAILED", "error": f"{type(exc).__name__}: {exc}"}
-    states = [item.get("state") for item in results.values() if isinstance(item, dict)]
-    results["overall_state"] = (
-        "DRAFTS_SAVED" if states and all(state in {"DRAFT_SAVED", "SKIPPED_NO_ELIGIBLE_ARTICLE", "SKIPPED_NO_APPROVED_TOPIC", "DISABLED"} for state in states)
-        else "PARTIAL_OR_BLOCKED"
-    )
+    states = [
+        results[key].get("state")
+        for key in ("literature", "popularization")
+        if isinstance(results.get(key), dict)
+    ]
+    acceptable = {"DRAFT_SAVED", "SKIPPED_NO_ELIGIBLE_ARTICLE", "SKIPPED_NO_APPROVED_TOPIC", "DISABLED"}
+    if states and all(state == "DRAFT_SAVED" for state in states):
+        results["overall_state"] = "DRAFTS_SAVED"
+    elif states and all(state in acceptable for state in states):
+        results["overall_state"] = "COMPLETED_WITH_SKIPS"
+    else:
+        results["overall_state"] = "PARTIAL_OR_BLOCKED"
     return results
