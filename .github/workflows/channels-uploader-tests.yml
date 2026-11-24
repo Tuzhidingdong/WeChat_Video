@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - feat/milestone-2-channels-draft-uploader
+      - feat/daily-literature-and-popularization
   pull_request:
     branches:
       - feat/slice-a-english-visual-refinement
+      - feat/milestone-2-channels-draft-uploader
 
 jobs:
   channels-uploader-tests:
@@ -31,4 +33,5 @@ jobs:
             tests/test_core.py \
             tests/test_qa_hardening.py \
             tests/test_final_refinement_v3.py \
-            tests/test_channels_upload.py
+            tests/test_channels_upload.py \
+            tests/test_daily_pipelines.py
