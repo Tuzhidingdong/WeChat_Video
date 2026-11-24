@@ -3353,14 +3353,17 @@ def _make_article_summary_upload_package(tmp_path: Path, *, eligible: bool = Tru
         "article_id": "article-1",
         "appmsgid": "appmsg-1",
         "title": "已发表的文献精读文章",
+        "source_type": "published_wechat_article",
+        "article_markdown_sha256": "hash-1",
     }
     summary = {
         "article_id": "article-1",
         "channels_title": "精读关键发现",
         "core_thesis": "研究给出了有证据支持的关键发现。",
+        "source_article_sha256": "hash-1",
     }
     (run_dir / "article_summary_manifest.json").write_text(
-        json.dumps({"content_type": "article_summary", "article_id": "article-1"}),
+        json.dumps({"content_type": "article_summary", "article_id": "article-1", "source_article_sha256": "hash-1"}),
         encoding="utf-8",
     )
     (run_dir / "source_record.json").write_text(json.dumps(article), encoding="utf-8")
