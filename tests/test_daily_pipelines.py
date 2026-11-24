@@ -1,0 +1,220 @@
+from __future__ import annotations
+
+import json
+from datetime import date
+from pathlib import Path
+
+import pytest
+
+from wechat_video import daily_pipelines as daily
+
+
+def _write(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _config(root: Path) -> None:
+    _write(root / "configs" / "daily_pipelines.json", {
+        "schema_version": 1,
+        "timezone": "Asia/Shanghai",
+        "outputs_root": "outputs",
+        "runtime_root": "runtime/daily_pipelines",
+        "lock_wait_seconds": 2,
+        "opencode": {
+            "executable": "opencode",
+            "agent": "daily-content-planner",
+            "model": None,
+            "timeout_seconds": 60,
+        },
+        "literature": {
+            "enabled": True,
+            "article_inbox_dir": "runtime/inbox/literature_articles",
+            "max_articles_per_day": 1,
+            "selection_policy": "latest_published_at",
+            "source_cta_text": "更多详细解读见【成核生长】同名公众号",
+            "outro_duration_ms": 1800,
+        },
+        "popularization": {
+            "enabled": True,
+            "fact_cards_dir": "fact_cards",
+            "sources_file": "fact_cards/sources.json",
+            "history_file": "runtime/daily_pipelines/popularization_history.json",
+            "max_topics_per_day": 1,
+            "language": "en-US",
+            "target_duration_seconds": [55, 65],
+        },
+        "upload": {
+            "account_name": "成核生长",
+            "draft_only": True,
+            "automatic_publication": False,
+        },
+    })
+
+
+def _article_package(root: Path, *, published_at: str, article_id: str = "article-1") -> Path:
+    package = root / article_id
+    package.mkdir(parents=True)
+    markdown = (
+        "# 测试文章\n\n"
+        + "研究团队在受控条件下开展实验，并比较了多个实验条件。"
+        "结果显示不同变量会影响观察到的过程。"
+        "作者讨论了证据、机制解释和模型适用范围。"
+        "这些内容需要结合测量条件和实验边界理解。\n\n"
+    ) * 5
+    (package / "article.md").write_bytes(markdown.encode("utf-8"))
+    _write(package / "images.json", {"images": []})
+    _write(package / "article.json", {
+        "schema_version": 1,
+        "account_name": "成核生长",
+        "editorial_slot": 1,
+        "article_type": "literature_translation",
+        "editorial_pillar_id": "literature_manuscript",
+        "publication_status": "PUBLISHED",
+        "appmsgid": article_id,
+        "article_id": article_id,
+        "title": "已发表的文献精读文章",
+        "published_at": published_at,
+        "canonical_url": None,
+        "canonical_url_verified": False,
+    })
+    return package
+
+
+def _fact_card(root: Path, *, status: str) -> tuple[Path, Path]:
+    cards = root / "fact_cards"
+    cards.mkdir(parents=True, exist_ok=True)
+    sources_path = cards / "sources.json"
+    _write(sources_path, {
+        "schema_version": 1,
+        "sources": [{
+            "source_id": "SRC-1",
+            "title": "Source supporting the approved science claims",
+            "url": "https://example.org/source",
+            "access_status": "FULL_TEXT_LOCATED",
+        }],
+    })
+    card_path = cards / "science_topic.json"
+    _write(card_path, {
+        "schema_version": 1,
+        "fact_card_id": "SCIENCE-001",
+        "title": "科学现象背后的关键机制",
+        "channels_title": "关键机制如何起作用",
+        "scientific_question": "为什么这个科学现象会发生？",
+        "scope": "仅讨论 Fact Card 已明确的模型、条件和适用范围。",
+        "approval_status": status,
+        "approved_by": "user" if status == "APPROVED" else None,
+        "approved_at": "2026-11-20T12:00:00+08:00" if status == "APPROVED" else None,
+        "editorial_angle_id": "critical_radius_growth_perspective",
+        "claims": [{
+            "claim_id": "C1",
+            "statement": "在记录的模型条件下，界面代价随面积增加。",
+            "evidence_status": "FULL_TEXT_LOCATED",
+            "source_ids": ["SRC-1"],
+            "conditions": ["模型条件"],
+            "caveats": ["不能外推到未测试体系。"],
+        }],
+    })
+    return card_path, sources_path
+
+
+def test_published_local_date_converts_utc_to_shanghai_calendar_day() -> None:
+    assert daily._published_local_date(
+        "2026-11-23T17:00:00Z", "Asia/Shanghai"
+    ) == date(2026, 11, 24)
+
+
+def test_extract_model_text_accepts_opencode_jsonl_text_events() -> None:
+    output = (
+        '{"type":"text","part":{"type":"text","text":"{\\"schema_version\\":1,"}}\n'
+        '{"type":"text","part":{"type":"text","text":"\\"ok\\":true}"}}\n'
+    )
+    parsed = json.loads(daily._extract_model_text(output))
+    assert parsed == {"schema_version": 1, "ok": True}
+
+
+def test_literature_discovery_selects_only_previous_local_day_and_deduplicates(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    outputs = tmp_path / "outputs"
+    target = date(2026, 11, 24)
+    _article_package(inbox, published_at="2026-11-23T17:00:00Z", article_id="yesterday-article")
+    _article_package(inbox, published_at="2026-11-22T15:00:00+08:00", article_id="older-article")
+
+    candidates, rejected = daily._discover_literature_packages(
+        inbox, outputs, target, "Asia/Shanghai"
+    )
+
+    assert [item["article_id"] for item in candidates] == ["yesterday-article"]
+    assert rejected == []
+
+
+def test_literature_discovery_excludes_articles_already_rendered(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    outputs = tmp_path / "outputs"
+    package = _article_package(
+        inbox, published_at="2026-11-23T18:00:00+08:00", article_id="already-made"
+    )
+    run_dir = outputs / "old-run"
+    run_dir.mkdir(parents=True)
+    _write(run_dir / "article_summary_manifest.json", {"article_id": "already-made"})
+
+    candidates, rejected = daily._discover_literature_packages(
+        inbox, outputs, date(2026, 11, 23), "Asia/Shanghai"
+    )
+
+    assert candidates == []
+    assert rejected[0]["reason"] == "article_already_has_generated_run"
+
+
+def test_pending_fact_cards_never_enter_approved_popularization_pool(tmp_path: Path) -> None:
+    card_path, _ = _fact_card(tmp_path, status="DRAFT_PENDING_USER_REVIEW")
+
+    approved, rejected = daily._approved_popularization_cards(tmp_path, {
+        "popularization": {
+            "fact_cards_dir": "fact_cards",
+            "sources_file": "fact_cards/sources.json",
+        }
+    })
+
+    assert approved == []
+    assert rejected[0]["reason"] == "not_approved"
+
+
+def test_tracked_approved_fact_card_is_eligible_only_with_registered_strategy(tmp_path: Path) -> None:
+    card_path, _ = _fact_card(tmp_path, status="APPROVED")
+
+    approved, rejected = daily._approved_popularization_cards(tmp_path, {
+        "popularization": {
+            "fact_cards_dir": "fact_cards",
+            "sources_file": "fact_cards/sources.json",
+        }
+    })
+
+    assert len(approved) == 1
+    assert approved[0]["fact_card_id"] == "SCIENCE-001"
+    assert approved[0]["path"] == card_path
+    assert rejected == []
+
+
+def test_missing_daily_sources_return_safe_skip_without_model_or_upload(tmp_path: Path) -> None:
+    _config(tmp_path)
+    (tmp_path / "runtime" / "inbox" / "literature_articles").mkdir(parents=True)
+    (tmp_path / "outputs").mkdir()
+    literature = daily.run_daily_literature(tmp_path, published_date="2026-11-23")
+    popularization = daily.run_daily_popularization(tmp_path, local_date="2026-11-24")
+
+    assert literature["state"] == "SKIPPED_NO_ELIGIBLE_ARTICLE"
+    assert popularization["state"] == "SKIPPED_NO_APPROVED_TOPIC"
+
+
+def test_job_record_prevents_automatic_repeat_after_side_effect(tmp_path: Path) -> None:
+    path = tmp_path / "jobs" / "literature.json"
+    record = daily._start_job(
+        path, content_type="literature", local_date=date(2026, 11, 24), source_id="article-1"
+    )
+    daily._update_job(path, record, "VIDEO_QA_PASSED", video_sha256="abc")
+
+    with pytest.raises(daily.DailyPipelineError, match="refusing automatic rerun"):
+        daily._start_job(
+            path, content_type="literature", local_date=date(2026, 11, 24), source_id="article-1"
+        )
