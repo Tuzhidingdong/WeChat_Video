@@ -116,11 +116,10 @@ def test_published_article_package_and_summary_validate(tmp_path: Path) -> None:
     assert metadata["source_article_id"] == "fixture-appmsg-001_0"
     assert metadata["source_appmsgid"] == "fixture-appmsg-001"
     assert metadata["source_cta_text"] == "更多详细解读见【成核生长】同名公众号"
-    assert metadata["extended_link_required"] is True
-    assert metadata["extended_link"]["type"] == "official_account_article"
-    assert metadata["extended_link"]["url"] == "https://mp.weixin.qq.com/s/the-real-published-link"
-    assert metadata["extended_link"]["article_id"] == "fixture-appmsg-001_0"
-    assert metadata["external_article_link_used"] is True
+    assert metadata["extended_link_required"] is False
+    assert metadata["extended_link"] is None
+    assert metadata["extended_link_status"] == "NOT_REQUIRED_CTA_ONLY"
+    assert metadata["external_article_link_used"] is False
     assert metadata["automatic_publication"] is False
 
 
@@ -251,9 +250,9 @@ def test_missing_published_url_does_not_block_draft_metadata_or_require_extended
     assert package["article"]["canonical_url_verified"] is False
     assert metadata["source_article_id"] == "fixture-appmsg-001_0"
     assert metadata["source_cta_text"] == "更多详细解读见【成核生长】同名公众号"
-    assert metadata["extended_link_required"] is True
+    assert metadata["extended_link_required"] is False
     assert metadata["extended_link"] is None
-    assert metadata["extended_link_status"] == "MISSING_VERIFIED_SOURCE_URL"
+    assert metadata["extended_link_status"] == "NOT_REQUIRED_CTA_ONLY"
     assert metadata["external_article_link_used"] is False
     assert metadata["automatic_publication"] is False
 
