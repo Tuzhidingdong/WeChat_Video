@@ -391,6 +391,7 @@ def test_one_minute_script_budget_is_checked_before_tts() -> None:
         "speech_units": [{"pause_after_ms": 450} for _ in range(7)],
     }
     tts_config = {
+        "default_provider": "edge_tts",
         "providers": {"edge_tts": {"rate": "+5%"}},
         "duration_policy": {
             "target_programme_seconds": 60,
