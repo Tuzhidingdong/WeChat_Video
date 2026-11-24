@@ -118,6 +118,39 @@ def _fact_card(root: Path, *, status: str) -> tuple[Path, Path]:
     return card_path, sources_path
 
 
+def test_mixed_offset_published_times_are_sorted_by_absolute_instant(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    outputs = tmp_path / "outputs"
+    # 11:00 UTC is 19:00 in Shanghai and is later than 18:30 Shanghai,
+    # even though lexical ordering of the ISO strings can be misleading.
+    _article_package(inbox, published_at="2026-11-23T11:00:00Z", article_id="later-instant")
+    _article_package(inbox, published_at="2026-11-23T18:30:00+08:00", article_id="earlier-instant")
+
+    candidates, _ = daily._discover_literature_packages(
+        inbox, outputs, date(2026, 11, 23), "Asia/Shanghai"
+    )
+
+    assert candidates[0]["article_id"] == "later-instant"
+
+
+def test_content_planner_fails_closed_without_explicit_model(tmp_path: Path, monkeypatch) -> None:
+    config = {
+        "opencode": {
+            "executable": "opencode",
+            "agent": "daily-content-planner",
+            "model": None,
+            "require_explicit_model": True,
+        }
+    }
+    with pytest.raises(daily.DailyPipelineError, match="No OpenCode model is explicitly configured"):
+        daily._run_content_planner(
+            tmp_path,
+            config,
+            prompt="test",
+            attachments=[],
+        )
+
+
 def test_published_local_date_converts_utc_to_shanghai_calendar_day() -> None:
     assert daily._published_local_date(
         "2026-11-23T17:00:00Z", "Asia/Shanghai"
