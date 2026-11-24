@@ -97,3 +97,8 @@ Preserve the currently accepted visual quality baseline while adding the literat
 - Do not approve Fact Cards on the user's behalf.
 - Do not add a new visual template library or broad visual redesign in this integration.
 - Do not modify frozen `TASK_PLAN.md` V5.
+
+
+### Explicit model configuration
+
+The daily content-planner must use an explicitly named OpenCode model. An empty `opencode.model` value blocks content planning and prevents the pipeline from silently inheriting a local default model.
