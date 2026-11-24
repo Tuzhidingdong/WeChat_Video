@@ -630,11 +630,18 @@ def run_article_summary(
         "inter_unit_silence_preserved": bool(mix_report.get("editorial_music_bed", {}).get("inter_unit_silence_preserved")),
         "narration_rhythm_report": rhythm_report.get("overall_status"),
         "outro_cta_text": "更多详细解读见【成核生长】同名公众号",
-        "outro_cta_rendered": True,
+        "outro_cta_rendered": any(
+            item.get("beat_id") == "outro_cta" and item.get("status") == "PASS"
+            for item in scene_layout_report.get("checks", [])
+        ),
         "upload_eligible": (
             qa["overall_status"] == "PASS"
             and timeline_validation["valid"] is True
             and scene_layout_report.get("overall_status") == "PASS"
+            and any(
+                item.get("beat_id") == "outro_cta" and item.get("status") == "PASS"
+                for item in scene_layout_report.get("checks", [])
+            )
             and claim_ids.issubset({
                 claim_id for unit in units for claim_id in unit["claim_ids"]
             })
