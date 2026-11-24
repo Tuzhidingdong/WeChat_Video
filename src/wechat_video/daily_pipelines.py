@@ -10,10 +10,10 @@ import sys
 import tempfile
 import time
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .article_source import ArticleSourceError, load_article_package
 from .channels_uploader import UploadBlockedError, UploadUnknownError, upload_run_to_channels
@@ -24,6 +24,24 @@ from .pipeline import VISUAL_STRATEGIES, run_slice_a
 
 class DailyPipelineError(RuntimeError):
     pass
+
+
+def _configured_timezone(timezone_name: str):
+    """Resolve a configured timezone, with a narrow Windows-safe Shanghai fallback.
+
+    Some Windows Python installations have no IANA timezone database installed.
+    Shanghai has used UTC+08:00 without daylight-saving transitions since 1991,
+    which is sufficient for the modern article/daily-job timestamps handled here.
+    Other missing timezone names remain fail-closed.
+    """
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        if timezone_name == "Asia/Shanghai":
+            return timezone(timedelta(hours=8), name="Asia/Shanghai")
+        raise DailyPipelineError(
+            f"Invalid configured timezone: {timezone_name!r}; install/provide an IANA timezone database."
+        ) from exc
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -62,10 +80,7 @@ def _load_config(project_root: Path) -> dict[str, Any]:
     if config.get("schema_version") != 1:
         raise DailyPipelineError("Unsupported daily_pipelines.json schema_version.")
     timezone_name = str(config.get("timezone") or "")
-    try:
-        ZoneInfo(timezone_name)
-    except Exception as exc:
-        raise DailyPipelineError(f"Invalid configured timezone: {timezone_name!r}") from exc
+    _configured_timezone(timezone_name)
     if not config.get("literature", {}).get("article_inbox_dir"):
         raise DailyPipelineError("literature.article_inbox_dir is required.")
     if not config.get("popularization", {}).get("fact_cards_dir"):
@@ -121,7 +136,7 @@ def _pipeline_lock(project_root: Path, config: dict[str, Any]) -> Iterator[None]
 
 
 def _target_article_date(config: dict[str, Any], requested: str | None) -> date:
-    zone = ZoneInfo(str(config["timezone"]))
+    zone = _configured_timezone(str(config["timezone"]))
     if requested:
         try:
             return date.fromisoformat(requested)
@@ -141,7 +156,7 @@ def _parse_published_at(value: str) -> datetime:
 
 
 def _published_local_date(value: str, timezone_name: str) -> date:
-    return _parse_published_at(value).astimezone(ZoneInfo(timezone_name)).date()
+    return _parse_published_at(value).astimezone(_configured_timezone(timezone_name)).date()
 
 
 def _existing_article_ids(outputs_root: Path) -> set[str]:
@@ -1240,7 +1255,7 @@ def run_daily_popularization(
     config = _load_config(project_root)
     if not config["popularization"].get("enabled", True):
         return {"state": "DISABLED", "content_type": "popularization"}
-    zone = ZoneInfo(str(config["timezone"]))
+    zone = _configured_timezone(str(config["timezone"]))
     target = date.fromisoformat(local_date) if local_date else datetime.now(zone).date()
     with _pipeline_lock(project_root, config):
         try:
@@ -1263,7 +1278,7 @@ def run_daily_two_videos(project_root: Path, *, published_date: str | None = Non
     project_root = project_root.resolve()
     config = _load_config(project_root)
     literature_date = _target_article_date(config, published_date)
-    pop_date = datetime.now(ZoneInfo(str(config["timezone"]))).date()
+    pop_date = datetime.now(_configured_timezone(str(config["timezone"]))).date()
     results: dict[str, Any] = {
         "schema_version": 1,
         "automatic_publication": False,
