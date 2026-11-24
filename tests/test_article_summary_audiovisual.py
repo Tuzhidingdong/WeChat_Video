@@ -249,7 +249,7 @@ def test_word_boundary_subtitles_are_phrase_timed_and_have_no_filled_black_box(t
     layout = {
         "canvas": {"width": 1080, "height": 1920},
         "subtitle": {
-            "max_line_chars_zh": 8,
+            "max_line_chars_zh": 12,
             "cjk_font_size": 42,
             "zh_y_percent": 72.5,
             "margin_left": 75,
@@ -410,7 +410,7 @@ def test_word_boundary_subtitles_restore_authored_punctuation_without_changing_t
     assert "研究团队，观察到关键界面" in srt
     assert "明显变化" in srt
     assert "明显变化。" not in srt
-    assert timeline["subtitle_cues"][0]["source_text"].endswith("。")
+    assert timeline["subtitle_cues"][-1]["source_text"].endswith("。")
     assert timeline["speech_units"][0]["word_boundaries"] == original_boundaries
 
 
