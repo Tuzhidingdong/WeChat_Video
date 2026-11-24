@@ -129,14 +129,18 @@ def _target_article_date(config: dict[str, Any], requested: str | None) -> date:
     return datetime.now(zone).date() - timedelta(days=1)
 
 
-def _published_local_date(value: str, timezone_name: str) -> date:
+def _parse_published_at(value: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
         raise DailyPipelineError(f"Invalid published_at timestamp: {value!r}") from exc
     if parsed.tzinfo is None:
         raise DailyPipelineError("published_at must include an explicit timezone offset.")
-    return parsed.astimezone(ZoneInfo(timezone_name)).date()
+    return parsed
+
+
+def _published_local_date(value: str, timezone_name: str) -> date:
+    return _parse_published_at(value).astimezone(ZoneInfo(timezone_name)).date()
 
 
 def _existing_article_ids(outputs_root: Path) -> set[str]:
@@ -188,7 +192,13 @@ def _discover_literature_packages(
             })
         except (ArticleSourceError, DailyPipelineError) as exc:
             rejected.append({"path": str(package_dir), "reason": str(exc)})
-    candidates.sort(key=lambda item: (item["published_at"], item["article_id"]), reverse=True)
+    candidates.sort(
+        key=lambda item: (
+            _parse_published_at(str(item["published_at"])).timestamp(),
+            str(item["article_id"]),
+        ),
+        reverse=True,
+    )
     return candidates, rejected
 
 
@@ -245,14 +255,24 @@ def _run_content_planner(
 ) -> dict[str, Any]:
     opencode_cfg = config.get("opencode") or {}
     executable = str(opencode_cfg.get("executable") or "opencode")
+    agent = str(opencode_cfg.get("agent") or "daily-content-planner")
+    model = str(opencode_cfg.get("model") or "").strip()
+    if bool(opencode_cfg.get("require_explicit_model", True)) and not model:
+        raise DailyPipelineError(
+            "No OpenCode model is explicitly configured. Set opencode.model in "
+            "configs/daily_pipelines.json before automated content planning; "
+            "the daily pipeline will not silently inherit a machine-default model."
+        )
+    print(
+        f"[CONTENT PLANNER] agent={agent} model={model or 'OpenCode CLI default'} "
+        f"project={project_root} attachments={len(attachments)}"
+    )
     resolved = shutil.which(executable)
     if not resolved:
         raise DailyPipelineError(f"OpenCode executable not found on PATH: {executable}")
-    agent = str(opencode_cfg.get("agent") or "daily-content-planner")
     cmd = [resolved, "run", "--format", "json", "--agent", agent]
-    model = opencode_cfg.get("model")
     if model:
-        cmd.extend(["--model", str(model)])
+        cmd.extend(["--model", model])
     for path in attachments:
         if not path.is_file():
             raise DailyPipelineError(f"Planner attachment does not exist: {path}")
