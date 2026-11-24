@@ -239,7 +239,7 @@ def test_extract_exported_model_usage_recovers_aggregated_assistant_counters() -
                     },
                     "cost": 0.0042,
                 },
-                "parts": [{"type": "text", "text": "{\\"ok\\":true}"}],
+                "parts": [{"type": "text", "text": "ok"}],
             },
         ],
     }
