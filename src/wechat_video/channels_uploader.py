@@ -3804,6 +3804,8 @@ def upload_run_to_channels(project_root: Path, run_dir: Path) -> dict[str, Any]:
             "account_name": config["account_name"],
             "verified_draft": job["verified_draft"],
             "save_action": job["save_action"],
+            "extended_link_persistence": job.get("extended_link_persistence"),
+            "blocking_reason": job.get("blocking_reason"),
             "mobile_app_visibility_verified": False,
             "edge_pid": session["edge_pid"],
             "headless": bool(session.get("headless", config.get("headless", False))),
