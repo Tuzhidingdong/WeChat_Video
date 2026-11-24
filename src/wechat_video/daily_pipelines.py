@@ -868,6 +868,34 @@ def _read_history(path: Path) -> dict[str, Any]:
     return value
 
 
+def _load_selected_popularization_card(
+    project_root: Path,
+    card_path: Path,
+    sources_path: Path,
+    *,
+    expected_card_sha256: str,
+    expected_source_sha256: str,
+) -> dict[str, Any]:
+    """Recheck approval and source hashes immediately before content planning."""
+    if _sha256(card_path) != expected_card_sha256:
+        raise DailyPipelineError("Selected Fact Card changed after eligibility selection.")
+    if _sha256(sources_path) != expected_source_sha256:
+        raise DailyPipelineError("Fact Card sources changed after eligibility selection.")
+    card, _, pending = load_fact_card(
+        card_path,
+        sources_path,
+        allow_pending_review=True,
+    )
+    approval = verify_fact_card_approval(project_root, card_path, sources_path)
+    if approval is None:
+        raise DailyPipelineError("Selected Fact Card no longer has a verifiable human approval.")
+    if pending and approval.get("approval_type") != "local_hash_bound":
+        raise DailyPipelineError(
+            "A pending Fact Card is eligible only with its exact hash-bound local approval record."
+        )
+    return card
+
+
 def _run_popularization_locked(
     project_root: Path,
     config: dict[str, Any],
@@ -892,6 +920,14 @@ def _run_popularization_locked(
             "automatic_publication": False,
         }
     selected = eligible[0]
+    sources_path = _project_path(project_root, str(pop["sources_file"]))
+    card = _load_selected_popularization_card(
+        project_root,
+        Path(selected["path"]),
+        sources_path,
+        expected_card_sha256=str(selected["fact_card_sha256"]),
+        expected_source_sha256=str(selected["source_record_sha256"]),
+    )
     _planner_preflight(config)
     job_path = _job_paths(project_root, config, local_date) / "popularization.json"
     record = _start_job(
@@ -919,14 +955,6 @@ def _run_popularization_locked(
         source_record_sha256=selected["source_record_sha256"],
         editorial_angle_id=selected["editorial_angle_id"],
     )
-    card, _, pending = load_fact_card(
-        Path(selected["path"]),
-        _project_path(project_root, str(pop["sources_file"])),
-        allow_pending_review=False,
-    )
-    if pending:
-        raise DailyPipelineError("A selected Fact Card became unapproved after selection.")
-    sources_path = _project_path(project_root, str(pop["sources_file"]))
     planner_dir = _project_path(project_root, str(config.get("runtime_root", "runtime/daily_pipelines"))) / "planner" / local_date.isoformat() / selected["fact_card_id"]
     planner_dir.mkdir(parents=True, exist_ok=True)
     script = _run_content_planner(
