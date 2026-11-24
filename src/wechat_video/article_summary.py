@@ -102,12 +102,26 @@ def _narration_duration_budget(
     ) / 1000
     cover_seconds = int(summary.get("cover_duration_ms", 1500)) / 1000
     outro_seconds = int(summary.get("outro_duration_ms", 900)) / 1000
+    provider_id = str(tts_config.get("default_provider") or "")
+    if provider_id != "edge_tts":
+        raise ArticleSourceError(
+            f"The current one-minute duration calibration is for edge_tts, not {provider_id or 'an unspecified provider'}. "
+            "Add a measured provider-specific calibration before using it for 58–62 second delivery."
+        )
     estimated_speech_seconds = cjk_characters / effective_rate
     estimated_total = estimated_speech_seconds + cover_seconds + pause_seconds + outro_seconds
+    minimum_seconds = float(policy.get("minimum_programme_seconds", 58))
+    maximum_seconds = float(policy.get("maximum_programme_seconds", 62))
+    if not minimum_seconds <= estimated_total <= maximum_seconds:
+        raise ArticleSourceError(
+            f"Estimated programme duration is {estimated_total:.2f}s, outside the "
+            f"{minimum_seconds:.0f}–{maximum_seconds:.0f}s one-minute target. "
+            "Revise script length or configured timing before TTS; do not use automatic speed adaptation."
+        )
     return {
         "target_seconds": float(policy.get("target_programme_seconds", 60)),
-        "minimum_seconds": float(policy.get("minimum_programme_seconds", 58)),
-        "maximum_seconds": float(policy.get("maximum_programme_seconds", 62)),
+        "minimum_seconds": minimum_seconds,
+        "maximum_seconds": maximum_seconds,
         "spoken_cjk_characters": cjk_characters,
         "estimated_cjk_characters_per_second": round(effective_rate, 3),
         "estimated_speech_seconds": round(estimated_speech_seconds, 3),
