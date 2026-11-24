@@ -624,6 +624,32 @@ def _run_literature_locked(
     return record
 
 
+def _popularization_duration_gate(run_dir: Path, target_seconds: list[Any]) -> dict[str, Any]:
+    timeline_path = run_dir / "audio_timing.json"
+    if not timeline_path.is_file():
+        report = {
+            "status": "FAIL",
+            "reason": "audio_timing.json is missing.",
+            "target_seconds": target_seconds,
+        }
+    else:
+        timeline = _read_json(timeline_path)
+        measured = float(timeline.get("total_duration_seconds", 0))
+        if not isinstance(target_seconds, list) or len(target_seconds) != 2:
+            raise DailyPipelineError("popularization.target_duration_seconds must be [minimum, maximum].")
+        minimum = float(target_seconds[0])
+        maximum = float(target_seconds[1])
+        report = {
+            "status": "PASS" if minimum <= measured <= maximum else "FAIL",
+            "measured_seconds": round(measured, 3),
+            "minimum_seconds": minimum,
+            "maximum_seconds": maximum,
+            "measurement_authority": "audio_timing.json measured PCM sample clock",
+        }
+    _atomic_json(run_dir / "daily_duration_gate.json", report)
+    return report
+
+
 def _approved_popularization_cards(project_root: Path, config: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     pop = config["popularization"]
     cards_root = _project_path(project_root, str(pop["fact_cards_dir"]))
@@ -764,15 +790,27 @@ def _run_popularization_locked(
         allow_pending_review=False,
     )
     qa = _read_json(run_dir / "qa_report.json")
-    if qa.get("overall_status") != "PASS":
-        raise DailyPipelineError("Popularization technical QA did not PASS.")
+    duration_gate = _popularization_duration_gate(
+        run_dir,
+        list(pop.get("target_duration_seconds") or [55, 65]),
+    )
+    qa_passed = qa.get("overall_status") == "PASS"
+    duration_passed = duration_gate.get("status") == "PASS"
     record = _update_job(
-        job_path, record, "VIDEO_QA_PASSED",
+        job_path, record, "VIDEO_QA_PASSED" if qa_passed and duration_passed else "VIDEO_QA_FAILED",
         run_dir=str(run_dir),
         video_path=str((run_dir / "final.mp4").resolve()),
         video_sha256=_sha256(run_dir / "final.mp4"),
         technical_qa=qa.get("overall_status"),
+        duration_gate=duration_gate,
     )
+    if not qa_passed:
+        raise DailyPipelineError("Popularization technical QA did not PASS.")
+    if not duration_passed:
+        raise DailyPipelineError(
+            "Popularization measured programme duration is outside the configured "
+            f"{duration_gate.get('minimum_seconds')}–{duration_gate.get('maximum_seconds')} second range."
+        )
     record = _update_job(job_path, record, "UPLOADING")
     upload = upload_run_to_channels(project_root, run_dir)
     if upload.get("state") != "DRAFT_SAVED":
