@@ -12,7 +12,7 @@ from wechat_video.media import (
     _speech_region_mask,
     assemble_final_video,
 )
-from wechat_video.article_summary import _audio_duration_breakdown
+from wechat_video.article_summary import _audio_duration_breakdown, _narration_duration_budget
 from wechat_video.article_summary import _narration_rhythm_report
 from wechat_video.subtitles import (
     _han_character_count,
@@ -377,6 +377,37 @@ def test_word_boundary_subtitles_restore_authored_punctuation_without_changing_t
     assert "明显变化。" not in srt
     assert timeline["subtitle_cues"][0]["source_text"].endswith("。")
     assert timeline["speech_units"][0]["word_boundaries"] == original_boundaries
+
+
+def test_one_minute_script_budget_is_checked_before_tts() -> None:
+    summary = {
+        "spoken_cjk_characters": 230,
+        "cover_duration_ms": 1500,
+        "outro_duration_ms": 900,
+        "speech_units": [{"pause_after_ms": 450} for _ in range(7)],
+    }
+    tts_config = {
+        "providers": {"edge_tts": {"rate": "+5%"}},
+        "duration_policy": {
+            "target_programme_seconds": 60,
+            "minimum_programme_seconds": 58,
+            "maximum_programme_seconds": 62,
+            "target_cjk_characters": {"minimum": 222, "maximum": 235},
+            "expected_cjk_characters_per_second_at_default_rate": 4.2,
+            "rate_adjustment": {"reference_rate_percent": 5, "maximum_percent": 8},
+        },
+    }
+
+    report = _narration_duration_budget(summary, tts_config)
+
+    assert 58 <= report["estimated_programme_seconds"] <= 62
+    assert report["estimated_pause_seconds"] == 2.7
+    assert report["configured_edge_rate"] == "+5%"
+    assert report["automatic_rate_adaptation"] is False
+
+    summary["spoken_cjk_characters"] = 271
+    with pytest.raises(Exception, match="calibrated one-minute planning range"):
+        _narration_duration_budget(summary, tts_config)
 
 
 def test_audio_duration_breakdown_separates_speech_cover_pauses_and_outro() -> None:
