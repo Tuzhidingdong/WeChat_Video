@@ -64,7 +64,7 @@ An explicit model ID is required in `configs/daily_pipelines.json` (`opencode.mo
 
 ## Shared engine and upload
 
-The literature path reuses Edge-TTS, measured PCM audio timeline, word-boundary metadata, subtitle generation, Manim article scenes, FFmpeg assembly and strict QA. The popularization path reuses the existing Slice A personal-voice production, bilingual subtitles, registered Manim strategy, content-uniqueness gate and strict QA.
+The literature path reuses Edge-TTS, measured PCM audio timeline, word-boundary metadata, subtitle generation, Manim article scenes, FFmpeg assembly and strict QA. The popularization path reuses the existing Slice A personal-voice production, bilingual subtitles, registered Manim strategy, content-uniqueness gate and strict QA. It additionally enforces a 55–65 second measured PCM programme-duration gate before upload; the base Slice A command's duration warning alone is not treated as a release gate.
 
 Both paths call `upload_run_to_channels(project_root, exact_run_dir)`. They do not use “upload newest output”. The uploader retains its dedicated Edge profile, target account verification, pre-save draft snapshot, single save click, post-save DraftListManager readback and `UPLOAD_UNKNOWN` reconciliation rules.
 
