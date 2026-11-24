@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .speech_alignment import restore_word_boundary_source_separators
+
 
 def _wrap_text(text: str, max_chars: int) -> str:
     text = text.strip()
@@ -141,6 +143,10 @@ def _caption_groups(cue: dict[str, Any], max_chars: int) -> list[dict[str, Any]]
     cue_end = int(cue["end_ms"])
     boundaries = cue.get("word_boundaries") or []
     alignment = str(cue.get("subtitle_alignment_method") or "speech_unit_envelope")
+    if alignment == "edge_word_boundary" and boundaries:
+        boundaries = restore_word_boundary_source_separators(
+            boundaries, str(cue.get("spoken_text") or "")
+        )
     if alignment != "edge_word_boundary" or not boundaries:
         text = str(cue.get("spoken_text") or cue.get("display_text") or "").strip()
         return [{
@@ -192,7 +198,7 @@ def _caption_groups(cue: dict[str, Any], max_chars: int) -> list[dict[str, Any]]
         current_text.append(text)
         current_end = max(current_end, end)
         current_chars += count
-        if text.rstrip().endswith(tuple("，。；！？、：")):
+        if any(mark in text for mark in "，。；！？、："):
             flush()
     flush()
 

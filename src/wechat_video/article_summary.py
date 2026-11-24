@@ -32,6 +32,32 @@ from .tts_provider import (
 )
 
 
+def _audio_duration_breakdown(timeline: dict[str, Any]) -> dict[str, Any]:
+    """Break measured PCM runtime into speech, cover, pauses, and outro."""
+    sample_rate = int(timeline["audio_sample_rate"])
+    if sample_rate <= 0:
+        raise ValueError("Audio duration breakdown requires a positive sample rate.")
+    totals = {"speech_seconds": 0.0, "cover_seconds": 0.0, "pause_seconds": 0.0, "outro_seconds": 0.0}
+    for segment in timeline["segments"]:
+        kind = str(segment.get("kind") or "")
+        duration = (
+            int(segment["end_sample"]) - int(segment["start_sample"])
+        ) / sample_rate
+        if kind == "speech":
+            totals["speech_seconds"] += duration
+        elif kind == "cover":
+            totals["cover_seconds"] += duration
+        elif kind == "silence":
+            totals["pause_seconds"] += duration
+        elif kind == "outro":
+            totals["outro_seconds"] += duration
+    totals["unit_durations_seconds"] = {
+        str(cue["unit_id"]): int(cue["sample_count"]) / sample_rate
+        for cue in timeline["speech_units"]
+    }
+    return totals
+
+
 def _write_json(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -343,9 +369,32 @@ def run_article_summary(
     _write_json(run_dir / "audio_timeline_validation.json", timeline_validation)
     duration = float(timeline["total_duration_seconds"])
     if not 45.0 <= duration <= 75.0:
+        breakdown = _audio_duration_breakdown(timeline)
+        non_speech_seconds = (
+            breakdown["cover_seconds"]
+            + breakdown["pause_seconds"]
+            + breakdown["outro_seconds"]
+        )
+        minimum_speech_seconds = max(0.0, 45.0 - non_speech_seconds)
+        maximum_speech_seconds = 75.0 - non_speech_seconds
+        unit_details = ", ".join(
+            f"{unit_id}={seconds:.2f}s"
+            for unit_id, seconds in breakdown["unit_durations_seconds"].items()
+        )
+        speech_budget = (
+            f"{minimum_speech_seconds:.2f}–{maximum_speech_seconds:.2f}s"
+            if maximum_speech_seconds >= 0
+            else f"no feasible speech budget (non-speech timing already exceeds 75s by {-maximum_speech_seconds:.2f}s)"
+        )
         raise RuntimeError(
-            f"Measured Chinese narration is {duration:.2f}s; expected 45–75s. "
-            "Rewrite the script; playback speed will not be altered."
+            f"Measured programme audio is {duration:.2f}s; expected 45–75s. "
+            f"Breakdown: speech={breakdown['speech_seconds']:.2f}s, "
+            f"cover={breakdown['cover_seconds']:.2f}s, "
+            f"inter-unit pauses={breakdown['pause_seconds']:.2f}s, "
+            f"outro={breakdown['outro_seconds']:.2f}s. "
+            f"With cover, pauses, and outro unchanged, the speech budget is {speech_budget}; "
+            f"per-unit speech durations: {unit_details}. "
+            "Shorten authored spoken_text; TTS speed, cover, pauses, and outro were not altered."
         )
     sfx_durations = generate_sfx(run_dir / "sfx")
     timeline = attach_editorial_events(timeline, units, sfx_durations)

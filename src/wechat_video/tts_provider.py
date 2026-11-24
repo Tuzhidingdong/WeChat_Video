@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .process import run_checked
+from .speech_alignment import normalize_word_boundary_coverage_text
 from .tooling import legacy_model_root, tool_env
 
 
@@ -207,10 +208,10 @@ def _read_word_boundary_metadata(
     spoken_text: str,
     audio_duration_seconds: float,
 ) -> tuple[list[dict[str, Any]], str]:
-    """Read Edge-TTS WordBoundary JSONL and verify exact text coverage."""
+    """Read Edge-TTS WordBoundary JSONL and verify lexical coverage. Edge omits punctuation."""
     if not metadata_path.is_file():
         return [], "metadata_missing"
-    expected = re.sub(r"\s+", "", spoken_text)
+    expected = normalize_word_boundary_coverage_text(spoken_text)
     boundaries: list[dict[str, Any]] = []
     emitted: list[str] = []
     duration_ms = max(0, round(audio_duration_seconds * 1000))
@@ -236,8 +237,8 @@ def _read_word_boundary_metadata(
         return [], "metadata_invalid"
     if not boundaries:
         return [], "word_boundaries_missing"
-    actual = re.sub(r"\s+", "", "".join(emitted))
-    if actual != expected:
+    actual = normalize_word_boundary_coverage_text("".join(emitted))
+    if not expected or actual != expected:
         return [], "text_coverage_mismatch"
     return boundaries, "word_boundaries_verified"
 

@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from wechat_video.media import _speech_region_mask
+from wechat_video.article_summary import _audio_duration_breakdown
 from wechat_video.article_summary import _narration_rhythm_report
 from wechat_video.subtitles import write_chinese_subtitles
 from wechat_video.timeline import (
@@ -189,3 +190,67 @@ def test_unavailable_word_boundaries_fall_back_to_complete_unit_caption(tmp_path
     assert count == 1
     assert timeline["subtitle_cues"][0]["alignment_method"] == "speech_unit_envelope"
     assert "保留完整语音单元。" in (tmp_path / "fallback.srt").read_text(encoding="utf-8-sig")
+
+
+
+def test_word_boundary_subtitles_restore_authored_punctuation_without_changing_timing(
+    tmp_path: Path,
+) -> None:
+    original_boundaries = [
+        {"text": "研究团队观", "start_ms": 0, "end_ms": 500},
+        {"text": "察到关键界面", "start_ms": 550, "end_ms": 1200},
+        {"text": "发生了明显变化", "start_ms": 1300, "end_ms": 2200},
+    ]
+    timeline = {
+        "speech_units": [{
+            "unit_id": "U01",
+            "spoken_text": "研究团队，观察到关键界面发生了明显变化。",
+            "start_ms": 1000,
+            "end_ms": 4000,
+            "subtitle_alignment_method": "edge_word_boundary",
+            "word_boundaries": [dict(boundary) for boundary in original_boundaries],
+        }]
+    }
+    layout = {
+        "canvas": {"width": 1080, "height": 1920},
+        "subtitle": {
+            "max_line_chars_zh": 8,
+            "cjk_font_size": 42,
+            "zh_y_percent": 72.5,
+            "margin_left": 75,
+            "margin_right": 75,
+        },
+    }
+
+    write_chinese_subtitles(
+        timeline, tmp_path / "restored.srt", tmp_path / "restored.ass",
+        layout, "Microsoft YaHei",
+    )
+
+    srt = (tmp_path / "restored.srt").read_text(encoding="utf-8-sig")
+    assert "研究团队，观察" in srt
+    assert "明显变化。" in srt
+    assert timeline["speech_units"][0]["word_boundaries"] == original_boundaries
+
+
+def test_audio_duration_breakdown_separates_speech_cover_pauses_and_outro() -> None:
+    timeline = {
+        "audio_sample_rate": 1000,
+        "segments": [
+            {"kind": "cover", "start_sample": 0, "end_sample": 1500},
+            {"kind": "speech", "start_sample": 1500, "end_sample": 9500},
+            {"kind": "silence", "start_sample": 9500, "end_sample": 9950},
+            {"kind": "outro", "start_sample": 9950, "end_sample": 10850},
+        ],
+        "speech_units": [
+            {"unit_id": "U01", "sample_count": 8000},
+        ],
+    }
+
+    report = _audio_duration_breakdown(timeline)
+
+    assert report["speech_seconds"] == 8.0
+    assert report["cover_seconds"] == 1.5
+    assert report["pause_seconds"] == 0.45
+    assert report["outro_seconds"] == 0.9
+    assert report["unit_durations_seconds"] == {"U01": 8.0}

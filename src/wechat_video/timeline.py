@@ -7,6 +7,8 @@ from typing import Any
 
 import numpy as np
 
+from .speech_alignment import normalize_word_boundary_coverage_text
+
 
 COVER_DURATION_MS = 1000
 DEFAULT_INTER_UNIT_PAUSE_MS = 500
@@ -348,9 +350,9 @@ def validate_audio_timeline(timeline: dict[str, Any]) -> dict[str, Any]:
                     raise ValueError(f"Speech cue {unit_id} word boundaries are not ordered.")
                 last_end = end_ms
                 boundary_text.append(text)
-            normalized_boundary_text = "".join("".join(boundary_text).split())
-            normalized_spoken_text = "".join(str(cue.get("spoken_text", "")).split())
-            if normalized_boundary_text != normalized_spoken_text:
+            normalized_boundary_text = normalize_word_boundary_coverage_text("".join(boundary_text))
+            normalized_spoken_text = normalize_word_boundary_coverage_text(str(cue.get("spoken_text", "")))
+            if not normalized_spoken_text or normalized_boundary_text != normalized_spoken_text:
                 raise ValueError(f"Speech cue {unit_id} word boundaries do not cover the exact spoken text.")
     if cue_ids != set(speech_segments):
         raise ValueError("Speech cue IDs and speech segment IDs are not a one-to-one match.")
@@ -358,6 +360,10 @@ def validate_audio_timeline(timeline: dict[str, Any]) -> dict[str, Any]:
     measured_seconds = total_samples / sample_rate
     if abs(float(timeline.get("total_duration_seconds", -1.0)) - measured_seconds) > 1e-9:
         raise ValueError("Audio timeline duration is not derived from total PCM sample count.")
+    fallback_cues = [
+        cue for cue in cues
+        if cue.get("subtitle_alignment_method") != "edge_word_boundary"
+    ]
     return {
         "valid": True,
         "sample_rate": sample_rate,
@@ -366,6 +372,14 @@ def validate_audio_timeline(timeline: dict[str, Any]) -> dict[str, Any]:
         "word_boundary_aligned_unit_count": sum(
             1 for cue in cues if cue.get("subtitle_alignment_method") == "edge_word_boundary"
         ),
+        "word_boundary_fallback_unit_count": len(fallback_cues),
+        "word_boundary_fallback_units": [
+            {
+                "unit_id": str(cue.get("unit_id") or ""),
+                "status": str(cue.get("word_boundary_status") or "unavailable"),
+            }
+            for cue in fallback_cues
+        ],
         "outro_duration_ms": int(timeline.get("outro_duration_ms", 0)),
         "segment_count": len(segments),
         "authority": "measured_pcm_wav_sample_counts",

@@ -220,3 +220,55 @@ def test_audio_timeline_rejects_cue_that_runs_ahead_of_its_visual_segment() -> N
 
     with pytest.raises(ValueError, match="does not match its audio segment"):
         validate_audio_timeline(timeline)
+
+
+
+def test_edge_word_boundary_metadata_accepts_punctuation_omission_and_preserves_times(
+    tmp_path: Path,
+) -> None:
+    metadata = tmp_path / "U01.jsonl"
+    events = [
+        {"type": "WordBoundary", "offset": 1_000_000, "duration": 4_000_000, "text": "反铁"},
+        {"type": "WordBoundary", "offset": 5_000_000, "duration": 4_000_000, "text": "磁材料"},
+        {"type": "WordBoundary", "offset": 9_000_000, "duration": 5_000_000, "text": "里的"},
+        {"type": "WordBoundary", "offset": 14_000_000, "duration": 6_000_000, "text": "磁畴"},
+    ]
+    metadata.write_text(
+        "\n".join(json.dumps(event, ensure_ascii=False) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    boundaries, status = tts_provider._read_word_boundary_metadata(
+        metadata, "反铁磁材料，里的磁畴。", 3.0
+    )
+
+    assert status == "word_boundaries_verified"
+    assert boundaries == [
+        {"text": "反铁", "start_ms": 100, "end_ms": 500},
+        {"text": "磁材料", "start_ms": 500, "end_ms": 900},
+        {"text": "里的", "start_ms": 900, "end_ms": 1400},
+        {"text": "磁畴", "start_ms": 1400, "end_ms": 2000},
+    ]
+
+
+def test_audio_timeline_reports_word_boundary_alignment_and_explicit_fallbacks() -> None:
+    timeline = _sample_timeline()
+    timeline["speech_units"][0].update({
+        "spoken_text": "反铁磁材料，里的磁畴。",
+        "subtitle_alignment_method": "edge_word_boundary",
+        "word_boundary_status": "word_boundaries_verified",
+        "word_boundaries": [
+            {"text": "反铁", "start_ms": 0, "end_ms": 500},
+            {"text": "磁材料", "start_ms": 500, "end_ms": 1300},
+            {"text": "里的磁畴", "start_ms": 1300, "end_ms": 2000},
+        ],
+    })
+    timeline["speech_units"][1]["word_boundary_status"] = "metadata_missing"
+
+    report = validate_audio_timeline(timeline)
+
+    assert report["word_boundary_aligned_unit_count"] == 1
+    assert report["word_boundary_fallback_unit_count"] == 1
+    assert report["word_boundary_fallback_units"] == [
+        {"unit_id": "U02", "status": "metadata_missing"}
+    ]
