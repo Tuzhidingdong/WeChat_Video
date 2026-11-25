@@ -33,10 +33,21 @@ E:\Agent\WeChat\data\daily_runs\<date>\research_subscription\<run_id>\
   review_state.json
   delivery_result.json
   uploaded_assets_manifest.json
+```
+
+The three publication-evidence files are **not** expected in the WeChat_control run folder. They are stored in the matching Video production output under `outputs/<article-summary-run>/`:
+
+```
+outputs/<article-summary-run>/
+  article_summary_manifest.json
+  source_record.json
   url_verification_evidence.json
   upload_preflight_report.json
   article_read_count_probe.json
+  source/images/...
 ```
+
+The adapter joins these two locations read-only. It accepts an evidence directory only when its `article_summary_manifest.json` and `source_record.json` both identify the same `article_id`, appmsgid, exact article title and Slot 1 Markdown SHA-256 as the upstream run. The three evidence files are then read from that matched Video output directory. A file in another output folder is never borrowed merely because it happens to contain a plausible timestamp or URL.
 
 It reads these existing local outputs only. It does not modify WeChat_control, open its browser profile, read its credentials, reuse its CDP session, call private APIs, or repeat the upstream article-discovery/writing/draft workflow.
 
@@ -45,10 +56,10 @@ Before a run is eligible, the adapter verifies:
 1. Slot 1 taxonomy is `literature_translation` + `literature_manuscript`.
 2. Exact `slot1.md` bytes match both `slot1.manifest.json.output_sha256` and `review_state.json.slots.1.article_sha256`.
 3. `prepared_articles.json` contains exactly one matching record, and its full `md_body` (and `raw_markdown`, when present) is byte-identical to `slot1.md`. The H1 must match its title.
-4. The delivery appmsgid and account match the configured account. The delivery result's `PENDING_PUBLICATION` state is not treated as publication evidence.
-5. The recorded official album DOM evidence identifies `li.album__list-item[data-link]`, the correct `__biz`, the exact article title, and Slot 1 item index. The observed canonical article URL must agree with the read-only verification provenance.
-6. The public article read-count probe supplies an unambiguous positive `ct` Unix timestamp. That instant is used as the publication time and converted to the configured Asia/Shanghai date. The draft/worker `article.json.published_at`, run date, draft-save time, and album update time are never substituted.
-7. The delivery `appmsgid` and album `data-msgid` remain distinct identifiers and are stored separately.
+4. The delivery appmsgid and `account` or `account_name` field match the configured target account (or its configured account key). The delivery result's `PENDING_PUBLICATION` state is not treated as publication evidence.
+5. The matched Video evidence bundle records exactly one canonical `mp.weixin.qq.com/s` article URL. The URL must agree with the matching Video source manifest and, when present, `upload_preflight_report.json.url_provenance` and the read-count probe. The adapter does not require selector names such as `li.album__list-item` or the literal attribute label `data-link` to have been copied into the evidence JSON.
+6. The recorded article URL or album endpoint must confirm the configured public-account `__biz`. Album `mid` and item `idx` are read from the observed URL/query or explicit recorded fields when available; conflicting values are rejected. The publishing appmsgid and album mid remain separate identifiers.
+7. The matched Video `article_read_count_probe.json` must supply an unambiguous positive `ct` Unix timestamp. That instant is used as the publication time and converted to the configured Asia/Shanghai date. The draft/worker `article.json.published_at`, run date, draft-save time, and album update time are never substituted.
 
 Only after all checks pass does Video create an immutable local package at:
 
@@ -60,7 +71,7 @@ runtime/upstream_article_packages/<appmsgid>_0/<run_id>/
   images/                 # only verified, local original assets, when present
 ```
 
-The Markdown is copied byte-for-byte from `slot1.md`. Original images are included only when their local path is inside the upstream data root, the image decodes successfully, and its recorded caption/context is grounded in the article Markdown. The adapter does not download CDN images or invent captions. The Video cache never overwrites a conflicting existing package.
+The Markdown is copied byte-for-byte from `slot1.md`. Original images already copied into the matching Video production output's `image_manifest` are reused first, but only when their files remain inside the configured Video `outputs` root, their recorded SHA-256 matches, they decode successfully, and their caption/context is grounded in the exact upstream Markdown. If no Video-side image is available, the adapter may use validated local files from the upstream `uploaded_assets_manifest.json`. It does not download CDN images or invent captions. The Video cache never overwrites a conflicting existing package.
 
 If an upstream run lacks the verified public URL/time evidence, account binding, taxonomy or SHA chain, it is rejected and reported with a reason. No video is created from an unverified candidate. The planner's explicit model preflight occurs before Video materializes a package; a null model remains a clear planning blocker.
 
