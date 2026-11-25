@@ -70,6 +70,14 @@ The content planner receives the exact package generated from the selected upstr
 
 No extended-link field is required.
 
+Before the first production run, the local Agent can verify the actual upstream artifacts without creating any cache package or starting OpenCode/rendering/upload:
+
+```powershell
+.venv\Scripts\python.exe -X utf8 -m wechat_video.cli inspect-literature-upstream
+```
+
+This command is read-only. It reports eligible/rejected source runs, the exact `published_at` derivation and provenance, source SHA, canonical URL, and verified local-image count. It does not create output directories, materialize an article package, write a job journal, or launch any production tool.
+
 ## Popularization source contract
 
 The runner reads only JSON Fact Cards under the configured directory and their matching `sources.json`. A card must either be tracked as `APPROVED` with approver metadata or have a valid hash-bound local topic approval record. `DRAFT_PENDING_USER_REVIEW` and review-sample cards are ineligible.
