@@ -327,6 +327,28 @@ def test_hash_bound_approval_keeps_pending_fact_card_eligible_after_recheck(tmp_
     assert loaded["approval_status"] == "DRAFT_PENDING_USER_REVIEW"
 
 
+def test_read_only_literature_inspection_has_no_production_side_effects(tmp_path: Path) -> None:
+    _config(tmp_path)
+    report = daily.inspect_daily_literature_sources(
+        tmp_path,
+        published_date="2026-11-23",
+    )
+
+    assert report["state"] == "SKIPPED_NO_ELIGIBLE_ARTICLE"
+    assert report["mode"] == "READ_ONLY_DISCOVERY"
+    assert report["candidate_count"] == 0
+    assert report["side_effects"] == {
+        "materialized_package": False,
+        "open_code_started": False,
+        "tts_started": False,
+        "manim_started": False,
+        "ffmpeg_started": False,
+        "upload_attempted": False,
+    }
+    assert not (tmp_path / "runtime" / "upstream_article_packages").exists()
+    assert not (tmp_path / "outputs").exists()
+
+
 def test_missing_daily_sources_return_safe_skip_without_model_or_upload(tmp_path: Path) -> None:
     _config(tmp_path)
     (tmp_path / "runtime" / "upstream_daily_runs").mkdir(parents=True)
