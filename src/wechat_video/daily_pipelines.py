@@ -20,6 +20,11 @@ from .channels_uploader import UploadBlockedError, UploadUnknownError, upload_ru
 from .fact_card import FactCardError, load_fact_card, read_json, validate_script_claim_links
 from .topic_approval import TopicApprovalError, verify_fact_card_approval
 from .pipeline import VISUAL_STRATEGIES, run_slice_a
+from .upstream_article_source import (
+    UpstreamArticleError,
+    discover_upstream_literature_runs,
+    materialize_upstream_article_package,
+)
 
 
 class DailyPipelineError(RuntimeError):
@@ -81,8 +86,10 @@ def _load_config(project_root: Path) -> dict[str, Any]:
         raise DailyPipelineError("Unsupported daily_pipelines.json schema_version.")
     timezone_name = str(config.get("timezone") or "")
     _configured_timezone(timezone_name)
-    if not config.get("literature", {}).get("article_inbox_dir"):
-        raise DailyPipelineError("literature.article_inbox_dir is required.")
+    literature = config.get("literature", {})
+    for field in ("upstream_daily_runs_dir", "upstream_account_key", "expected_public_account_biz_id"):
+        if not str(literature.get(field) or "").strip():
+            raise DailyPipelineError(f"literature.{field} is required for automatic upstream discovery.")
     if not config.get("popularization", {}).get("fact_cards_dir"):
         raise DailyPipelineError("popularization.fact_cards_dir is required.")
     if config.get("upload", {}).get("automatic_publication") is not False:
@@ -825,6 +832,8 @@ def _record_daily_report(
                 "state", "source_id", "selected_title", "run_dir", "video_path",
                 "video_sha256", "upload_job_id", "account_name", "verified_draft",
                 "error", "reason", "candidate_count", "approved_card_count", "planner_metadata",
+                "published_at", "canonical_url", "upstream_run_dir", "upstream_run_id",
+                "publication_time_provenance", "rejected_package_count",
             )
             if key in value
         }
@@ -861,23 +870,49 @@ def _run_literature_locked(
     published_date: date,
 ) -> dict[str, Any]:
     lit = config["literature"]
-    inbox = _project_path(project_root, str(lit["article_inbox_dir"]))
+    upstream_root = _project_path(project_root, str(lit["upstream_daily_runs_dir"]))
     outputs = _project_path(project_root, str(config.get("outputs_root", "outputs")))
-    candidates, rejected = _discover_literature_packages(
-        inbox, outputs, published_date, str(config["timezone"])
+    candidates, rejected = discover_upstream_literature_runs(
+        upstream_root,
+        account_key=str(lit["upstream_account_key"]),
+        account_name=str(config["upload"]["account_name"]),
+        expected_biz_id=str(lit["expected_public_account_biz_id"]),
+        target_date=published_date,
+        timezone_name=str(config["timezone"]),
     )
-    if not candidates:
+    seen_ids = _existing_article_ids(outputs)
+    eligible: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if str(candidate["article_id"]) in seen_ids:
+            rejected.append({
+                "path": str(candidate["source_run_dir"]),
+                "reason": "article_already_has_generated_run",
+            })
+            continue
+        eligible.append(candidate)
+    if not eligible:
         return {
             "state": "SKIPPED_NO_ELIGIBLE_ARTICLE",
             "published_date": published_date.isoformat(),
+            "upstream_root": str(upstream_root),
             "candidate_count": 0,
             "rejected_package_count": len(rejected),
             "rejected_packages": rejected[:30],
-            "reason": "No complete, published, previous-day literature package is available.",
+            "reason": "No complete upstream Slot 1 run has a verified public article URL and matching public-page ct for the previous Asia/Shanghai calendar day.",
             "automatic_publication": False,
         }
-    selected = candidates[0]
+
+    selected = eligible[0]
+    # Validate the explicit model before writing even the Video-local materialized
+    # package. The upstream WeChat_control run remains strictly read-only.
     _planner_preflight(config)
+    package_root = _project_path(
+        project_root,
+        str(lit.get("materialized_package_root", "runtime/upstream_article_packages")),
+    )
+    package_dir = materialize_upstream_article_package(selected, package_root)
+    selected["path"] = package_dir
+
     job_path = _job_paths(project_root, config, published_date) / "literature.json"
     record = _start_job(
         job_path,
@@ -889,22 +924,27 @@ def _run_literature_locked(
         return record
     record = _update_job(
         job_path, record, "CONTENT_PLANNING",
-        selected_package=str(selected["path"]),
+        selected_package=str(package_dir),
+        upstream_run_dir=str(selected["source_run_dir"]),
+        upstream_run_id=str(selected["source_run_id"]),
         selected_title=selected["title"],
-        selection_policy="latest_published_at",
-        candidate_count=len(candidates),
-        candidate_article_ids=[item["article_id"] for item in candidates],
+        published_at=selected["published_at"],
+        canonical_url=selected["canonical_url"],
+        selection_policy="latest_public_page_ct",
+        candidate_count=len(eligible),
+        candidate_article_ids=[item["article_id"] for item in eligible],
         rejected_packages=rejected[:30],
         source_record_sha256=selected["markdown_sha256"],
+        publication_time_provenance=selected["publication_time_details"],
     )
-    package = load_article_package(Path(selected["path"]))
+    package = load_article_package(package_dir)
     article = package["article"]
     planner_dir = _project_path(project_root, str(config.get("runtime_root", "runtime/daily_pipelines"))) / "planner" / published_date.isoformat() / selected["article_id"]
     planner_dir.mkdir(parents=True, exist_ok=True)
     attachments = [
-        Path(selected["path"]) / "article.json",
-        Path(selected["path"]) / "article.md",
-        Path(selected["path"]) / "images.json",
+        package_dir / "article.json",
+        package_dir / "article.md",
+        package_dir / "images.json",
     ]
     summary = _run_content_planner(
         project_root, config,
@@ -937,7 +977,7 @@ def _run_literature_locked(
     from .article_summary import run_article_summary
     run_dir = run_article_summary(
         project_root,
-        article_dir=Path(selected["path"]),
+        article_dir=package_dir,
         summary_path=summary_path,
         output_root=outputs,
     )
