@@ -829,6 +829,7 @@ def _run_literature_locked(
     outputs = _project_path(project_root, str(config.get("outputs_root", "outputs")))
     candidates, rejected = discover_upstream_literature_runs(
         upstream_root,
+        publication_evidence_root=outputs,
         account_key=str(lit["upstream_account_key"]),
         account_name=str(config["upload"]["account_name"]),
         expected_biz_id=str(lit["expected_public_account_biz_id"]),
@@ -1226,17 +1227,17 @@ def inspect_daily_literature_sources(
     target = _target_article_date(config, published_date)
     lit = config["literature"]
     upstream_root = _project_path(project_root, str(lit["upstream_daily_runs_dir"]))
+    evidence_root = _project_path(project_root, str(config.get("outputs_root", "outputs")))
     candidates, rejected = discover_upstream_literature_runs(
         upstream_root,
+        publication_evidence_root=evidence_root,
         account_key=str(lit["upstream_account_key"]),
         account_name=str(config["upload"]["account_name"]),
         expected_biz_id=str(lit["expected_public_account_biz_id"]),
         target_date=target,
         timezone_name=str(config["timezone"]),
     )
-    seen_ids = _existing_article_ids(
-        _project_path(project_root, str(config.get("outputs_root", "outputs")))
-    )
+    seen_ids = _existing_article_ids(evidence_root)
     visible_candidates = []
     for candidate in candidates:
         details = dict(candidate["publication_time_details"])
@@ -1253,6 +1254,9 @@ def inspect_daily_literature_sources(
             "publication_time_field_path": candidate["publication_time_field_path"],
             "publication_time_provenance": details,
             "verified_local_image_count": len(candidate.get("image_assets") or []),
+            "image_asset_source": candidate.get("image_asset_source"),
+            "verified_video_image_count": candidate.get("verified_video_image_count", 0),
+            "publication_evidence_dir": str(candidate.get("publication_evidence_dir") or ""),
             "already_rendered": str(candidate["article_id"]) in seen_ids,
         })
     unseen = [item for item in visible_candidates if not item["already_rendered"]]
@@ -1262,6 +1266,7 @@ def inspect_daily_literature_sources(
         "published_date": target.isoformat(),
         "timezone": str(config["timezone"]),
         "upstream_daily_runs_root": str(upstream_root),
+        "publication_evidence_root": str(evidence_root),
         "candidate_count": len(visible_candidates),
         "eligible_candidate_count": len(unseen),
         "candidates": visible_candidates,
