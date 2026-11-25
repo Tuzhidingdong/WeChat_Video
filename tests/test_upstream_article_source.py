@@ -116,7 +116,7 @@ def test_discovers_published_article_from_existing_daily_run_without_manual_pack
 
     candidates, rejected = _discover(root)
 
-    assert len(candidates) == 1
+    assert len(candidates) == 1, rejected
     assert rejected == []
     candidate = candidates[0]
     assert candidate["source_run_dir"] == run_dir
@@ -189,7 +189,7 @@ def test_rejects_publication_time_when_probe_url_does_not_match_album_data_link(
     candidates, rejected = _discover(root)
 
     assert candidates == []
-    assert any("do not identify exactly one identical" in item["reason"] for item in rejected)
+    assert any("different article URL" in item["reason"] for item in rejected), rejected
 
 
 def test_rejects_album_page_for_another_public_account(tmp_path: Path) -> None:
