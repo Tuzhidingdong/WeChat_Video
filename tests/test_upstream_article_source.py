@@ -16,7 +16,7 @@ from wechat_video.upstream_article_source import (
 
 
 TITLE = "俄亥俄州立大学团队发表APL：失配位错剪切应力模板化锁定反铁磁畴"
-ARTICLE_URL = "https://mp.weixin.qq.com/s/published-article-fixture"
+ARTICLE_URL = "https://mp.weixin.qq.com/s?__biz=MzIyMjY1ODkwMA==&mid=2247484414&idx=1&sn=fixture"
 ALBUM_URL = (
     "https://mp.weixin.qq.com/mp/appmsgalbum?"
     "__biz=MzIyMjY1ODkwMA==&action=getalbum&album_id=4776718530358493186"
@@ -69,39 +69,74 @@ def _make_upstream_run(root: Path, *, run_id: str = "20261121T152703-fixture") -
     }])
     _write(run_dir / "delivery_result.json", {
         "appmsgid": "100000764",
-        "account_name": "成核生长",
+        "account": "成核生长",
         "state": "DRAFT_CREATED_COLLECTION_CONFIGURED",
         "publication_state": "PENDING_PUBLICATION",
-    })
-    _write(run_dir / "url_verification_evidence.json", {
-        "source_page_url": ALBUM_URL,
-        "selector": "li.album__list-item[data-link]",
-        "attribute": "data-link",
-        "data-link": ARTICLE_URL,
-        "data-msgid": "2247484414",
-        "data-itemidx": "1",
-        "title": TITLE,
-        "visible_article_page": True,
-    })
-    _write(run_dir / "upload_preflight_report.json", {
-        "url_provenance": {
-            "endpoint": ALBUM_URL,
-            "field_path": "li.album__list-item[data-link]",
-            "article_url": ARTICLE_URL,
-        },
-    })
-    _write(run_dir / "article_read_count_probe.json", {
-        "url": ARTICLE_URL,
-        "ct": CT,
-        "read_count": 12,
     })
     _write(run_dir / "uploaded_assets_manifest.json", {"assets": []})
     return run_dir
 
 
-def _discover(root: Path):
+def _make_video_evidence(
+    evidence_root: Path,
+    run_dir: Path,
+    *,
+    canonical_url: str = ARTICLE_URL,
+    image_manifest: dict | None = None,
+) -> Path:
+    markdown_sha = hashlib.sha256((run_dir / "slot1.md").read_bytes()).hexdigest()
+    prepared = json.loads((run_dir / "prepared_articles.json").read_text(encoding="utf-8"))[0]
+    evidence_dir = evidence_root / "20261125_100000_100000764_article_summary"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    _write(evidence_dir / "article_summary_manifest.json", {
+        "schema_version": 1,
+        "content_type": "article_summary",
+        "appmsgid": "100000764",
+        "article_id": "100000764_0",
+        "article_title": TITLE,
+        "canonical_url": canonical_url,
+        "canonical_url_verified": True,
+        "source_article_sha256": markdown_sha,
+        "account_name": "成核生长",
+        "editorial_slot": 1,
+        "article_type": "literature_translation",
+        "editorial_pillar_id": "literature_manuscript",
+        "image_count": len(image_manifest or {}),
+        "image_manifest": image_manifest or {},
+    })
+    _write(evidence_dir / "source_record.json", {
+        "source_type": "published_wechat_article",
+        "appmsgid": "100000764",
+        "article_id": "100000764_0",
+        "title": prepared["title"],
+        "editorial_slot": 1,
+        "article_type": "literature_translation",
+        "editorial_pillar_id": "literature_manuscript",
+        "canonical_url": canonical_url,
+        "canonical_url_verified": True,
+        "article_markdown_sha256": markdown_sha,
+    })
+    # This mirrors the real evidence shape: the file records the URL; it does
+    # not serialize browser selector names or DOM attribute names.
+    _write(evidence_dir / "url_verification_evidence.json", {"url": canonical_url})
+    _write(evidence_dir / "upload_preflight_report.json", {
+        "url_provenance": {
+            "endpoint": ALBUM_URL,
+            "article_url": canonical_url,
+        },
+    })
+    _write(evidence_dir / "article_read_count_probe.json", {
+        "url": canonical_url,
+        "ct": CT,
+        "read_count": 12,
+    })
+    return evidence_dir
+
+
+def _discover(root: Path, evidence_root: Path):
     return discover_upstream_literature_runs(
         root,
+        publication_evidence_root=evidence_root,
         account_key="research_subscription",
         account_name="成核生长",
         expected_biz_id="MzIyMjY1ODkwMA==",
