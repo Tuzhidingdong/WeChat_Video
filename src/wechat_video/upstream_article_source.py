@@ -552,7 +552,7 @@ def discover_upstream_literature_runs(
                 if md_body.encode("utf-8") != slot1_bytes:
                     raise UpstreamArticleError("prepared_articles.json md_body is not byte-identical to slot1.md.")
                 title = str(prepared.get("title") or "").strip()
-                h1 = re.search(r"(?m)^#\\s+(.+?)\\s*$", markdown)
+                h1 = re.search(r"(?m)^#\s+(.+?)\s*$", markdown)
                 if not title or not h1 or h1.group(1).strip() != title:
                     raise UpstreamArticleError("prepared article title does not match the exact slot1.md H1.")
 
