@@ -27,6 +27,10 @@ from .channels_uploader import (
 from .model_setup import download_chinese_model, download_model
 from .pipeline import run_slice_a
 from .preflight import run_preflight
+from .publication_source_evidence import (
+    PublicationSourceEvidenceError,
+    record_source_evidence,
+)
 from .topic_approval import approve_fact_card
 from .tooling import describe_tools, tool_path_for_bat
 
@@ -214,6 +218,13 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_literature.add_argument("--project-root", type=Path, default=root)
     inspect_literature.add_argument("--published-date", help="Optional Asia/Shanghai publication date YYYY-MM-DD.")
 
+    record_source = sub.add_parser(
+        "record-literature-source-evidence",
+        help="Atomically add a validated browser-observed publication source to the unique matching Video evidence bundle.",
+    )
+    record_source.add_argument("--project-root", type=Path, default=root)
+    record_source.add_argument("--observation", type=Path, required=True)
+
     literature_daily = sub.add_parser(
         "run-literature-daily",
         help="Select yesterday's published literature article, render it, QA it, and save the exact output as a draft.",
@@ -285,6 +296,17 @@ def main(argv: list[str] | None = None) -> int:
             result = inspect_daily_literature_sources(
                 args.project_root,
                 published_date=args.published_date,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "record-literature-source-evidence":
+            project_root = args.project_root.resolve()
+            config = json.loads((project_root / "configs" / "daily_pipelines.json").read_text(encoding="utf-8"))
+            outputs_root = project_root / str(config.get("outputs_root") or "outputs")
+            result = record_source_evidence(
+                observation_path=args.observation,
+                evidence_root=outputs_root,
+                expected_biz_id=str(config["literature"]["expected_public_account_biz_id"]),
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
@@ -451,6 +473,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except UploadBlockedError as exc:
         print(f"\nCHANNELS WORKFLOW BLOCKED: {exc}", file=sys.stderr)
+        return 2
+    except PublicationSourceEvidenceError as exc:
+        print(f"\nPUBLICATION SOURCE EVIDENCE REJECTED: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:
         print(f"\nWECHAT VIDEO FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)

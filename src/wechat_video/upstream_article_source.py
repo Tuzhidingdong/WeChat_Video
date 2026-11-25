@@ -18,10 +18,30 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .article_source import validate_canonical_article_url
+from .publication_source_evidence import (
+    PublicationSourceEvidenceError,
+    read_source_evidence,
+    validate_binding as validate_source_evidence_binding,
+)
 
 
 class UpstreamArticleError(ValueError):
     """An upstream Slot 1 run lacks a consistent published-article evidence chain."""
+
+
+def _require_album_url(value: Any) -> str:
+    """Never fall back to the article URL as if it were an independent source."""
+    text = str(value or "").strip()
+    parsed = urlparse(text)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "mp.weixin.qq.com"
+        or parsed.path != "/mp/appmsgalbum"
+    ):
+        raise UpstreamArticleError(
+            "Refusing to materialize: no independently observed mp.weixin.qq.com/mp/appmsgalbum source URL."
+        )
+    return text
 
 
 _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
@@ -196,6 +216,10 @@ def _find_video_publication_evidence(
             probe = _read_json(companions["probe_path"])
         except UpstreamArticleError:
             continue
+        try:
+            source_evidence = read_source_evidence(directory)
+        except PublicationSourceEvidenceError as exc:
+            raise UpstreamArticleError(f"Invalid publication source evidence in {directory}: {exc}") from exc
         matched.append({
             "directory": directory,
             "verification_path": companions["verification_path"],
@@ -204,6 +228,7 @@ def _find_video_publication_evidence(
             "verification": verification,
             "preflight": preflight,
             "probe": probe,
+            "source_evidence": source_evidence,
             "manifest": manifest,
             "source_record": source,
         })
@@ -281,6 +306,8 @@ def _published_time(
     metadata_url: str | None,
     expected_biz_id: str,
     verified_at_fallback: str,
+    source_evidence: dict[str, Any] | None = None,
+    identity: dict[str, Any] | None = None,
 ) -> tuple[str, str, str | None, str, str, str]:
     """Validate the recorded public URL and derive the formal instant from the paired public ct probe.
 
@@ -301,6 +328,22 @@ def _published_time(
         )
     canonical_url = validate_canonical_article_url(next(iter(verification_urls)))
 
+    source_binding: dict[str, Any] | None = None
+    if source_evidence is not None:
+        identity = identity or {}
+        try:
+            source_binding = validate_source_evidence_binding(
+                source_evidence,
+                article_id=str(identity.get("article_id") or ""),
+                appmsgid=str(identity.get("appmsgid") or ""),
+                title=str(identity.get("title") or ""),
+                markdown_sha256=str(identity.get("markdown_sha256") or ""),
+                verified_article_url=canonical_url,
+                expected_biz_id=expected_biz_id,
+            )
+        except PublicationSourceEvidenceError as exc:
+            raise UpstreamArticleError(f"Publication source evidence binding failed: {exc}") from exc
+
     metadata_url_value = str(metadata_url or "").strip()
     if metadata_url_value:
         if validate_canonical_article_url(metadata_url_value) != canonical_url:
@@ -319,12 +362,15 @@ def _published_time(
             "article_read_count_probe.json identifies a different public article URL."
         )
     provenance_album_urls = _extract_urls(provenance, _ALBUM_RE)
-    if not provenance_article_urls and not metadata_url_value and not provenance_album_urls:
+    if not provenance_article_urls and not metadata_url_value and not provenance_album_urls and not source_binding:
         raise UpstreamArticleError(
-            "The recorded article URL has no independent binding in url_provenance or the matching Video source manifest."
+            "The recorded article URL has no independent binding in url_provenance, the matching Video "
+            "source manifest, or a recorded publication_source_evidence.json observation."
         )
 
     album_urls = _extract_urls(provenance, _ALBUM_RE) | _extract_urls(verification, _ALBUM_RE)
+    if source_binding:
+        album_urls.add(str(source_binding["album_url"]))
     album_url = _optional_unique(sorted(album_urls), "official album page URL")
     canonical_query = parse_qs(urlparse(canonical_url).query)
     album_query = parse_qs(urlparse(album_url).query) if album_url else {}
@@ -345,7 +391,10 @@ def _published_time(
         if isinstance(value, bool):
             continue
         try:
-            numeric = int(str(value).strip())
+            # The public page serializes `var ct = "1795308507"`; the captured
+            # probe therefore stores the value with literal quote characters.
+            raw_ct = str(value).strip().strip("'\" \t")
+            numeric = int(raw_ct)
         except (TypeError, ValueError):
             continue
         if numeric > 0:
@@ -366,13 +415,17 @@ def _published_time(
 
     query_mid = str((canonical_query.get("mid") or album_query.get("mid") or [""])[0])
     query_idx = str((canonical_query.get("idx") or album_query.get("idx") or [""])[0])
+    source_mid = str(source_binding["data_msgid"]) if source_binding and source_binding.get("data_msgid") else ""
+    source_idx = str(source_binding["data_itemidx"]) if source_binding and source_binding.get("data_itemidx") else ""
     recorded_mid = _optional_unique(
-        _attribute_values(verification, "data-msgid")
+        ([source_mid] if source_mid else [])
+        + _attribute_values(verification, "data-msgid")
         + _record_values(verification, "data_msgid", "album_mid", "mid"),
         "official album mid",
     )
     recorded_idx = _optional_unique(
-        _attribute_values(verification, "data-itemidx")
+        ([source_idx] if source_idx else [])
+        + _attribute_values(verification, "data-itemidx")
         + _record_values(verification, "data_itemidx", "album_item_index", "itemidx", "idx"),
         "official album item index",
     )
@@ -389,16 +442,26 @@ def _published_time(
         path for path, key, value in _walk(verification)
         if isinstance(value, str) and any(url in value for url in verification_urls)
     ]
-    field_path = verification_url_paths[0] if verification_url_paths else "url_verification_evidence.json: recorded URL"
-    verified_at_values = _record_values(provenance, "verified_at", "observed_at", "recorded_at")
-    verified_at_values += _record_values(verification, "verified_at", "observed_at", "recorded_at")
-    recorded_verified_at = _optional_unique(verified_at_values, "URL verification timestamp")
+    if source_binding:
+        field_path = (
+            f"{source_binding['container_tag']}[{source_binding['link_attribute']}] "
+            "observed on source_page.url"
+        )
+    else:
+        field_path = verification_url_paths[0] if verification_url_paths else "url_verification_evidence.json: recorded URL"
+    if source_binding:
+        recorded_verified_at = str(source_binding["observed_at"])
+        verified_at_source = "recorded_browser_observation_time_in_publication_source_evidence"
+    else:
+        verified_at_values = _record_values(provenance, "verified_at", "observed_at", "recorded_at")
+        verified_at_values += _record_values(verification, "verified_at", "observed_at", "recorded_at")
+        recorded_verified_at = _optional_unique(verified_at_values, "URL verification timestamp")
+        verified_at_source = (
+            "explicit_timestamp_in_recorded_evidence"
+            if recorded_verified_at
+            else "url_verification_evidence.json_filesystem_mtime_fallback_not_browser_event_time"
+        )
     verified_at = recorded_verified_at or verified_at_fallback
-    verified_at_source = (
-        "explicit_timestamp_in_recorded_evidence"
-        if recorded_verified_at
-        else "url_verification_evidence.json_filesystem_mtime_fallback_not_browser_event_time"
-    )
 
     return published_at, canonical_url, album_url, ct_path, json.dumps({
         "ct": ct,
@@ -410,6 +473,14 @@ def _published_time(
         "field_path": field_path,
         "verified_at": verified_at,
         "verified_at_source": verified_at_source,
+        "publication_source_evidence": (
+            {
+                "observed_at": source_binding["observed_at"],
+                "album_url": source_binding["album_url"],
+                "link_attribute": source_binding["link_attribute"],
+            }
+            if source_binding else None
+        ),
     }, ensure_ascii=False), verified_at
 
 
@@ -620,6 +691,13 @@ def discover_upstream_literature_runs(
                     metadata_url=str(metadata_url or "") or None,
                     expected_biz_id=expected_biz_id,
                     verified_at_fallback=fallback_verified_at,
+                    source_evidence=evidence.get("source_evidence"),
+                    identity={
+                        "article_id": f"{appmsgid}_0",
+                        "appmsgid": appmsgid,
+                        "title": title,
+                        "markdown_sha256": markdown_sha,
+                    },
                 )
                 parsed_published = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
                 try:
@@ -752,7 +830,7 @@ def materialize_upstream_article_package(candidate: dict[str, Any], package_root
         "canonical_url": str(candidate["canonical_url"]),
         "canonical_url_verified": True,
         "url_provenance": {
-            "endpoint": str(candidate.get("album_url") or candidate["canonical_url"]),
+            "endpoint": _require_album_url(candidate.get("album_url")),
             "field_path": str(time_details.get("field_path") or "url_verification_evidence.json: recorded URL"),
             "verified_at": str(candidate["url_verified_at"]),
             "verified_at_source": time_details.get("verified_at_source"),

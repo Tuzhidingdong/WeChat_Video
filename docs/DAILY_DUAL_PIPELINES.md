@@ -23,6 +23,12 @@ Configured source settings in `configs/daily_pipelines.json`:
 - `literature.expected_public_account_biz_id`: the exact public account `__biz` value used by the official album page.
 - `literature.materialized_package_root`: Video-owned cache under `runtime/upstream_article_packages`.
 
+### Independent publication-source evidence
+
+Formal source attribution requires a structured `publication_source_evidence.json` in the matching Video output bundle. It is produced only from a real, read-only visible-browser observation of the official album page: the observed album page URL, the observed link attribute name/raw href, the browser-resolved article URL, the observed `data-msgid`/`data-itemidx`, the observed DOM relation, and an `observed_at` timestamp with timezone. The original href and the final resolved URL are stored separately; the album URL and the article URL are stored separately; the album `data-msgid` is never mixed with the publishing `appmsgid`.
+
+The browser observation is currently triggered explicitly by an operator/Agent using the in-app browser (`/browser`) or the visible Edge window. It is **not** an unattended automatic scrape. Run `record-literature-source-evidence --observation <json>` to validate that observation and atomically add it to the unique matching Video evidence bundle; the command refuses existing targets, ambiguous bundles, and any mismatch of article_id/appmsgid/title/Markdown SHA-256/__biz. The adapter only reads and validates this evidence; it never opens a browser, uses cookies/tokens, or calls private APIs. Passing source-evidence validation does not mean a video or WeChat draft has been accepted.
+
 The adapter scans:
 
 ```
