@@ -36,17 +36,21 @@ A single cross-process production/upload lock serializes operations that share M
 
 ## 4. Literature reading contract
 
-- Consume only complete, already-published local article packages exported by the upstream publishing workflow.
-- Required taxonomy: account 「成核生长」, `editorial_slot=1`, `article_type=literature_translation`, `editorial_pillar_id=literature_manuscript`, `publication_status=PUBLISHED`.
-- Select from the previous Asia/Shanghai calendar date, not “last 24 hours”.
-- When multiple candidates exist, choose deterministically by latest `published_at`; record all candidates and the selection reason.
-- Never invent a source URL. Video production does not require the WeChat extended-link feature.
-- Generate a source-locked `summary.json` using the restricted OpenCode content-planner agent and attached article package only.
+- Discover existing successful Slot 1 runs directly from the upstream local output `../data/daily_runs/<date>/research_subscription/<run_id>/`, relative to the Video project root. Do not require a user-created article package or manual inbox.
+- The configured source account key is `research_subscription`; the target public account is `成核生长` and its verified `__biz` value is configured explicitly.
+- Required taxonomy: `literature_translation` + `literature_manuscript` for Slot 1.
+- Verify the exact `slot1.md` SHA-256 against `slot1.manifest.json.output_sha256` and `review_state.json.slots.1.article_sha256`; require the full `prepared_articles.json` `md_body` to be byte-identical to the exact Markdown.
+- The delivery `appmsgid` and account must match. The upstream draft/worker `published_at`, run date, and draft-save time are not publication evidence.
+- Formal publication status/time requires the recorded official album DOM entry `li.album__list-item[data-link]`, matching target-account `__biz`, exact article title, Slot 1 item index, canonical URL provenance, and a positive Unix `ct` from the same run's `article_read_count_probe.json`.
+- Convert `ct` to the configured Asia/Shanghai date. Keep the publishing `appmsgid` and album `data-msgid` (mid) as separate namespaces.
+- Reject incomplete or ambiguous source evidence with a per-run reason. Do not substitute draft timestamps, guess URLs, or create a video from an unverified candidate.
+- After source validation and explicit OpenCode model preflight, materialize a byte-identical Markdown package in Video-owned `runtime/upstream_article_packages/<appmsgid>_0/<run_id>/`; do not modify upstream files or overwrite a conflicting cache entry.
+- Copy only verified local, decodable source images with article-grounded context. Do not fabricate captions or fetch unverified images.
+- A read-only `inspect-literature-upstream` CLI command reports eligible/rejected source runs and evidence without materializing packages or launching any production step.
+- Select the latest eligible article on the previous Asia/Shanghai calendar date; never use a “last 24 hours” window.
+- Generate a source-locked `summary.json` using the restricted OpenCode content-planner agent and the automatically materialized package only.
 - The final video outro must display: **「更多详细解读见【成核生长】同名公众号」**.
-- A missing or incomplete article package causes a safe skip/block, not a guessed summary.
 - A previously generated `article_id` is not regenerated automatically.
-
-The local article inbox path is configured in `configs/daily_pipelines.json`. The exact upstream export path must be confirmed from the read-only local audit before unattended scheduling.
 
 ## 5. Popularization contract
 
@@ -81,7 +85,7 @@ Preserve the currently accepted visual quality baseline while adding the literat
 
 ## 9. Acceptance gates
 
-1. Read-only local audit identifies the actual upstream article-package handoff path and local runtime constraints.
+1. The read-only upstream adapter is validated against the real local daily-run sample, including publication URL/time evidence and the exact Markdown hash chain.
 2. Portable unit/contract tests pass on GitHub Actions.
 3. Local Windows Agent syncs the exact approved feature-branch SHA and runs the bounded local validation suite.
 4. A real literature article produces one strict-QA-PASS MP4 with the requested outro and is saved as one verified unpublished draft.
