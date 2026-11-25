@@ -376,7 +376,6 @@ def discover_upstream_literature_runs(
                 records = _prepared_records(prepared_doc)
                 prepared = _find_slot1_article(records)
                 md_body = prepared.get("md_body")
-                raw_markdown = prepared.get("raw_markdown")
                 if not isinstance(md_body, str) or not md_body:
                     raise UpstreamArticleError("prepared_articles.json Slot 1 md_body is missing.")
                 if md_body.encode("utf-8") != slot1_bytes:
@@ -447,7 +446,7 @@ def discover_upstream_literature_runs(
                     ),
                     "data_root": data_root,
                 })
-            except (UpstreamArticleError, OSError, UnicodeDecodeError, ValueError) as exc:
+            except (UpstreamArticleError, OSError, UnicodeDecodeError, ValueError, TypeError, AttributeError, KeyError, IndexError) as exc:
                 rejected.append({"path": str(run_dir), "reason": str(exc)})
 
     candidates.sort(
