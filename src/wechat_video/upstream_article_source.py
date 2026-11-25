@@ -392,7 +392,13 @@ def _published_time(
     field_path = verification_url_paths[0] if verification_url_paths else "url_verification_evidence.json: recorded URL"
     verified_at_values = _record_values(provenance, "verified_at", "observed_at", "recorded_at")
     verified_at_values += _record_values(verification, "verified_at", "observed_at", "recorded_at")
-    verified_at = _optional_unique(verified_at_values, "URL verification timestamp") or verified_at_fallback
+    recorded_verified_at = _optional_unique(verified_at_values, "URL verification timestamp")
+    verified_at = recorded_verified_at or verified_at_fallback
+    verified_at_source = (
+        "explicit_timestamp_in_recorded_evidence"
+        if recorded_verified_at
+        else "url_verification_evidence.json_filesystem_mtime_fallback_not_browser_event_time"
+    )
 
     return published_at, canonical_url, album_url, ct_path, json.dumps({
         "ct": ct,
@@ -403,6 +409,7 @@ def _published_time(
         "album_item_index": item_index,
         "field_path": field_path,
         "verified_at": verified_at,
+        "verified_at_source": verified_at_source,
     }, ensure_ascii=False), verified_at
 
 
@@ -748,6 +755,7 @@ def materialize_upstream_article_package(candidate: dict[str, Any], package_root
             "endpoint": str(candidate.get("album_url") or candidate["canonical_url"]),
             "field_path": str(time_details.get("field_path") or "url_verification_evidence.json: recorded URL"),
             "verified_at": str(candidate["url_verified_at"]),
+            "verified_at_source": time_details.get("verified_at_source"),
             "read_only": True,
             "evidence_directory": str(candidate["publication_evidence_dir"]),
         },
