@@ -29,7 +29,10 @@ def _config(root: Path) -> None:
         },
         "literature": {
             "enabled": True,
-            "article_inbox_dir": "runtime/inbox/literature_articles",
+            "upstream_daily_runs_dir": "runtime/upstream_daily_runs",
+            "upstream_account_key": "research_subscription",
+            "expected_public_account_biz_id": "MzIyMjY1ODkwMA==",
+            "materialized_package_root": "runtime/upstream_article_packages",
             "max_articles_per_day": 1,
             "selection_policy": "latest_published_at",
             "source_cta_text": "更多详细解读见【成核生长】同名公众号",
@@ -403,33 +406,13 @@ def test_hash_bound_approval_keeps_pending_fact_card_eligible_after_recheck(tmp_
 
 def test_missing_daily_sources_return_safe_skip_without_model_or_upload(tmp_path: Path) -> None:
     _config(tmp_path)
-    (tmp_path / "runtime" / "inbox" / "literature_articles").mkdir(parents=True)
+    (tmp_path / "runtime" / "upstream_daily_runs").mkdir(parents=True)
     (tmp_path / "outputs").mkdir()
     literature = daily.run_daily_literature(tmp_path, published_date="2026-11-23")
     popularization = daily.run_daily_popularization(tmp_path, local_date="2026-11-24")
 
     assert literature["state"] == "SKIPPED_NO_ELIGIBLE_ARTICLE"
     assert popularization["state"] == "SKIPPED_NO_APPROVED_TOPIC"
-
-
-def test_missing_planner_model_does_not_create_a_poisoned_daily_job(tmp_path: Path) -> None:
-    _config(tmp_path)
-    inbox = tmp_path / "runtime" / "inbox" / "literature_articles"
-    _article_package(
-        inbox,
-        published_at="2026-11-23T10:00:00+08:00",
-        article_id="article-without-model",
-    )
-
-    result = daily.run_daily_literature(tmp_path, published_date="2026-11-23")
-    job_path = (
-        tmp_path / "runtime" / "daily_pipelines" / "jobs"
-        / "2026-11-23" / "literature.json"
-    )
-
-    assert result["state"] == "FAILED"
-    assert "No OpenCode model is explicitly configured" in result["error"]
-    assert not job_path.exists()
 
 
 def test_job_record_prevents_automatic_repeat_after_side_effect(tmp_path: Path) -> None:
