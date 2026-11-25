@@ -59,7 +59,7 @@ The following package schema describes the **internal generated artifact** only;
 
 ## 3. Summary script contract
 
-The model or editor creates a separate summary.json. Its source hash must match article.md. Every claim must include an exact source excerpt, and each spoken unit and visual beat must map to one or more of those claim IDs.
+The daily literature pipeline asks the planner for a versioned intermediate object (`src/wechat_video/planner_output_schema.py`, schema_version 1), not for a legacy summary.json. The program owns article_id, source SHA, image ids and a deterministic paragraph index of article.md; the planner owns scientific content and returns `source_ref.paragraph_index` for each claim. `src/wechat_video/source_paragraphs.py` extracts the exact original block, and `src/wechat_video/planner_summary_adapter.py` converts the validated planner object into the legacy summary.json schema below. `validate_article_summary()` remains the sole final gate with unchanged thresholds. For manually prepared inputs, a model or editor may still author summary.json directly in the legacy format.
 
 Content-planning instructions for the reusable authoring prompt:
 

@@ -16,6 +16,9 @@ from typing import Any, Iterator
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .article_source import ArticleSourceError, load_article_package
+from .planner_output_schema import PlannerContractError, validate_planner_output
+from .planner_summary_adapter import adapt_planner_output
+from .source_paragraphs import build_paragraph_index
 from .channels_uploader import UploadBlockedError, UploadUnknownError, upload_run_to_channels
 from .fact_card import FactCardError, load_fact_card, read_json, validate_script_claim_links
 from .topic_approval import TopicApprovalError, verify_fact_card_approval
@@ -643,45 +646,52 @@ def _cjk_count(value: str) -> int:
     return len(re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff]", value))
 
 
-def _literature_prompt(article: dict[str, Any], article_sha256: str) -> str:
+def _literature_prompt(
+    article: dict[str, Any],
+    article_sha256: str,
+    paragraphs: list[dict[str, Any]] | None = None,
+) -> str:
+    # Deterministic metadata is owned by the program; the model must not echo it.
+    del article, article_sha256
+    previews = "\n".join(
+        f"paragraph_index {item['paragraph_index']}: {item['text'][:90]}"
+        for item in (paragraphs or [])
+    )
     return f"""
 Create one source-grounded Chinese one-minute literature-reading video summary.
 The attached article.json, article.md and images.json are the only allowed evidence.
-Return exactly one JSON object with this schema:
+Do NOT output article_id, source_article_sha256, URLs, image metadata or any other program-owned data.
+Return exactly one JSON object with this schema_version 1 structure and NO extra fields:
 {{
  "schema_version":1,
- "article_id":"{article['article_id']}",
- "source_article_sha256":"{article_sha256}",
  "summary_title":"...",
  "channels_title":"6-16 Chinese characters",
  "core_thesis":"...",
  "thesis_claim_ids":["C1"],
- "claims":[{{"claim_id":"C1","statement":"...","source_excerpt":"exact contiguous excerpt from article.md"}}],
- "speech_units":[{{"unit_id":"U01","spoken_text":"...","display_text":"...","claim_ids":["C1"],"visual_trigger_ids":["B01"],"pause_after_ms":500}}],
+ "claims":[{{"claim_id":"C1","statement":"...","source_ref":{{"paragraph_index":0}}}}],
+ "speech_units":[{{"unit_id":"U01","spoken_text":"...","display_text":"...","claim_ids":["C1"],"visual_beat_id":"B01","pause_after_ms":500}}],
  "beats":[
   {{"beat_id":"B01","unit_id":"U01","kind":"hook","headline":"...","body":"...","claim_ids":["C1"]}},
-  {{"beat_id":"B02","unit_id":"U02","kind":"image","headline":"...","body":"...","image_ids":["IMG01"],"claim_ids":["C1"]}},
-  {{"beat_id":"B03","unit_id":"U03","kind":"stat","headline":"...","body":"...","stat_value":"...","stat_label":"...","claim_ids":["C1"]}},
-  {{"beat_id":"B04","unit_id":"U04","kind":"compare","headline":"...","left":{{"label":"...","detail":"..."}},"right":{{"label":"...","detail":"..."}},"claim_ids":["C1"]}},
-  {{"beat_id":"B05","unit_id":"U05","kind":"mechanism","headline":"...","body":"...","steps":["...","...","..."],"claim_ids":["C1"]}},
-  {{"beat_id":"B06","unit_id":"U06","kind":"quote","headline":"...","quote":"exact article quote","claim_ids":["C1"]}},
+  {{"beat_id":"B02","unit_id":"U02","kind":"image","headline":"...","claim_ids":["C1"],"image_ids":["IMG01"]}},
+  {{"beat_id":"B03","unit_id":"U03","kind":"stat","headline":"...","claim_ids":["C1"],"stat_value":"...","stat_label":"..."}},
+  {{"beat_id":"B04","unit_id":"U04","kind":"compare","headline":"...","claim_ids":["C1"],"left":{{"label":"...","detail":"..."}},"right":{{"label":"...","detail":"..."}}}},
+  {{"beat_id":"B05","unit_id":"U05","kind":"mechanism","headline":"...","claim_ids":["C1"],"steps":["...","..."]}},
+  {{"beat_id":"B06","unit_id":"U06","kind":"quote","headline":"...","claim_ids":["C1"],"quote":"..."}},
   {{"beat_id":"B07","unit_id":"U07","kind":"takeaway","headline":"...","body":"...","claim_ids":["C1"]}}
- ],
- "cover_duration_ms":1500,
- "outro_duration_ms":1800,
- "source_line":"成核生长 · 文献精读"
+ ]
 }}
 Requirements:
-- Use 5-8 speech units and exactly one beat per unit. The sample beat kinds above are examples; select only what fits the source, do not invent data/quotes.
-- Every claim's source_excerpt must be exact, contiguous text from article.md.
-- Every claim must be referenced by at least one speech unit; thesis_claim_ids must exist.
-- Every beat beat_id must be listed in its unit visual_trigger_ids.
-- Use only image IDs from images.json; if no relevant local image, do not invent image IDs.
-- Numeric values/units/conditions/comparisons/limitations/uncertainty must be source-grounded.
-- Keep 222-235 Chinese Han characters in concatenated spoken_text. Do not pad or remove evidence just to hit the count; if impossible return {{"error":"CONTENT_BUDGET_CONFLICT","reason":"..."}}.
-- Use plain Chinese before technical terms; avoid promotional wording.
-- No source URL or link field. The app adds the fixed end card: 更多详细解读见【成核生长】同名公众号.
+- Use 5-8 speech units and exactly one beat per unit; beat_id must equal the unit's visual_beat_id.
+- Every claim must have a statement and a source_ref.paragraph_index from the index below. The program extracts the exact original excerpt from article.md; do NOT copy long excerpts into the JSON.
+- thesis_claim_ids and every unit/beat claim_ids must reference existing claim IDs. Use only image IDs present in images.json.
+- Allowed beat kinds: hook, image, stat, compare, mechanism, quote, takeaway. Include only the extra fields shown for that kind above.
+- Numeric values, units, conditions, comparisons, limitations and uncertainty must be grounded in the article. Never invent evidence.
+- Keep 222-235 Chinese Han characters in concatenated spoken_text. If impossible, return {{"error":"CONTENT_BUDGET_CONFLICT"}} instead of another structure.
+- Use plain Chinese before technical terms; avoid promotional wording. No link field.
 - Return JSON only.
+
+Deterministic paragraph index (program will extract exact text from article.md):
+{previews}
 """.strip()
 
 
@@ -1015,33 +1025,38 @@ def _run_literature_locked(
         package_dir / "article.md",
         package_dir / "images.json",
     ]
+    paragraphs = build_paragraph_index(package["markdown"])
     summary = _run_content_planner(
         project_root, config,
-        prompt=_literature_prompt(article, str(package["markdown_sha256"])),
+        prompt=_literature_prompt(article, str(package["markdown_sha256"]), paragraphs),
         attachments=attachments,
     )
+    planner_metadata = summary.pop("_planner_run_metadata", {})
     if summary.get("error"):
         raise DailyPipelineError(f"Literature content planning blocked: {summary.get('error')}: {summary.get('reason','')}")
-    if summary.get("article_id") != article["article_id"]:
-        raise DailyPipelineError("Planner summary article_id does not match the selected article.")
-    if summary.get("source_article_sha256") != package["markdown_sha256"]:
-        raise DailyPipelineError("Planner summary source hash does not match the selected article.")
-    spoken = "".join(str(unit.get("spoken_text") or "") for unit in summary.get("speech_units", []))
-    count = _cjk_count(spoken)
-    if not 222 <= count <= 235:
-        raise DailyPipelineError(f"Planner summary has {count} Chinese Han characters; expected 222–235.")
+    try:
+        validated = validate_planner_output(
+            summary,
+            article_id=str(article["article_id"]),
+            article_sha256=str(package["markdown_sha256"]),
+            image_ids=set(package["images"]),
+        )
+        summary = adapt_planner_output(validated, package=package, paragraphs=paragraphs)
+    except PlannerContractError as exc:
+        raise DailyPipelineError(f"Planner output rejected by summary contract: {exc}") from exc
+    count = int(summary["spoken_cjk_characters"])
     summary["cover_duration_ms"] = int(lit.get("cover_duration_ms", 1500))
     summary["outro_duration_ms"] = int(lit.get("outro_duration_ms", 1800))
     summary["source_line"] = "成核生长 · 文献精读"
     summary_path = planner_dir / "summary.json"
     _atomic_json(summary_path, summary)
-    _atomic_json(planner_dir / "planner_run_report.json", summary["_planner_run_metadata"])
+    _atomic_json(planner_dir / "planner_run_report.json", planner_metadata)
     record = _update_job(
         job_path, record, "CONTENT_READY",
         summary_path=str(summary_path),
         summary_or_script_sha256=_sha256(summary_path),
         spoken_cjk_characters=count,
-        planner_metadata=summary.get("_planner_run_metadata"),
+        planner_metadata=planner_metadata,
     )
     from .article_summary import run_article_summary
     run_dir = run_article_summary(

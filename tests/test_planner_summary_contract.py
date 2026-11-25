@@ -162,6 +162,17 @@ def test_failed_model_shapes_are_rejected() -> None:
             validate_planner_output(output, article_id=_article_id(), article_sha256=package["markdown_sha256"], image_ids=set(package["images"]))
 
 
+def test_prompt_matches_intermediate_contract() -> None:
+    from wechat_video.daily_pipelines import _literature_prompt
+
+    prompt = _literature_prompt({"article_id": _article_id()}, "0" * 64, [])
+    assert '"schema_version":1' in prompt
+    assert "source_ref" in prompt and "paragraph_index" in prompt
+    assert "visual_beat_id" in prompt
+    assert "source_excerpt" not in prompt
+    assert "Do NOT output article_id" in prompt
+
+
 def test_paragraph_index_is_deterministic_and_excerpt_is_exact() -> None:
     markdown = (PACKAGE_DIR / "article.md").read_text(encoding="utf-8")
     first = build_paragraph_index(markdown)
