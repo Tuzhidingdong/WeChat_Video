@@ -681,6 +681,7 @@ def discover_upstream_literature_runs(
     expected_biz_id: str,
     target_date: date,
     timezone_name: str,
+    target_dates: set[date] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     """Join upstream Slot 1 run data to its identity-matched Video output evidence."""
     candidates: list[dict[str, Any]] = []
@@ -810,7 +811,22 @@ def discover_upstream_literature_runs(
                         raise
                     from datetime import timedelta
                     local_date = parsed_published.astimezone(timezone(timedelta(hours=8))).date()
-                if local_date != target_date:
+                if target_dates is not None:
+                    if local_date not in target_dates:
+                        rejected.append({
+                            "path": str(run_dir),
+                            "reason": "publication_date_outside_rolling_window",
+                            "article_id": f"{appmsgid}_0",
+                            "local_date": local_date.isoformat(),
+                        })
+                        continue
+                elif local_date != target_date:
+                    rejected.append({
+                        "path": str(run_dir),
+                        "reason": "publication_date_does_not_match_requested_day",
+                        "article_id": f"{appmsgid}_0",
+                        "local_date": local_date.isoformat(),
+                    })
                     continue
 
                 article_id = f"{appmsgid}_0"

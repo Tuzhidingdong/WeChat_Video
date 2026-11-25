@@ -23,6 +23,10 @@ Configured source settings in `configs/daily_pipelines.json`:
 - `literature.expected_public_account_biz_id`: the exact public account `__biz` value used by the official album page.
 - `literature.materialized_package_root`: Video-owned cache under `runtime/upstream_article_packages`.
 
+### Rolling literature discovery window
+
+The literature BAT no longer filters by "yesterday". `configs/daily_pipelines.json` → `literature.lookback_days` (default 7) defines an inclusive Asia/Shanghai window of today plus the preceding six calendar days. `literature.selection_policy=newest_first` selects the most recent formally published, evidence-complete, unproduced article. `--published-date` is retained only as an explicit single-day diagnostic override; the BAT never passes it. The read-only inspection reports the window, scanned run count, found articles, already-rendered count, rejection categories, selected article, deferred candidates and candidates about to expire from the window. Deferred candidates are retried on later runs; nothing is deleted and duplicate protection is unchanged. Upstream run date, draft save time or unverified `published_at` never substitutes for formal publication evidence.
+
 ### Unified read-only readiness check
 
 `python -m wechat_video.cli inspect-daily-two-video-readiness [--published-date YYYY-MM-DD]` reports literature, popularization and shared readiness in one JSON, using `READY_FOR_HUMAN_AUTHORIZATION` / `PARTIALLY_READY` / `BLOCKED`. It is strictly read-only: no job record, no article package, no model task, no TTS/Manim/FFmpeg, no Edge, no upload and no input modification. Missing model or Fact Card approval are reported as human-decision blockers, not code defects.

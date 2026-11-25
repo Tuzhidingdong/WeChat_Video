@@ -151,6 +151,68 @@ def _target_article_date(config: dict[str, Any], requested: str | None) -> date:
     return datetime.now(zone).date() - timedelta(days=1)
 
 
+def _article_date_window(config: dict[str, Any], requested: str | None) -> tuple[date, date, set[date]]:
+    """Inclusive Asia/Shanghai date window for literature discovery.
+
+    Default: today and the preceding six calendar days (7 calendar days total).
+    An explicit --published-date is a single-day diagnostic override and never
+    becomes the BAT default.
+    """
+    zone = _configured_timezone(str(config["timezone"]))
+    if requested:
+        try:
+            day = date.fromisoformat(requested)
+        except ValueError as exc:
+            raise DailyPipelineError("--published-date must be YYYY-MM-DD.") from exc
+        return day, day, {day}
+    try:
+        lookback = int((config.get("literature") or {}).get("lookback_days", 7))
+    except (TypeError, ValueError):
+        lookback = 7
+    lookback = max(1, min(lookback, 365))
+    today = datetime.now(zone).date()
+    start = today - timedelta(days=lookback - 1)
+    return start, today, {start + timedelta(days=index) for index in range(lookback)}
+
+
+def _count_upstream_runs(upstream_root: Path, account_key: str) -> int:
+    count = 0
+    if not upstream_root.is_dir():
+        return 0
+    for date_dir in upstream_root.iterdir():
+        account_dir = date_dir / account_key if date_dir.is_dir() else None
+        if account_dir and account_dir.is_dir():
+            count += sum(1 for run in account_dir.iterdir() if run.is_dir() and (run / "slot1.md").is_file())
+    return count
+
+
+def _rejection_categories(rejected: list[dict[str, str]]) -> dict[str, int]:
+    categories: dict[str, int] = {}
+    for item in rejected:
+        reason = str(item.get("reason") or "")
+        if "Cannot read" in reason:
+            key = "incomplete_upstream_artifact"
+        elif "No matching Video evidence bundle" in reason:
+            key = "missing_independent_source_evidence"
+        elif "publication" in reason.casefold() or "ct" in reason.casefold():
+            key = "publication_time_evidence"
+        else:
+            key = "other"
+        categories[key] = categories.get(key, 0) + 1
+    return categories
+
+
+def _candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "article_id": candidate.get("article_id"),
+        "appmsgid": candidate.get("appmsgid"),
+        "title": candidate.get("title"),
+        "published_at": candidate.get("published_at"),
+        "local_date": candidate.get("local_date"),
+        "source_run_id": candidate.get("source_run_id"),
+    }
+
+
 def _parse_published_at(value: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -823,38 +885,57 @@ def _run_literature_locked(
     config: dict[str, Any],
     *,
     published_date: date,
+    requested_date: str | None = None,
 ) -> dict[str, Any]:
     lit = config["literature"]
     upstream_root = _project_path(project_root, str(lit["upstream_daily_runs_dir"]))
     outputs = _project_path(project_root, str(config.get("outputs_root", "outputs")))
+    window_start, window_end, window_dates = _article_date_window(config, requested_date)
     candidates, rejected = discover_upstream_literature_runs(
         upstream_root,
         publication_evidence_root=outputs,
         account_key=str(lit["upstream_account_key"]),
         account_name=str(config["upload"]["account_name"]),
         expected_biz_id=str(lit["expected_public_account_biz_id"]),
-        target_date=published_date,
+        target_date=window_end,
         timezone_name=str(config["timezone"]),
+        target_dates=window_dates,
     )
     seen_ids = _existing_article_ids(outputs)
     eligible: list[dict[str, Any]] = []
+    rendered: list[dict[str, Any]] = []
     for candidate in candidates:
         if str(candidate["article_id"]) in seen_ids:
-            rejected.append({
-                "path": str(candidate["source_run_dir"]),
-                "reason": "article_already_has_generated_run",
-            })
+            rendered.append(candidate)
             continue
         eligible.append(candidate)
+    deferred = eligible[1:]
+    expiring = [item for item in deferred if item.get("local_date") == window_start.isoformat()]
+    window_info = {
+        "window_start": window_start.isoformat(),
+        "window_end": window_end.isoformat(),
+        "lookback_days": len(window_dates),
+        "timezone": str(config["timezone"]),
+        "upstream_root": str(upstream_root),
+        "upstream_run_count": _count_upstream_runs(upstream_root, str(lit["upstream_account_key"])),
+        "found_article_count": len(candidates),
+        "evidence_complete_candidate_count": len(candidates),
+        "already_rendered_count": len(rendered),
+        "rejected_count": len(rejected),
+        "rejection_categories": _rejection_categories(rejected),
+        "rejected_packages": rejected[:30],
+        "deferred_candidates": [_candidate_summary(item) for item in deferred],
+        "expiring_candidates": [_candidate_summary(item) for item in expiring],
+    }
     if not eligible:
         return {
             "state": "SKIPPED_NO_ELIGIBLE_ARTICLE",
             "published_date": published_date.isoformat(),
-            "upstream_root": str(upstream_root),
-            "candidate_count": 0,
-            "rejected_package_count": len(rejected),
-            "rejected_packages": rejected[:30],
-            "reason": "No complete upstream Slot 1 run has a verified public article URL and matching public-page ct for the previous Asia/Shanghai calendar day.",
+            **window_info,
+            "candidate_count": len(candidates),
+            "eligible_candidate_count": 0,
+            "selected_article": None,
+            "reason": "No evidence-complete, formally published article within the rolling window that has not already been produced.",
             "automatic_publication": False,
         }
 
@@ -884,11 +965,21 @@ def _run_literature_locked(
         upstream_run_dir=str(selected["source_run_dir"]),
         upstream_run_id=str(selected["source_run_id"]),
         selected_title=selected["title"],
+        selected_article=_candidate_summary(selected),
         published_at=selected["published_at"],
         canonical_url=selected["canonical_url"],
-        selection_policy="latest_public_page_ct",
+        selection_policy=str(lit.get("selection_policy") or "newest_first"),
         candidate_count=len(eligible),
         candidate_article_ids=[item["article_id"] for item in eligible],
+        window_start=window_start.isoformat(),
+        window_end=window_end.isoformat(),
+        lookback_days=len(window_dates),
+        upstream_run_count=window_info["upstream_run_count"],
+        found_article_count=window_info["found_article_count"],
+        rejected_count=len(rejected),
+        rejection_categories=window_info["rejection_categories"],
+        deferred_candidates=window_info["deferred_candidates"],
+        expiring_candidates=window_info["expiring_candidates"],
         rejected_packages=rejected[:30],
         source_record_sha256=selected["markdown_sha256"],
         publication_time_provenance=selected["publication_time_details"],
@@ -1224,7 +1315,7 @@ def inspect_daily_literature_sources(
     """Read-only discovery report; never materializes packages or starts production."""
     project_root = project_root.resolve()
     config = _load_config(project_root)
-    target = _target_article_date(config, published_date)
+    window_start, window_end, window_dates = _article_date_window(config, published_date)
     lit = config["literature"]
     upstream_root = _project_path(project_root, str(lit["upstream_daily_runs_dir"]))
     evidence_root = _project_path(project_root, str(config.get("outputs_root", "outputs")))
@@ -1234,8 +1325,9 @@ def inspect_daily_literature_sources(
         account_key=str(lit["upstream_account_key"]),
         account_name=str(config["upload"]["account_name"]),
         expected_biz_id=str(lit["expected_public_account_biz_id"]),
-        target_date=target,
+        target_date=window_end,
         timezone_name=str(config["timezone"]),
+        target_dates=window_dates,
     )
     seen_ids = _existing_article_ids(evidence_root)
     visible_candidates = []
@@ -1260,15 +1352,28 @@ def inspect_daily_literature_sources(
             "already_rendered": str(candidate["article_id"]) in seen_ids,
         })
     unseen = [item for item in visible_candidates if not item["already_rendered"]]
+    deferred = unseen[1:]
+    expiring = [item for item in deferred if item.get("local_date") == window_start.isoformat()]
     return {
         "state": "SOURCE_CANDIDATES_FOUND" if unseen else "SKIPPED_NO_ELIGIBLE_ARTICLE",
         "mode": "READ_ONLY_DISCOVERY",
-        "published_date": target.isoformat(),
+        "published_date": window_end.isoformat(),
+        "window_start": window_start.isoformat(),
+        "window_end": window_end.isoformat(),
+        "lookback_days": len(window_dates),
         "timezone": str(config["timezone"]),
         "upstream_daily_runs_root": str(upstream_root),
         "publication_evidence_root": str(evidence_root),
+        "upstream_run_count": _count_upstream_runs(upstream_root, str(lit["upstream_account_key"])),
+        "found_article_count": len(candidates),
         "candidate_count": len(visible_candidates),
         "eligible_candidate_count": len(unseen),
+        "already_rendered_count": len(visible_candidates) - len(unseen),
+        "rejected_count": len(rejected),
+        "rejection_categories": _rejection_categories(rejected),
+        "selected_candidate": unseen[0] if unseen else None,
+        "deferred_candidates": deferred,
+        "expiring_candidates": expiring,
         "candidates": visible_candidates,
         "rejected_run_count": len(rejected),
         "rejected_runs": rejected[:50],
@@ -1295,7 +1400,9 @@ def run_daily_literature(
     target = _target_article_date(config, published_date)
     with _pipeline_lock(project_root, config):
         try:
-            result = _run_literature_locked(project_root, config, published_date=target)
+            result = _run_literature_locked(
+                project_root, config, published_date=target, requested_date=published_date
+            )
         except UploadUnknownError as exc:
             recovered_state = _mark_daily_job(
                 project_root, config, target, "literature", "UPLOAD_UNKNOWN", str(exc)

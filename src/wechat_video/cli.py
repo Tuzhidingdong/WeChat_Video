@@ -331,6 +331,22 @@ def main(argv: list[str] | None = None) -> int:
                 published_date=args.published_date,
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
+            selected = result.get("selected_article") or {}
+            print(
+                f"[LITERATURE SUMMARY] window="
+                f"{result.get('window_start', 'n/a')}..{result.get('window_end', 'n/a')} "
+                f"scanned_runs={result.get('upstream_run_count', 0)} "
+                f"found={result.get('found_article_count', 0)} "
+                f"eligible={result.get('candidate_count', 0)} "
+                f"deferred={len(result.get('deferred_candidates') or [])}"
+            )
+            if selected:
+                print(
+                    f"[LITERATURE SUMMARY] selected={selected.get('article_id')} "
+                    f"published={selected.get('local_date')} title={selected.get('title')}"
+                )
+            elif result.get("reason"):
+                print(f"[LITERATURE SUMMARY] reason={result['reason']}")
             return 0 if result.get("state") in {
                 "DRAFT_SAVED", "SKIPPED_NO_ELIGIBLE_ARTICLE", "DISABLED"
             } else 2 if result.get("state") == "UPLOAD_UNKNOWN" else 1
