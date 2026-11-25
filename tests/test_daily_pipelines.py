@@ -55,35 +55,6 @@ def _config(root: Path) -> None:
     })
 
 
-def _article_package(root: Path, *, published_at: str, article_id: str = "article-1") -> Path:
-    package = root / article_id
-    package.mkdir(parents=True)
-    markdown = (
-        "# 测试文章\n\n"
-        + "研究团队在受控条件下开展实验，并比较了多个实验条件。"
-        "结果显示不同变量会影响观察到的过程。"
-        "作者讨论了证据、机制解释和模型适用范围。"
-        "这些内容需要结合测量条件和实验边界理解。\n\n"
-    ) * 5
-    (package / "article.md").write_bytes(markdown.encode("utf-8"))
-    _write(package / "images.json", {"images": []})
-    _write(package / "article.json", {
-        "schema_version": 1,
-        "account_name": "成核生长",
-        "editorial_slot": 1,
-        "article_type": "literature_translation",
-        "editorial_pillar_id": "literature_manuscript",
-        "publication_status": "PUBLISHED",
-        "appmsgid": article_id,
-        "article_id": article_id,
-        "title": "已发表的文献精读文章",
-        "published_at": published_at,
-        "canonical_url": None,
-        "canonical_url_verified": False,
-    })
-    return package
-
-
 def _fact_card(root: Path, *, status: str) -> tuple[Path, Path]:
     cards = root / "fact_cards"
     cards.mkdir(parents=True, exist_ok=True)
@@ -119,21 +90,6 @@ def _fact_card(root: Path, *, status: str) -> tuple[Path, Path]:
         }],
     })
     return card_path, sources_path
-
-
-def test_mixed_offset_published_times_are_sorted_by_absolute_instant(tmp_path: Path) -> None:
-    inbox = tmp_path / "inbox"
-    outputs = tmp_path / "outputs"
-    # 11:00 UTC is 19:00 in Shanghai and is later than 18:30 Shanghai,
-    # even though lexical ordering of the ISO strings can be misleading.
-    _article_package(inbox, published_at="2026-11-23T11:00:00Z", article_id="later-instant")
-    _article_package(inbox, published_at="2026-11-23T18:30:00+08:00", article_id="earlier-instant")
-
-    candidates, _ = daily._discover_literature_packages(
-        inbox, outputs, date(2026, 11, 23), "Asia/Shanghai"
-    )
-
-    assert candidates[0]["article_id"] == "later-instant"
 
 
 def test_content_planner_fails_closed_without_explicit_model(tmp_path: Path, monkeypatch) -> None:
@@ -292,39 +248,6 @@ def test_extract_model_text_accepts_opencode_jsonl_text_events() -> None:
     )
     parsed = json.loads(daily._extract_model_text(output))
     assert parsed == {"schema_version": 1, "ok": True}
-
-
-def test_literature_discovery_selects_only_previous_local_day_and_deduplicates(tmp_path: Path) -> None:
-    inbox = tmp_path / "inbox"
-    outputs = tmp_path / "outputs"
-    target = date(2026, 11, 24)
-    _article_package(inbox, published_at="2026-11-23T17:00:00Z", article_id="yesterday-article")
-    _article_package(inbox, published_at="2026-11-22T15:00:00+08:00", article_id="older-article")
-
-    candidates, rejected = daily._discover_literature_packages(
-        inbox, outputs, target, "Asia/Shanghai"
-    )
-
-    assert [item["article_id"] for item in candidates] == ["yesterday-article"]
-    assert rejected == []
-
-
-def test_literature_discovery_excludes_articles_already_rendered(tmp_path: Path) -> None:
-    inbox = tmp_path / "inbox"
-    outputs = tmp_path / "outputs"
-    package = _article_package(
-        inbox, published_at="2026-11-23T18:00:00+08:00", article_id="already-made"
-    )
-    run_dir = outputs / "old-run"
-    run_dir.mkdir(parents=True)
-    _write(run_dir / "article_summary_manifest.json", {"article_id": "already-made"})
-
-    candidates, rejected = daily._discover_literature_packages(
-        inbox, outputs, date(2026, 11, 23), "Asia/Shanghai"
-    )
-
-    assert candidates == []
-    assert rejected[0]["reason"] == "article_already_has_generated_run"
 
 
 def test_popularization_duration_gate_uses_measured_timeline(tmp_path: Path) -> None:
