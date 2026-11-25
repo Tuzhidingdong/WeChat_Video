@@ -230,7 +230,7 @@ def _published_time(
         raise UpstreamArticleError(f"Expected Slot 1 album item data-itemidx=1, observed {item_index!r}.")
 
     field_paths = [
-        str(value) for _, value in _walk(provenance)
+        str(value) for _, _, value in _walk(provenance)
         if isinstance(value, str) and "data-link" in value.casefold()
     ]
     field_path = field_paths[0] if field_paths else "li.album__list-item[data-link]"
