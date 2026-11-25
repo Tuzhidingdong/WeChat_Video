@@ -34,4 +34,5 @@ jobs:
             tests/test_qa_hardening.py \
             tests/test_final_refinement_v3.py \
             tests/test_channels_upload.py \
-            tests/test_daily_pipelines.py
+            tests/test_daily_pipelines.py \
+            tests/test_upstream_article_source.py
