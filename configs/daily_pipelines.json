@@ -7,7 +7,7 @@
   "opencode": {
     "executable": "opencode",
     "agent": "daily-content-planner",
-    "model": null,
+    "model": "opencode/tidepool-alpha-free",
     "require_explicit_model": true,
     "timeout_seconds": 1800
   },
