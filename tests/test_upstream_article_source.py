@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
+import types
 from datetime import date
 from pathlib import Path
 
@@ -193,6 +195,57 @@ def test_materializes_byte_identical_package_with_external_evidence_provenance(t
     assert package["markdown_sha256"] == candidates[0]["markdown_sha256"]
     assert (package_dir / "article.md").read_bytes() == (run_dir / "slot1.md").read_bytes()
     assert json.loads((package_dir / "images.json").read_text(encoding="utf-8")) == {"images": []}
+
+
+def test_reuses_two_verified_original_images_from_matching_video_package(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "WeChat_control" / "data" / "daily_runs"
+    evidence_root = tmp_path / "Video" / "outputs"
+    run_dir = _make_upstream_run(root)
+    evidence_dir = evidence_root / "20261125_100000_100000764_article_summary"
+    image_dir = evidence_dir / "source" / "images"
+    image_dir.mkdir(parents=True)
+    context = "研究团队围绕反铁磁畴的形成与演化开展了系统研究"
+    records = {}
+    for image_id in ("IMG01", "IMG02"):
+        image_path = image_dir / f"{image_id}.png"
+        image_bytes = f"verified-{image_id}".encode("utf-8")
+        image_path.write_bytes(image_bytes)
+        records[image_id] = {
+            "image_id": image_id,
+            "path": str(image_path),
+            "caption": context,
+            "context": context,
+            "image_aspect": 1.5,
+            "sha256": hashlib.sha256(image_bytes).hexdigest(),
+        }
+    _make_video_evidence(evidence_root, run_dir, image_manifest=records)
+
+    class FakeImage:
+        size = (300, 200)
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+        def verify(self):
+            return None
+
+    fake_pil = types.ModuleType("PIL")
+    fake_pil.Image = types.SimpleNamespace(open=lambda _path: FakeImage())
+    monkeypatch.setitem(sys.modules, "PIL", fake_pil)
+
+    candidates, rejected = _discover(root, evidence_root)
+
+    assert len(candidates) == 1, rejected
+    assert candidates[0]["verified_video_image_count"] == 2
+    assert candidates[0]["image_asset_source"] == "matching_video_production_output"
+    package_dir = materialize_upstream_article_package(
+        candidates[0], tmp_path / "Video" / "runtime" / "upstream_article_packages"
+    )
+    image_manifest = json.loads((package_dir / "images.json").read_text(encoding="utf-8"))
+    assert len(image_manifest["images"]) == 2
+    for record in image_manifest["images"]:
+        expected = (image_dir / f"{record['image_id']}.png").read_bytes()
+        assert (package_dir / record["file"]).read_bytes() == expected
 
 
 def test_rejects_mismatched_slot_hash_chain_before_looking_up_publication_evidence(tmp_path: Path) -> None:
