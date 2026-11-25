@@ -23,6 +23,10 @@ Configured source settings in `configs/daily_pipelines.json`:
 - `literature.expected_public_account_biz_id`: the exact public account `__biz` value used by the official album page.
 - `literature.materialized_package_root`: Video-owned cache under `runtime/upstream_article_packages`.
 
+### Unified read-only readiness check
+
+`python -m wechat_video.cli inspect-daily-two-video-readiness [--published-date YYYY-MM-DD]` reports literature, popularization and shared readiness in one JSON, using `READY_FOR_HUMAN_AUTHORIZATION` / `PARTIALLY_READY` / `BLOCKED`. It is strictly read-only: no job record, no article package, no model task, no TTS/Manim/FFmpeg, no Edge, no upload and no input modification. Missing model or Fact Card approval are reported as human-decision blockers, not code defects.
+
 ### Independent publication-source evidence
 
 Formal source attribution requires a structured `publication_source_evidence.json` in the matching Video output bundle. It is produced only from a real, read-only visible-browser observation of the official album page: the observed album page URL, the observed link attribute name/raw href, the browser-resolved article URL, the observed `data-msgid`/`data-itemidx`, the observed DOM relation, and an `observed_at` timestamp with timezone. The original href and the final resolved URL are stored separately; the album URL and the article URL are stored separately; the album `data-msgid` is never mixed with the publishing `appmsgid`.

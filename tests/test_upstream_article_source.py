@@ -335,7 +335,7 @@ def test_reports_missing_matching_video_evidence_bundle(tmp_path: Path) -> None:
 
     assert candidates == []
     assert len(rejected) == 1
-    assert "No matching Video production evidence bundle" in rejected[0]["reason"]
+    assert "No matching Video evidence bundle" in rejected[0]["reason"]
     assert str(run_dir) == rejected[0]["path"]
 
 

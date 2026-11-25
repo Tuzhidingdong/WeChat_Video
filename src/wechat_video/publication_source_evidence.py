@@ -21,6 +21,10 @@ from urllib.parse import parse_qs, urlparse
 from .article_source import validate_canonical_article_url
 
 EVIDENCE_FILENAME = "publication_source_evidence.json"
+STANDALONE_EVIDENCE_DIRNAME = "publication_source_evidence"
+VERIFICATION_FILENAME = "url_verification_evidence.json"
+PROBE_FILENAME = "article_read_count_probe.json"
+PREFLIGHT_FILENAME = "upload_preflight_report.json"
 _AUTH_KEYS = {"token", "access_token", "auth", "code", "pass_ticket"}
 _IDENTITY_KEYS = ("__biz", "mid", "idx", "sn", "chksm")
 _ORIGINAL_EVIDENCE_FILES = (
@@ -188,6 +192,29 @@ def validate_observation(observation: dict[str, Any], *, expected_biz_id: str) -
     if screenshot is not None and not isinstance(screenshot, str):
         raise PublicationSourceEvidenceError("evidence_screenshot must be a string when present.")
 
+    publication_probe = observation.get("publication_probe")
+    normalized_probe = None
+    if publication_probe is not None:
+        if not isinstance(publication_probe, dict):
+            raise PublicationSourceEvidenceError("publication_probe must be an object when present.")
+        probe_source = _require_text(publication_probe.get("source"), "publication_probe.source")
+        if "article_page" not in probe_source:
+            raise PublicationSourceEvidenceError(
+                "publication_probe.source must identify a real article-page observation."
+            )
+        try:
+            probe_ct = int(str(publication_probe.get("ct") or "").strip().strip("'\" "))
+        except (TypeError, ValueError) as exc:
+            raise PublicationSourceEvidenceError("publication_probe.ct must be a positive Unix timestamp.") from exc
+        if probe_ct <= 0:
+            raise PublicationSourceEvidenceError("publication_probe.ct must be a positive Unix timestamp.")
+        normalized_probe = {
+            "ct": probe_ct,
+            "source": probe_source,
+            "visible_publication_date": str(publication_probe.get("visible_publication_date") or ""),
+            "precision": str(publication_probe.get("precision") or "unknown"),
+        }
+
     return {
         "schema_version": 1,
         "capture_method": method,
@@ -216,6 +243,7 @@ def validate_observation(observation: dict[str, Any], *, expected_biz_id: str) -
             "link_attributes": dict(link_attrs),
         },
         "evidence_screenshot": str(screenshot) if screenshot else None,
+        "publication_probe": normalized_probe,
         "observation_note": str(observation.get("observation_note") or ""),
     }
 
@@ -331,6 +359,64 @@ def _record_values(record: dict[str, Any], *keys: str) -> list[Any]:
     return found
 
 
+def _record_standalone_evidence(evidence: dict[str, Any], evidence_root: Path) -> dict[str, Any]:
+    """Create an identity-bound evidence bundle for an article with no prior Video output.
+
+    Every value below comes from the observed browser record. No article summary,
+    video, job record or publication timestamp is fabricated.
+    """
+    probe = evidence.get("publication_probe")
+    if not probe:
+        raise PublicationSourceEvidenceError(
+            "No matching Video output exists; a real article-page publication_probe with ct is "
+            "required to create standalone source evidence."
+        )
+    identity = evidence["identity"]
+    target_dir = evidence_root / STANDALONE_EVIDENCE_DIRNAME / identity["article_id"]
+    if target_dir.exists() and (target_dir / EVIDENCE_FILENAME).exists():
+        raise PublicationSourceEvidenceError(
+            f"Refusing to overwrite existing standalone evidence: {target_dir / EVIDENCE_FILENAME}"
+        )
+    resolved_url = str(evidence["article_entry"]["resolved_article_url"])
+    _write_json_atomic(target_dir / EVIDENCE_FILENAME, evidence)
+    _write_json_atomic(target_dir / VERIFICATION_FILENAME, {
+        "schema_version": 1,
+        "url": resolved_url,
+        "title": identity["title"],
+        "captured_at": evidence["observed_at"],
+        "capture_method": evidence["capture_method"],
+    })
+    _write_json_atomic(target_dir / PROBE_FILENAME, {
+        "schema_version": 1,
+        "ct": str(probe["ct"]),
+        "title": identity["title"],
+        "appmsgid": evidence["article_entry"]["data_msgid"],
+        "source": probe["source"],
+        "observed_at": evidence["observed_at"],
+    })
+    _write_json_atomic(target_dir / PREFLIGHT_FILENAME, {
+        "schema_version": 1,
+        "url_provenance": {
+            "endpoint": evidence["source_page"]["url"],
+            "field_path": f"{evidence['dom_relation']['container_tag']}[{evidence['article_entry']['link_attribute']}]",
+            "verified_at": evidence["observed_at"],
+            "read_only": True,
+            "source": evidence["capture_method"],
+        },
+    })
+    return {
+        "state": "STANDALONE_SOURCE_EVIDENCE_RECORDED",
+        "evidence_path": str(target_dir / EVIDENCE_FILENAME),
+        "evidence_bundle": str(target_dir),
+        "storage_mode": "standalone_identity_bound_evidence",
+        "identity": identity,
+        "source_page_url": evidence["source_page"]["url"],
+        "resolved_article_url": resolved_url,
+        "observed_at": evidence["observed_at"],
+        "original_files_untouched": True,
+    }
+
+
 def record_source_evidence(
     *,
     observation_path: Path,
@@ -359,9 +445,7 @@ def record_source_evidence(
         ):
             matches.append(directory)
     if not matches:
-        raise PublicationSourceEvidenceError(
-            "No unique Video evidence bundle matches the observed article identity and SHA-256."
-        )
+        return _record_standalone_evidence(evidence, root)
     if len(matches) > 1:
         raise PublicationSourceEvidenceError(
             "Multiple Video evidence bundles match the observed article; refusing to choose: "

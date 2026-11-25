@@ -19,6 +19,10 @@ from urllib.parse import parse_qs, urlparse
 
 from .article_source import validate_canonical_article_url
 from .publication_source_evidence import (
+    EVIDENCE_FILENAME,
+    PREFLIGHT_FILENAME,
+    PROBE_FILENAME,
+    VERIFICATION_FILENAME,
     PublicationSourceEvidenceError,
     read_source_evidence,
     validate_binding as validate_source_evidence_binding,
@@ -232,12 +236,60 @@ def _find_video_publication_evidence(
             "manifest": manifest,
             "source_record": source,
         })
+
+    # Standalone, identity-bound evidence for articles that have no prior Video
+    # summary output. Identity comes from the observation itself, never from a
+    # fabricated article_summary_manifest.json.
+    known_dirs = {item["directory"] for item in matched}
+    for evidence_path in sorted(root.rglob(EVIDENCE_FILENAME)):
+        directory = evidence_path.parent
+        if directory in known_dirs:
+            continue
+        try:
+            evidence = read_source_evidence(directory)
+        except PublicationSourceEvidenceError as exc:
+            raise UpstreamArticleError(f"Invalid publication source evidence in {directory}: {exc}") from exc
+        if evidence is None:
+            continue
+        observed_identity = evidence.get("identity") or {}
+        if (
+            str(observed_identity.get("article_id") or "") != article_id
+            or str(observed_identity.get("appmsgid") or "") != appmsgid
+            or str(observed_identity.get("title") or "") != title
+            or str(observed_identity.get("markdown_sha256") or "").casefold() != markdown_sha256.casefold()
+        ):
+            continue
+        companions = {
+            "verification_path": directory / VERIFICATION_FILENAME,
+            "preflight_path": directory / PREFLIGHT_FILENAME,
+            "probe_path": directory / PROBE_FILENAME,
+        }
+        if not all(path.is_file() for path in companions.values()):
+            continue
+        try:
+            verification = _read_json(companions["verification_path"])
+            preflight = _read_json(companions["preflight_path"])
+            probe = _read_json(companions["probe_path"])
+        except UpstreamArticleError:
+            continue
+        matched.append({
+            "directory": directory,
+            "verification_path": companions["verification_path"],
+            "preflight_path": companions["preflight_path"],
+            "probe_path": companions["probe_path"],
+            "verification": verification,
+            "preflight": preflight,
+            "probe": probe,
+            "source_evidence": evidence,
+            "manifest": {},
+            "source_record": {},
+        })
     if not matched:
         raise UpstreamArticleError(
-            "No matching Video production evidence bundle under "
-            f"{root}; expected url_verification_evidence.json, upload_preflight_report.json, "
-            "article_read_count_probe.json, article_summary_manifest.json and source_record.json "
-            "bound to this exact article_id/appmsgid/title/Markdown SHA-256."
+            "No matching Video evidence bundle under "
+            f"{root}; expected either the historical five-file production bundle or a standalone "
+            "publication_source_evidence.json bundle, both bound to this exact "
+            "article_id/appmsgid/title/Markdown SHA-256."
         )
     if len(matched) > 1:
         directories = [str(item["directory"]) for item in matched]
@@ -570,6 +622,56 @@ def _local_image_assets(
     return found
 
 
+def _markdown_figure_assets(
+    markdown: str,
+    *,
+    prepared: dict[str, Any],
+    data_root: Path,
+) -> list[dict[str, Any]]:
+    """Derive local, caption-grounded figure assets from the real upstream run.
+
+    Only files already present under the read-only WeChat_control data root are
+    used. Captions come from the exact upstream Markdown, never from invented text.
+    """
+    matches = re.findall(
+        r"!\[([^\]]*)\]\((https://mmbiz\.qpic\.cn/[^)]+)\)", markdown
+    )
+    if not matches:
+        return []
+    bundle = str(prepared.get("bundle_path") or "")
+    bundle_dir = Path(bundle).resolve()
+    data_root = data_root.resolve()
+    if not bundle_dir.is_relative_to(data_root):
+        return []
+    figures_dir = bundle_dir.parent / "figures"
+    assets: list[dict[str, Any]] = []
+    for index, (caption, url) in enumerate(matches, 1):
+        caption = re.sub(r"\s+", " ", caption).strip()
+        if not caption:
+            continue
+        source = figures_dir / f"fig_{index}_full_pdf.png"
+        if not source.is_file() or not source.resolve().is_relative_to(data_root):
+            continue
+        try:
+            from PIL import Image
+            with Image.open(source) as image:
+                width, height = image.size
+                image.verify()
+            if width <= 0 or height <= 0:
+                continue
+        except Exception:
+            continue
+        assets.append({
+            "source_path": source.resolve(),
+            "source_url": url.strip(),
+            "context": caption,
+            "image_aspect": round(width / height, 6),
+            "image_id": f"figure_{index:02d}",
+            "sha256": _sha256_bytes(source.read_bytes()),
+        })
+    return assets
+
+
 def discover_upstream_literature_runs(
     daily_runs_root: Path,
     *,
@@ -724,10 +826,17 @@ def discover_upstream_literature_runs(
                     data_root=data_root,
                     markdown=markdown,
                 )
-                image_assets = video_image_assets or upstream_image_assets
+                markdown_image_assets = _markdown_figure_assets(
+                    markdown,
+                    prepared=prepared,
+                    data_root=data_root,
+                )
+                image_assets = video_image_assets or upstream_image_assets or markdown_image_assets
                 image_asset_source = (
                     "matching_video_production_output"
                     if video_image_assets
+                    else "upstream_markdown_figure_assets"
+                    if markdown_image_assets
                     else "upstream_uploaded_assets_manifest"
                 )
                 candidates.append({

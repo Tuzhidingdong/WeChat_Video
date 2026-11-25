@@ -13,6 +13,7 @@ from .daily_pipelines import (
     run_daily_popularization,
     run_daily_two_videos,
 )
+from .daily_readiness import inspect_daily_two_video_readiness
 from .channels_uploader import (
     UploadBlockedError,
     approve_latest_run,
@@ -225,6 +226,13 @@ def build_parser() -> argparse.ArgumentParser:
     record_source.add_argument("--project-root", type=Path, default=root)
     record_source.add_argument("--observation", type=Path, required=True)
 
+    readiness = sub.add_parser(
+        "inspect-daily-two-video-readiness",
+        help="Read-only unified readiness report for both daily BATs; starts no production step.",
+    )
+    readiness.add_argument("--project-root", type=Path, default=root)
+    readiness.add_argument("--published-date", help="Optional Asia/Shanghai publication date YYYY-MM-DD.")
+
     literature_daily = sub.add_parser(
         "run-literature-daily",
         help="Select yesterday's published literature article, render it, QA it, and save the exact output as a draft.",
@@ -307,6 +315,13 @@ def main(argv: list[str] | None = None) -> int:
                 observation_path=args.observation,
                 evidence_root=outputs_root,
                 expected_biz_id=str(config["literature"]["expected_public_account_biz_id"]),
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "inspect-daily-two-video-readiness":
+            result = inspect_daily_two_video_readiness(
+                args.project_root,
+                published_date=args.published_date,
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
