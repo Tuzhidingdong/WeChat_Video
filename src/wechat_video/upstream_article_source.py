@@ -145,7 +145,6 @@ def _published_time(
 ) -> tuple[str, str, str, str, str]:
     verification_text = "\n".join(_strings(verification))
     provenance_text = "\n".join(_strings(provenance))
-    probe_text = "\n".join(_strings(probe))
 
     if "appmsgalbum" not in verification_text.casefold():
         raise UpstreamArticleError("Publication evidence does not identify the official appmsgalbum page.")
@@ -507,7 +506,7 @@ def materialize_upstream_article_package(candidate: dict[str, Any], package_root
         "article_type": "literature_translation",
         "editorial_pillar_id": "literature_manuscript",
         "publication_status": "PUBLISHED",
-        "appmsgid": article_id.rsplit("_", 1)[0],
+        "appmsgid": str(candidate["appmsgid"]),
         "article_id": article_id,
         "title": str(candidate["title"]),
         "published_at": published_at,
