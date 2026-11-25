@@ -318,7 +318,8 @@ def _published_time(
         raise UpstreamArticleError(
             "article_read_count_probe.json identifies a different public article URL."
         )
-    if not provenance_article_urls and not metadata_url_value:
+    provenance_album_urls = _extract_urls(provenance, _ALBUM_RE)
+    if not provenance_article_urls and not metadata_url_value and not provenance_album_urls:
         raise UpstreamArticleError(
             "The recorded article URL has no independent binding in url_provenance or the matching Video source manifest."
         )
@@ -758,7 +759,7 @@ def materialize_upstream_article_package(candidate: dict[str, Any], package_root
             "read_only": True,
         },
         "official_album_entry": {
-            "page_url": str(candidate["album_url"]),
+            "page_url": candidate.get("album_url"),
             "data_msgid": time_details.get("album_mid"),
             "data_itemidx": time_details.get("album_item_index"),
             "note": "data_msgid is the official album namespace and is not the delivery appmsgid",
