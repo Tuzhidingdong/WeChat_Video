@@ -23,6 +23,10 @@ Configured source settings in `configs/daily_pipelines.json`:
 - `literature.expected_public_account_biz_id`: the exact public account `__biz` value used by the official album page.
 - `literature.materialized_package_root`: Video-owned cache under `runtime/upstream_article_packages`.
 
+### OpenCode planner provider routing
+
+The planner model must use the OpenCode Go provider prefix `opencode-go/<model-id>`; ordinary `opencode/...` free models share a separate quota and are rejected by a fail-closed validator before any planner command is built. The current model is selected from the live Go catalog (zero input/output/cache price, non region-restricted, sufficient context and tool support); Beam Free is excluded because it is unavailable in China. Model choice is explicit via `--model`, sessions are never reused, and no silent fallback exists if the catalog is unavailable.
+
 ### Rolling literature discovery window
 
 The literature BAT no longer filters by "yesterday". `configs/daily_pipelines.json` → `literature.lookback_days` (default 7) defines an inclusive Asia/Shanghai window of today plus the preceding six calendar days. `literature.selection_policy=newest_first` selects the most recent formally published, evidence-complete, unproduced article. `--published-date` is retained only as an explicit single-day diagnostic override; the BAT never passes it. The read-only inspection reports the window, scanned run count, found articles, already-rendered count, rejection categories, selected article, deferred candidates and candidates about to expire from the window. Deferred candidates are retried on later runs; nothing is deleted and duplicate protection is unchanged. Upstream run date, draft save time or unverified `published_at` never substitutes for formal publication evidence.

@@ -514,6 +514,28 @@ def _extract_model_text(stdout: str) -> str:
     raise DailyPipelineError("OpenCode output did not contain one valid JSON object.")
 
 
+_GO_MODEL_PREFIX = "opencode-go/"
+
+
+def _validate_planner_model(model: str) -> str:
+    """Fail closed unless the planner model is explicitly routed via OpenCode Go.
+
+    Ordinary `opencode/...` free models share a separate quota and must never be
+    selected by the daily pipelines. This guard does not depend on catalog
+    availability: an unavailable catalog can only block, never silently reroute.
+    """
+    text = str(model or "").strip()
+    if not text.startswith(_GO_MODEL_PREFIX):
+        raise DailyPipelineError(
+            "Planner model must use the OpenCode Go provider prefix 'opencode-go/'; "
+            f"refusing non-Go model {text!r}."
+        )
+    model_id = text[len(_GO_MODEL_PREFIX):]
+    if not model_id or any(char.isspace() for char in model_id) or "/" in model_id:
+        raise DailyPipelineError(f"Invalid OpenCode Go model ID: {text!r}.")
+    return text
+
+
 def _planner_preflight(config: dict[str, Any]) -> tuple[str, str, str]:
     opencode_cfg = config.get("opencode") or {}
     executable = str(opencode_cfg.get("executable") or "opencode")
@@ -530,7 +552,7 @@ def _planner_preflight(config: dict[str, Any]) -> tuple[str, str, str]:
         resolved = str(Path(executable).resolve())
     if not resolved:
         raise DailyPipelineError(f"OpenCode executable not found on PATH: {executable}")
-    return resolved, agent, model
+    return resolved, agent, _validate_planner_model(model)
 
 
 def _run_content_planner(
