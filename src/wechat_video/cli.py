@@ -7,7 +7,12 @@ import sys
 from pathlib import Path
 
 from .article_summary import run_article_summary
-from .daily_pipelines import run_daily_literature, run_daily_popularization, run_daily_two_videos
+from .daily_pipelines import (
+    inspect_daily_literature_sources,
+    run_daily_literature,
+    run_daily_popularization,
+    run_daily_two_videos,
+)
 from .channels_uploader import (
     UploadBlockedError,
     approve_latest_run,
@@ -202,6 +207,13 @@ def build_parser() -> argparse.ArgumentParser:
     article_summary.add_argument("--summary", type=Path, required=True)
     article_summary.add_argument("--output-root", type=Path, default=Path("outputs"))
 
+    inspect_literature = sub.add_parser(
+        "inspect-literature-upstream",
+        help="Read-only inspect of eligible published articles from WeChat_control daily-run artifacts; no production side effects.",
+    )
+    inspect_literature.add_argument("--project-root", type=Path, default=root)
+    inspect_literature.add_argument("--published-date", help="Optional Asia/Shanghai publication date YYYY-MM-DD.")
+
     literature_daily = sub.add_parser(
         "run-literature-daily",
         help="Select yesterday's published literature article, render it, QA it, and save the exact output as a draft.",
@@ -268,6 +280,13 @@ def main(argv: list[str] | None = None) -> int:
                 "automatic_publication": False,
             }, ensure_ascii=False, indent=2))
             print("Local article-summary preview created. No upload or publication was attempted.")
+            return 0
+        if args.command == "inspect-literature-upstream":
+            result = inspect_daily_literature_sources(
+                args.project_root,
+                published_date=args.published_date,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         if args.command == "run-literature-daily":
             result = run_daily_literature(
