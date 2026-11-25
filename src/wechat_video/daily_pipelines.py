@@ -21,7 +21,6 @@ from .fact_card import FactCardError, load_fact_card, read_json, validate_script
 from .topic_approval import TopicApprovalError, verify_fact_card_approval
 from .pipeline import VISUAL_STRATEGIES, run_slice_a
 from .upstream_article_source import (
-    UpstreamArticleError,
     discover_upstream_literature_runs,
     materialize_upstream_article_package,
 )
