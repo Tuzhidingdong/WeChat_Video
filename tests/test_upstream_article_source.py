@@ -145,30 +145,38 @@ def _discover(root: Path, evidence_root: Path):
     )
 
 
-def test_discovers_published_article_from_existing_daily_run_without_manual_package(tmp_path: Path) -> None:
-    root = tmp_path / "data" / "daily_runs"
+def test_discovers_published_article_from_existing_daily_run_and_external_video_evidence(tmp_path: Path) -> None:
+    root = tmp_path / "WeChat_control" / "data" / "daily_runs"
+    evidence_root = tmp_path / "Video" / "outputs"
     run_dir = _make_upstream_run(root)
+    evidence_dir = _make_video_evidence(evidence_root, run_dir)
 
-    candidates, rejected = _discover(root)
+    candidates, rejected = _discover(root, evidence_root)
 
     assert len(candidates) == 1, rejected
     assert rejected == []
     candidate = candidates[0]
     assert candidate["source_run_dir"] == run_dir
+    assert candidate["publication_evidence_dir"] == evidence_dir
     assert candidate["article_id"] == "100000764_0"
     assert candidate["appmsgid"] == "100000764"
     assert candidate["published_at"] == "2026-11-22T00:48:27Z"
     assert candidate["local_date"] == "2026-11-22"
     assert candidate["canonical_url"] == ARTICLE_URL
-    assert candidate["publication_time_field_path"] == "$.ct"
+    assert candidate["publication_time_field_path"] == "$.url"
     assert candidate["publication_time_details"]["album_mid"] == "2247484414"
     assert candidate["publication_time_details"]["album_mid"] != candidate["appmsgid"]
+    assert candidate["publication_time_details"]["album_item_index"] == "1"
 
 
-def test_materializes_byte_identical_video_local_package_and_preserves_provenance(tmp_path: Path) -> None:
-    root = tmp_path / "data" / "daily_runs"
-    _make_upstream_run(root)
-    candidates, _ = _discover(root)
+def test_materializes_byte_identical_package_with_external_evidence_provenance(tmp_path: Path) -> None:
+    root = tmp_path / "WeChat_control" / "data" / "daily_runs"
+    evidence_root = tmp_path / "Video" / "outputs"
+    run_dir = _make_upstream_run(root)
+    evidence_dir = _make_video_evidence(evidence_root, run_dir)
+    candidates, rejected = _discover(root, evidence_root)
+    assert len(candidates) == 1, rejected
+
     package_dir = materialize_upstream_article_package(
         candidates[0], tmp_path / "Video" / "runtime" / "upstream_article_packages"
     )
@@ -179,75 +187,110 @@ def test_materializes_byte_identical_video_local_package_and_preserves_provenanc
     assert package["article"]["published_at"] == "2026-11-22T00:48:27Z"
     assert package["article"]["publication_time_provenance"]["raw_ct"] == CT
     assert package["article"]["canonical_url"] == ARTICLE_URL
+    assert package["article"]["url_provenance"]["endpoint"] == ALBUM_URL
+    assert package["article"]["url_provenance"]["evidence_directory"] == str(evidence_dir)
+    assert package["article"]["official_album_entry"]["data_msgid"] == "2247484414"
     assert package["markdown_sha256"] == candidates[0]["markdown_sha256"]
-    assert (package_dir / "article.md").read_bytes() == (
-        Path(candidates[0]["source_run_dir"]) / "slot1.md"
-    ).read_bytes()
+    assert (package_dir / "article.md").read_bytes() == (run_dir / "slot1.md").read_bytes()
     assert json.loads((package_dir / "images.json").read_text(encoding="utf-8")) == {"images": []}
 
 
-def test_rejects_mismatched_slot_hash_chain(tmp_path: Path) -> None:
-    root = tmp_path / "data" / "daily_runs"
+def test_rejects_mismatched_slot_hash_chain_before_looking_up_publication_evidence(tmp_path: Path) -> None:
+    root = tmp_path / "WeChat_control" / "data" / "daily_runs"
+    evidence_root = tmp_path / "Video" / "outputs"
     run_dir = _make_upstream_run(root)
+    _make_video_evidence(evidence_root, run_dir)
     _write(run_dir / "review_state.json", {"slots": {"1": {"article_sha256": "0" * 64}}})
 
-    candidates, rejected = _discover(root)
+    candidates, rejected = _discover(root, evidence_root)
 
     assert candidates == []
     assert any("review_state.json slots.1.article_sha256" in item["reason"] for item in rejected)
 
 
-def test_accepts_ct_from_same_run_probe_when_probe_omits_duplicate_article_url(tmp_path: Path) -> None:
-    root = tmp_path / "data" / "daily_runs"
+def test_accepts_ct_probe_without_duplicate_url_when_video_package_binds_article_identity(tmp_path: Path) -> None:
+    root = tmp_path / "WeChat_control" / "data" / "daily_runs"
+    evidence_root = tmp_path / "Video" / "outputs"
     run_dir = _make_upstream_run(root)
-    probe = json.loads((run_dir / "article_read_count_probe.json").read_text(encoding="utf-8"))
+    evidence_dir = _make_video_evidence(evidence_root, run_dir)
+    probe_path = evidence_dir / "article_read_count_probe.json"
+    probe = json.loads(probe_path.read_text(encoding="utf-8"))
     probe.pop("url")
-    _write(run_dir / "article_read_count_probe.json", probe)
+    _write(probe_path, probe)
 
-    candidates, rejected = _discover(root)
+    candidates, rejected = _discover(root, evidence_root)
 
-    assert len(candidates) == 1
+    assert len(candidates) == 1, rejected
     assert rejected == []
     assert candidates[0]["publication_time_details"]["ct_binding"] == (
-        "same_run_article_read_count_probe_scoped_by_verified_album_evidence"
+        "paired_video_output_evidence_bound_by_article_id_appmsgid_title_and_markdown_sha256"
     )
 
 
-def test_rejects_publication_time_when_probe_url_does_not_match_album_data_link(tmp_path: Path) -> None:
-    root = tmp_path / "data" / "daily_runs"
+def test_rejects_publication_time_when_video_probe_url_does_not_match_verified_article_url(tmp_path: Path) -> None:
+    root = tmp_path / "WeChat_control" / "data" / "daily_runs"
+    evidence_root = tmp_path / "Video" / "outputs"
     run_dir = _make_upstream_run(root)
-    _write(run_dir / "article_read_count_probe.json", {
-        "url": "https://mp.weixin.qq.com/s/a-different-article",
+    evidence_dir = _make_video_evidence(evidence_root, run_dir)
+    _write(evidence_dir / "article_read_count_probe.json", {
+        "url": "https://mp.weixin.qq.com/s?__biz=MzIyMjY1ODkwMA==&mid=999999&idx=1",
         "ct": CT,
     })
 
-    candidates, rejected = _discover(root)
+    candidates, rejected = _discover(root, evidence_root)
 
     assert candidates == []
-    assert any("different article URL" in item["reason"] for item in rejected), rejected
+    assert any("different public article URL" in item["reason"] for item in rejected), rejected
 
 
-def test_rejects_album_page_for_another_public_account(tmp_path: Path) -> None:
-    root = tmp_path / "data" / "daily_runs"
+def test_rejects_video_evidence_for_another_public_account(tmp_path: Path) -> None:
+    root = tmp_path / "WeChat_control" / "data" / "daily_runs"
+    evidence_root = tmp_path / "Video" / "outputs"
     run_dir = _make_upstream_run(root)
-    wrong_album = ALBUM_URL.replace("MzIyMjY1ODkwMA==", "WRONG_BIZ")
-    evidence = json.loads((run_dir / "url_verification_evidence.json").read_text(encoding="utf-8"))
-    preflight = json.loads((run_dir / "upload_preflight_report.json").read_text(encoding="utf-8"))
-    evidence["source_page_url"] = wrong_album
-    preflight["url_provenance"]["endpoint"] = wrong_album
-    _write(run_dir / "url_verification_evidence.json", evidence)
-    _write(run_dir / "upload_preflight_report.json", preflight)
+    evidence_dir = _make_video_evidence(evidence_root, run_dir)
+    wrong_url = ARTICLE_URL.replace("MzIyMjY1ODkwMA==", "WRONG_BIZ")
+    for filename in ("url_verification_evidence.json", "article_read_count_probe.json"):
+        _write(evidence_dir / filename, {"url": wrong_url, "ct": CT})
+    preflight = _read_json_for_test(evidence_dir / "upload_preflight_report.json")
+    preflight["url_provenance"]["article_url"] = wrong_url
+    _write(evidence_dir / "upload_preflight_report.json", preflight)
+    manifest = _read_json_for_test(evidence_dir / "article_summary_manifest.json")
+    source = _read_json_for_test(evidence_dir / "source_record.json")
+    manifest["canonical_url"] = wrong_url
+    source["canonical_url"] = wrong_url
+    _write(evidence_dir / "article_summary_manifest.json", manifest)
+    _write(evidence_dir / "source_record.json", source)
 
-    candidates, rejected = _discover(root)
+    candidates, rejected = _discover(root, evidence_root)
 
     assert candidates == []
-    assert any("album __biz mismatch" in item["reason"] for item in rejected)
+    assert any("__biz" in item["reason"] for item in rejected)
+
+
+def _read_json_for_test(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_reports_missing_matching_video_evidence_bundle(tmp_path: Path) -> None:
+    root = tmp_path / "WeChat_control" / "data" / "daily_runs"
+    evidence_root = tmp_path / "Video" / "outputs"
+    run_dir = _make_upstream_run(root)
+
+    candidates, rejected = _discover(root, evidence_root)
+
+    assert candidates == []
+    assert len(rejected) == 1
+    assert "No matching Video production evidence bundle" in rejected[0]["reason"]
+    assert str(run_dir) == rejected[0]["path"]
 
 
 def test_refuses_to_overwrite_a_conflicting_materialized_package(tmp_path: Path) -> None:
-    root = tmp_path / "data" / "daily_runs"
-    _make_upstream_run(root)
-    candidates, _ = _discover(root)
+    root = tmp_path / "WeChat_control" / "data" / "daily_runs"
+    evidence_root = tmp_path / "Video" / "outputs"
+    run_dir = _make_upstream_run(root)
+    _make_video_evidence(evidence_root, run_dir)
+    candidates, rejected = _discover(root, evidence_root)
+    assert len(candidates) == 1, rejected
     package_root = tmp_path / "Video" / "runtime" / "upstream_article_packages"
     package_dir = materialize_upstream_article_package(candidates[0], package_root)
     (package_dir / "article.md").write_text("changed", encoding="utf-8")
