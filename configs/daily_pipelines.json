@@ -7,7 +7,7 @@
   "opencode": {
     "executable": "opencode",
     "agent": "daily-content-planner",
-    "model": "opencode-go/hy4-flash-free",
+    "model": "opencode-go/hungerg-free",
     "require_explicit_model": true,
     "timeout_seconds": 1800
   },

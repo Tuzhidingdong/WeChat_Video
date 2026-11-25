@@ -25,7 +25,7 @@ Configured source settings in `configs/daily_pipelines.json`:
 
 ### OpenCode planner provider routing
 
-The planner model must use the OpenCode Go provider prefix `opencode-go/<model-id>`; ordinary `opencode/...` free models share a separate quota and are rejected by a fail-closed validator before any planner command is built. The current model is selected from the live Go catalog (zero input/output/cache price, non region-restricted, sufficient context and tool support); Beam Free is excluded because it is unavailable in China. Model choice is explicit via `--model`, sessions are never reused, and no silent fallback exists if the catalog is unavailable.
+The planner model must use the OpenCode Go provider prefix `opencode-go/<model-id>`; ordinary `opencode/...` free models share a separate quota and are rejected by a fail-closed validator before any planner command is built. The current model is selected from the live Go catalog (zero input/output/cache price, non region-restricted, sufficient context and tool support); Beam Free is excluded because it is unavailable in China. The active free model is `opencode-go/hungerg-free` after an authorized backup-model retry; its strict JSON and Chinese output must still pass the existing summary validator during the authorized first run. Model choice is explicit via `--model`, sessions are never reused, and no silent fallback exists if the catalog is unavailable.
 
 ### Rolling literature discovery window
 
