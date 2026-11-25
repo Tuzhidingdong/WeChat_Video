@@ -12,37 +12,63 @@
 
 The first two launchers can be started independently. They share a global lock because Manim production and the dedicated Edge/CDP uploader are not safe for concurrent use.
 
-## Literature article inbox contract
+## Automatic WeChat_control literature source
 
-The configured inbox is `configs/daily_pipelines.json` → `literature.article_inbox_dir`. The current default is:
+The literature BAT discovers source articles directly from the existing, completed WeChat_control daily-run output. No user-created article package or manual inbox is required.
+
+Configured source settings in `configs/daily_pipelines.json`:
+
+- `literature.upstream_daily_runs_dir`: `../data/daily_runs`, resolved relative to the Video project root.
+- `literature.upstream_account_key`: `research_subscription`.
+- `literature.expected_public_account_biz_id`: the exact public account `__biz` value used by the official album page.
+- `literature.materialized_package_root`: Video-owned cache under `runtime/upstream_article_packages`.
+
+The adapter scans:
 
 ```
-runtime/inbox/literature_articles/
-  <article_id>/
-    article.json
-    article.md
-    images.json
-    images/
-      ...
+E:\Agent\WeChat\data\daily_runs\<date>\research_subscription\<run_id>\
+  slot1.md
+  slot1.manifest.json
+  prepared_articles.json
+  review_state.json
+  delivery_result.json
+  uploaded_assets_manifest.json
+  url_verification_evidence.json
+  upload_preflight_report.json
+  article_read_count_probe.json
 ```
 
-The default path is a project-local handoff placeholder until the read-only local audit confirms the real publishing-workflow export location. Set it to the verified read-only/import directory before enabling unattended runs. Do not connect to or reuse the WeChat_control browser profile or private session.
+It reads these existing local outputs only. It does not modify WeChat_control, open its browser profile, read its credentials, reuse its CDP session, call private APIs, or repeat the upstream article-discovery/writing/draft workflow.
 
-Packages must be complete, published, in the 「成核生长」 account, and carry the existing literature taxonomy:
-- `editorial_slot=1`
-- `article_type=literature_translation`
-- `editorial_pillar_id=literature_manuscript`
-- `publication_status=PUBLISHED`
+Before a run is eligible, the adapter verifies:
 
-The run selects the latest `published_at` whose timestamp converts to the previous Asia/Shanghai calendar day. It records all candidate IDs and rejection reasons. A missing verified canonical URL does not block a video because the platform's WeChat article link field rejected the source article under its current readership/recent-publication eligibility rule. The original URL, if verified, remains in the local source record only.
+1. Slot 1 taxonomy is `literature_translation` + `literature_manuscript`.
+2. Exact `slot1.md` bytes match both `slot1.manifest.json.output_sha256` and `review_state.json.slots.1.article_sha256`.
+3. `prepared_articles.json` contains exactly one matching record, and its full `md_body` (and `raw_markdown`, when present) is byte-identical to `slot1.md`. The H1 must match its title.
+4. The delivery appmsgid and account match the configured account. The delivery result's `PENDING_PUBLICATION` state is not treated as publication evidence.
+5. The recorded official album DOM evidence identifies `li.album__list-item[data-link]`, the correct `__biz`, the exact article title, and Slot 1 item index. The observed canonical article URL must agree with the read-only verification provenance.
+6. The public article read-count probe supplies an unambiguous positive `ct` Unix timestamp. That instant is used as the publication time and converted to the configured Asia/Shanghai date. The draft/worker `article.json.published_at`, run date, draft-save time, and album update time are never substituted.
+7. The delivery `appmsgid` and album `data-msgid` remain distinct identifiers and are stored separately.
 
-The content planner receives article metadata, full text and image manifest as explicit file attachments. It must return 5–8 narration units, exactly one visual beat per unit, 222–235 Chinese Han characters, exact contiguous source excerpts for every claim, and only local image IDs. The existing article-summary validator rechecks source hash, excerpt membership, claim IDs, beat structure and image references before Edge-TTS starts.
+Only after all checks pass does Video create an immutable local package at:
 
-The final 1.8-second video outro states:
+```
+runtime/upstream_article_packages/<appmsgid>_0/<run_id>/
+  article.json
+  article.md
+  images.json
+  images/                 # only verified, local original assets, when present
+```
+
+The Markdown is copied byte-for-byte from `slot1.md`. Original images are included only when their local path is inside the upstream data root, the image decodes successfully, and its recorded caption/context is grounded in the article Markdown. The adapter does not download CDN images or invent captions. The Video cache never overwrites a conflicting existing package.
+
+If an upstream run lacks the verified public URL/time evidence, account binding, taxonomy or SHA chain, it is rejected and reported with a reason. No video is created from an unverified candidate. The planner's explicit model preflight occurs before Video materializes a package; a null model remains a clear planning blocker.
+
+The content planner receives the exact package generated from the selected upstream run. Existing summary validation, Edge-TTS, Manim, FFmpeg, strict QA, and exact-run-directory draft uploader remain the downstream production engine. The fixed on-video CTA remains:
 
 **更多详细解读见【成核生长】同名公众号**
 
-No WeChat extended-link field is filled.
+No extended-link field is required.
 
 ## Popularization source contract
 
@@ -100,7 +126,7 @@ Use `--published-date YYYY-MM-DD` for an explicitly selected literature publicat
 ## Scheduling policy
 
 Do not register a Windows Task Scheduler task until:
-1. the local read-only audit has confirmed the actual article-package handoff directory;
+1. the upstream adapter has been synced locally and its source-evidence checks have passed against the real daily-run artifact;
 2. the local Agent has synced and accepted the exact feature branch SHA;
 3. at least one real literature article has been converted to and verified as a draft;
 4. at least one human-approved eligible Fact Card has been converted to and verified as a draft;
