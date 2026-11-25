@@ -122,6 +122,19 @@ def _find_slot1_article(records: list[dict[str, Any]]) -> dict[str, Any]:
     return eligible[0]
 
 
+def _attribute_values(value: Any, attribute: str) -> list[str]:
+    escaped = re.escape(attribute)
+    pattern = re.compile(rf"{escaped}\\s*=\\s*[\"']?([A-Za-z0-9_-]+)", re.IGNORECASE)
+    values = [
+        str(item).strip()
+        for _, item in _values_for_key(value, attribute)
+        if str(item).strip()
+    ]
+    for text in _strings(value):
+        values.extend(match.group(1) for match in pattern.finditer(text))
+    return values
+
+
 def _published_time(
     verification: Any,
     provenance: Any,
@@ -194,16 +207,14 @@ def _published_time(
     # The caller converts the absolute instant to its configured local timezone.
     published_at = published.isoformat(timespec="seconds").replace("+00:00", "Z")
     ct_path = _unique_string([path for path, value in ct_values], "ct field path")
-    album_mid_values = [
-        str(value) for _, value in _values_for_key(verification, "data-msgid")
-        if str(value).strip()
-    ]
-    album_mid = _unique_string(album_mid_values, "official album data-msgid")
-    item_index_values = [
-        str(value) for _, value in _values_for_key(verification, "data-itemidx")
-        if str(value).strip()
-    ]
-    item_index = _unique_string(item_index_values, "official album data-itemidx")
+    album_mid = _unique_string(
+        _attribute_values(verification, "data-msgid"),
+        "official album data-msgid",
+    )
+    item_index = _unique_string(
+        _attribute_values(verification, "data-itemidx"),
+        "official album data-itemidx",
+    )
     if item_index != "1":
         raise UpstreamArticleError(f"Expected Slot 1 album item data-itemidx=1, observed {item_index!r}.")
 
