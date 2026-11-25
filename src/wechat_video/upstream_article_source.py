@@ -124,7 +124,7 @@ def _find_slot1_article(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _attribute_values(value: Any, attribute: str) -> list[str]:
     escaped = re.escape(attribute)
-    pattern = re.compile(rf"{escaped}\\s*=\\s*[\"']?([A-Za-z0-9_-]+)", re.IGNORECASE)
+    pattern = re.compile(rf"{escaped}\s*=\s*[\"']?([A-Za-z0-9_-]+)", re.IGNORECASE)
     values = [
         str(item).strip()
         for _, item in _values_for_key(value, attribute)
