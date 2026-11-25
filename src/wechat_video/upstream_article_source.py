@@ -216,7 +216,8 @@ def _published_time(
     )
     # The caller converts the absolute instant to its configured local timezone.
     published_at = published.isoformat(timespec="seconds").replace("+00:00", "Z")
-    ct_path = _unique_string([path for path, value in ct_values], "ct field path")
+    ct_paths = sorted({path for path, value in ct_values})
+    ct_path = "$.ct" if "$.ct" in ct_paths else ct_paths[0]
     album_mid = _unique_string(
         _attribute_values(verification, "data-msgid"),
         "official album data-msgid",
