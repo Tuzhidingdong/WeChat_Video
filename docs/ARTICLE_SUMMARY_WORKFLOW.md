@@ -8,58 +8,50 @@
 
 The pipeline consumes a sanitized, local article package exported by the publishing workflow. Its taxonomy mirrors the upstream record: editorial_slot=1, article_type=literature_translation, and editorial_pillar_id=literature_manuscript. It does not access or reuse the WeChat_control browser profile, cookies, access tokens, or private platform APIs. This keeps the Video project isolated from the WeChat_control account session and browser automation.
 
-## 2. Input package contract
+## 2. Automatic source package contract
 
-Create one directory per published article:
+The production BAT does **not** ask the user to create or copy an article package. It discovers completed Slot 1 runs from the existing local WeChat_control output at `../data/daily_runs/<date>/research_subscription/<run_id>/`.
 
-    article-package/
-      article.json
-      article.md
-      images.json
-      images/
-        IMG01.jpg
-        IMG02.png
+The Video adapter reads the existing run's `slot1.md`, `slot1.manifest.json`, `prepared_articles.json`, `review_state.json`, `delivery_result.json`, `uploaded_assets_manifest.json`, and the recorded publication-evidence files. It verifies the full Markdown hash chain and the `literature_translation` / `literature_manuscript` taxonomy before considering the run.
 
-article.json:
+Formal publication time is derived only from the positive Unix-epoch `ct` field in the same run's `article_read_count_probe.json`, with provenance retained in the materialized package. For the inspected sample, `ct=1795308507` corresponds to `2026-11-22T00:48:27Z` (`2026-11-22 08:48:27` Asia/Shanghai). The upstream run's `article.json.published_at` value is a draft/worker timestamp and must never be used as the formal publication time.
 
-    {
-      "schema_version": 1,
-      "account_name": "成核生长",
-      "editorial_slot": 1,
-      "article_type": "literature_translation",
-      "editorial_pillar_id": "literature_manuscript",
-      "publication_status": "PUBLISHED",
-      "appmsgid": "the original WeChat appmsgid",
-      "article_id": "appmsgid plus item index, e.g. appmsgid_0",
-      "title": "The exact published article title",
-      "published_at": "2026-11-21T21:10:55+08:00",
-      "canonical_url": "https://mp.weixin.qq.com/s/the-real-published-link",
-      "canonical_url_verified": true,
-      "url_provenance": {
-        "endpoint": "/the/observed/backend/route",
-        "field_path": "the.actual.response.field.path",
-        "verified_at": "2026-11-23T12:00:00+08:00",
-        "read_only": true
-      }
-    }
+The canonical public article URL is read from the recorded official album DOM evidence, specifically `li.album__list-item[data-link]`, and must agree with the read-only URL provenance. The official album page's `data-msgid` (mid) is retained separately from the publishing `delivery_result.json.appmsgid`; the two identifiers are not interchangeable. The adapter does not open a browser, use cookies/tokens, or call private APIs.
 
-The canonical URL is optional for **video production and draft upload**. When the published-article response has not yet yielded a verified URL, set canonical_url to null and canonical_url_verified to false, and omit url_provenance. The video can be produced and saved as an unpublished draft from the real published article body; the final video contains a fixed public-account CTA instead of a clickable WeChat article card. If a URL is supplied, it must be the exact HTTPS mp.weixin.qq.com/s/... link read from an observed published-article response, with canonical_url_verified=true and a complete read-only url_provenance. Never construct it from appmsgid. Never put tokens, cookies, credentials, or authenticated query parameters in the package. The endpoint field is the route only; field_path identifies the actual response property that carried the URL. A package containing a URL while canonical_url_verified is false is rejected.
+After these checks pass, Video creates a non-overwriting package in its own runtime cache:
 
-article.md is the complete exported article text. images.json uses this structure:
+```
+runtime/upstream_article_packages/<appmsgid>_0/<run_id>/
+  article.json
+  article.md
+  images.json
+  images/
+```
 
-    {
-      "images": [
-        {
-          "image_id": "IMG01",
-          "file": "images/IMG01.jpg",
-          "image_aspect": 1.5,
-          "caption": "A caption found in the article",
-          "context": "The article paragraph to which this image belongs"
-        }
-      ]
-    }
+`article.md` is a byte-identical copy of upstream `slot1.md`. Only locally present, decodable original images with caption/context grounded in the article Markdown are copied; unverified CDN-only images are not downloaded or fabricated. The generated `article.json` stores account/taxonomy identity, formal publication time, canonical URL and its provenance, publication-time provenance, album identity and upstream run provenance.
 
-Image paths must remain inside the package directory. An image selected for a video beat must have a caption or context that can be found in the article Markdown. Only locally exported original article images are used; the renderer does not fetch third-party images.
+A missing, ambiguous or mismatched source-evidence field rejects that candidate. It does not cause the adapter to substitute the draft timestamp or manufacture a published timestamp. No eligible article produces `SKIPPED_NO_ELIGIBLE_ARTICLE`, with per-run rejection reasons.
+
+The following package schema describes the **internal generated artifact** only; it is not a manual user input requirement:
+
+```json
+{
+  "schema_version": 1,
+  "account_name": "成核生长",
+  "editorial_slot": 1,
+  "article_type": "literature_translation",
+  "editorial_pillar_id": "literature_manuscript",
+  "publication_status": "PUBLISHED",
+  "appmsgid": "100000764",
+  "article_id": "100000764_0",
+  "title": "Exact published Slot 1 article title",
+  "published_at": "2026-11-22T00:48:27Z",
+  "canonical_url": "the observed official published article URL",
+  "canonical_url_verified": true
+}
+```
+
+`images.json` contains only validated local image paths and article-grounded captions/context. The source Markdown is copied without rewriting or newline normalization so the source SHA-256 remains identical to the upstream Slot 1 artifact.
 
 ## 3. Summary script contract
 
