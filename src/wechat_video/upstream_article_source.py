@@ -467,6 +467,9 @@ def _local_image_assets(
             ),
             None,
         )
+        expected_sha = str(value.get("sha256") or "").strip().casefold()
+        if expected_sha and _sha256_bytes(source_path.read_bytes()).casefold() != expected_sha:
+            continue
         try:
             from PIL import Image
             with Image.open(source_path) as image:
@@ -479,9 +482,11 @@ def _local_image_assets(
         seen.add(source_path)
         found.append({
             "source_path": source_path,
+            "asset_root": data_root.resolve(),
             "source_url": source_url,
             "context": context,
             "image_aspect": round(width / height, 6),
+            "sha256": expected_sha or _sha256_bytes(source_path.read_bytes()),
         })
     return found
 
@@ -489,18 +494,25 @@ def _local_image_assets(
 def discover_upstream_literature_runs(
     daily_runs_root: Path,
     *,
+    publication_evidence_root: Path,
     account_key: str,
     account_name: str,
     expected_biz_id: str,
     target_date: date,
     timezone_name: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Find published Slot 1 articles from existing daily-run output, read-only."""
+    """Join upstream Slot 1 run data to its identity-matched Video output evidence."""
     candidates: list[dict[str, Any]] = []
     rejected: list[dict[str, str]] = []
     root = daily_runs_root.resolve()
+    evidence_root = publication_evidence_root.resolve()
     if not root.is_dir():
         return [], [{"path": str(root), "reason": "upstream_daily_runs_directory_missing"}]
+    if not evidence_root.is_dir():
+        return [], [{
+            "path": str(evidence_root),
+            "reason": "video_publication_evidence_directory_missing",
+        }]
 
     data_root = root.parent.resolve()
     for date_dir in sorted(root.iterdir()):
@@ -521,9 +533,6 @@ def discover_upstream_literature_runs(
                 prepared_doc = _read_json(run_dir / "prepared_articles.json")
                 delivery = _read_json(run_dir / "delivery_result.json")
                 review = _read_json(run_dir / "review_state.json")
-                verification = _read_json(run_dir / "url_verification_evidence.json")
-                preflight = _read_json(run_dir / "upload_preflight_report.json")
-                probe = _read_json(run_dir / "article_read_count_probe.json")
                 assets_manifest = _read_json(run_dir / "uploaded_assets_manifest.json")
 
                 manifest_hash = str(manifest.get("output_sha256") or "").casefold()
@@ -543,7 +552,7 @@ def discover_upstream_literature_runs(
                 if md_body.encode("utf-8") != slot1_bytes:
                     raise UpstreamArticleError("prepared_articles.json md_body is not byte-identical to slot1.md.")
                 title = str(prepared.get("title") or "").strip()
-                h1 = re.search(r"(?m)^#\s+(.+?)\s*$", markdown)
+                h1 = re.search(r"(?m)^#\\s+(.+?)\\s*$", markdown)
                 if not title or not h1 or h1.group(1).strip() != title:
                     raise UpstreamArticleError("prepared article title does not match the exact slot1.md H1.")
 
@@ -562,18 +571,47 @@ def discover_upstream_literature_runs(
                     "delivery_result.appmsgid",
                 )
                 delivered_accounts = [
-                    str(value).strip() for _, value in _values_for_key(delivery, "account_name")
+                    str(value).strip()
+                    for _, value in (
+                        _values_for_key(delivery, "account_name")
+                        + _values_for_key(delivery, "account")
+                    )
                     if str(value).strip()
                 ]
-                if not delivered_accounts or any(value != account_name for value in delivered_accounts):
-                    raise UpstreamArticleError("delivery_result account_name does not match the configured target account.")
+                accepted_accounts = {account_name, account_key}
+                if not delivered_accounts or any(value not in accepted_accounts for value in delivered_accounts):
+                    raise UpstreamArticleError(
+                        f"delivery_result account/account_name must identify {account_name!r} "
+                        f"or its configured key {account_key!r}; observed {delivered_accounts!r}."
+                    )
 
-                published_at, canonical_url, album_url, ct_path, time_details = _published_time(
-                    verification,
-                    preflight.get("url_provenance") if isinstance(preflight, dict) else None,
-                    probe,
+                evidence = _find_video_publication_evidence(
+                    evidence_root,
+                    article_id=f"{appmsgid}_0",
+                    appmsgid=appmsgid,
                     title=title,
+                    markdown_sha256=markdown_sha,
+                )
+                verification = evidence["verification"]
+                preflight = evidence["preflight"]
+                probe = evidence["probe"]
+                provenance = preflight.get("url_provenance") if isinstance(preflight, dict) else None
+                metadata_url = (
+                    evidence["source_record"].get("canonical_url")
+                    or evidence["manifest"].get("canonical_url")
+                )
+                verification_path = Path(evidence["verification_path"])
+                fallback_verified_at = datetime.fromtimestamp(
+                    verification_path.stat().st_mtime,
+                    tz=timezone.utc,
+                ).isoformat(timespec="seconds").replace("+00:00", "Z")
+                published_at, canonical_url, album_url, ct_path, time_details, verified_at = _published_time(
+                    verification,
+                    provenance,
+                    probe,
+                    metadata_url=str(metadata_url or "") or None,
                     expected_biz_id=expected_biz_id,
+                    verified_at_fallback=fallback_verified_at,
                 )
                 parsed_published = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
                 try:
@@ -588,6 +626,24 @@ def discover_upstream_literature_runs(
                     continue
 
                 article_id = f"{appmsgid}_0"
+                video_image_assets = _local_image_assets(
+                    evidence["manifest"].get("image_manifest") or {},
+                    run_dir=evidence["directory"],
+                    data_root=evidence_root,
+                    markdown=markdown,
+                )
+                upstream_image_assets = _local_image_assets(
+                    assets_manifest,
+                    run_dir=run_dir,
+                    data_root=data_root,
+                    markdown=markdown,
+                )
+                image_assets = video_image_assets or upstream_image_assets
+                image_asset_source = (
+                    "matching_video_production_output"
+                    if video_image_assets
+                    else "upstream_uploaded_assets_manifest"
+                )
                 candidates.append({
                     "source_run_dir": run_dir,
                     "source_run_id": run_dir.name,
@@ -600,13 +656,16 @@ def discover_upstream_literature_runs(
                     "markdown_sha256": markdown_sha,
                     "canonical_url": canonical_url,
                     "album_url": album_url,
+                    "url_verified_at": verified_at,
                     "publication_time_field_path": ct_path,
                     "publication_time_details": json.loads(time_details),
+                    "publication_evidence_dir": evidence["directory"],
                     "prepared_article": prepared,
-                    "image_assets": _local_image_assets(
-                        assets_manifest, run_dir=run_dir, data_root=data_root, markdown=markdown
-                    ),
+                    "image_assets": image_assets,
+                    "image_asset_source": image_asset_source,
+                    "verified_video_image_count": len(video_image_assets),
                     "data_root": data_root,
+                    "evidence_root": evidence_root,
                 })
             except (UpstreamArticleError, OSError, UnicodeDecodeError, ValueError, TypeError, AttributeError, KeyError, IndexError) as exc:
                 rejected.append({"path": str(run_dir), "reason": str(exc)})
