@@ -3,9 +3,9 @@
 
 **版本：** V3.0  
 **状态：** FROZEN — 冻结需求基线  
-**项目目录：** \`E:\Agent\WeChat\Video\`  
-**BAT：** \`Run_Literature_Micro_Visual.bat\`  
-**CLI：** \`run-literature-micro-visual\`
+**项目目录：** `E:\Agent\WeChat\Video`  
+**BAT：** `Run_Literature_Micro_Visual.bat`  
+**CLI：** `run-literature-micro-visual`
 
 本规格用于交给 OpenCode / Antigravity 开发。冻结的是产品定义、工作流边界、质量门禁和验收标准。Phase 0 仍须通过只读勘查验证实际环境能力，不能将计划中的能力误认为已经在本机验证。
 
