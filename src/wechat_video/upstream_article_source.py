@@ -155,21 +155,32 @@ def _published_time(
     if title not in verification_text:
         raise UpstreamArticleError("Official album evidence does not contain the exact prepared-article title.")
 
-    observed_urls = _extract_urls(verification, _URL_RE)
-    provenance_urls = _extract_urls(provenance, _URL_RE)
-    probe_urls = _extract_urls(probe, _URL_RE)
-    common = observed_urls & provenance_urls & probe_urls
-    article_urls = {
-        url for url in common
-        if urlparse(url).hostname == "mp.weixin.qq.com"
-        and (urlparse(url).path == "/s" or urlparse(url).path.startswith("/s/"))
-    }
-    if len(article_urls) != 1:
+    def published_article_urls(value: Any) -> set[str]:
+        return {
+            url for url in _extract_urls(value, _URL_RE)
+            if urlparse(url).hostname == "mp.weixin.qq.com"
+            and (urlparse(url).path == "/s" or urlparse(url).path.startswith("/s/"))
+        }
+
+    observed_article_urls = published_article_urls(verification)
+    provenance_article_urls = published_article_urls(provenance)
+    verified_urls = observed_article_urls & provenance_article_urls
+    if len(verified_urls) != 1:
         raise UpstreamArticleError(
-            "The album data-link, upload preflight provenance, and public read-count probe "
-            "do not identify exactly one identical published article URL."
+            "The album data-link and upload preflight provenance do not identify "
+            "exactly one identical published article URL."
         )
-    canonical_url = validate_canonical_article_url(next(iter(article_urls)))
+    canonical_url = validate_canonical_article_url(next(iter(verified_urls)))
+    probe_article_urls = published_article_urls(probe)
+    if probe_article_urls and probe_article_urls != {canonical_url}:
+        raise UpstreamArticleError(
+            "The public read-count probe identifies a different article URL from the verified album data-link."
+        )
+    ct_binding = (
+        "article_read_count_probe_url_matches_verified_album_data_link"
+        if probe_article_urls
+        else "same_run_article_read_count_probe_scoped_by_verified_album_evidence"
+    )
 
     album_urls = _extract_urls(verification, _ALBUM_RE) | _extract_urls(provenance, _ALBUM_RE)
     if not album_urls:
@@ -224,6 +235,7 @@ def _published_time(
     field_path = field_paths[0] if field_paths else "li.album__list-item[data-link]"
     return published_at, canonical_url, album_url, ct_path, json.dumps({
         "ct": ct,
+        "ct_binding": ct_binding,
         "album_mid": album_mid,
         "album_item_index": item_index,
         "field_path": field_path,
@@ -368,8 +380,6 @@ def discover_upstream_literature_runs(
                     raise UpstreamArticleError("prepared_articles.json Slot 1 md_body is missing.")
                 if md_body.encode("utf-8") != slot1_bytes:
                     raise UpstreamArticleError("prepared_articles.json md_body is not byte-identical to slot1.md.")
-                if isinstance(raw_markdown, str) and raw_markdown.encode("utf-8") != slot1_bytes:
-                    raise UpstreamArticleError("prepared_articles.json raw_markdown differs from slot1.md.")
                 title = str(prepared.get("title") or "").strip()
                 h1 = re.search(r"(?m)^#\s+(.+?)\s*$", markdown)
                 if not title or not h1 or h1.group(1).strip() != title:
