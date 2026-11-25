@@ -19,10 +19,12 @@ _MIN_SPOKEN_HAN = 222
 _MAX_SPOKEN_HAN = 235
 
 _REQUIRED_TOP = {
-    "schema_version", "article_id", "summary_title", "channels_title", "core_thesis",
+    "schema_version", "summary_title", "channels_title", "core_thesis",
     "thesis_claim_ids", "claims", "speech_units", "beats",
 }
-_OPTIONAL_TOP = {"source_article_sha256"}
+# Deterministic metadata is owned by the program. Models may echo these values,
+# but the echo is optional and must match the program value exactly when present.
+_OPTIONAL_TOP = {"article_id", "source_article_sha256"}
 _CLAIM_KEYS = {"claim_id", "statement", "source_ref"}
 _SOURCE_REF_KEYS = {"paragraph_index"}
 _UNIT_KEYS = {"unit_id", "spoken_text", "display_text", "claim_ids", "visual_beat_id", "pause_after_ms"}
@@ -94,8 +96,8 @@ def validate_planner_output(
     _check_keys(raw, _REQUIRED_TOP | _OPTIONAL_TOP, "planner output")
     if raw["schema_version"] != PLANNER_SCHEMA_VERSION:
         _fail("Planner schema_version must be 1.")
-    if str(raw["article_id"]) != article_id:
-        _fail("Planner article_id does not match the selected article.")
+    if "article_id" in raw and str(raw["article_id"]) != article_id:
+        _fail("Planner article_id echo conflicts with the selected article.")
     if "source_article_sha256" in raw:
         if str(raw["source_article_sha256"]).casefold() != article_sha256.casefold():
             _fail("Planner source_article_sha256 echo conflicts with article.md.")
