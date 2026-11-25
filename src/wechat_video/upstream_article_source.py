@@ -744,10 +744,11 @@ def materialize_upstream_article_package(candidate: dict[str, Any], package_root
         "canonical_url": str(candidate["canonical_url"]),
         "canonical_url_verified": True,
         "url_provenance": {
-            "endpoint": str(candidate["album_url"]),
-            "field_path": "li.album__list-item[data-link] (data-itemidx=1)",
-            "verified_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "endpoint": str(candidate.get("album_url") or candidate["canonical_url"]),
+            "field_path": str(time_details.get("field_path") or "url_verification_evidence.json: recorded URL"),
+            "verified_at": str(candidate["url_verified_at"]),
             "read_only": True,
+            "evidence_directory": str(candidate["publication_evidence_dir"]),
         },
         "publication_time_provenance": {
             "source_file": "article_read_count_probe.json",
@@ -758,8 +759,8 @@ def materialize_upstream_article_package(candidate: dict[str, Any], package_root
         },
         "official_album_entry": {
             "page_url": str(candidate["album_url"]),
-            "data_msgid": str(time_details.get("album_mid") or ""),
-            "data_itemidx": str(time_details.get("album_item_index") or ""),
+            "data_msgid": time_details.get("album_mid"),
+            "data_itemidx": time_details.get("album_item_index"),
             "note": "data_msgid is the official album namespace and is not the delivery appmsgid",
         },
         "source_provenance": {
@@ -767,6 +768,8 @@ def materialize_upstream_article_package(candidate: dict[str, Any], package_root
             "source_account_key": str(candidate["source_account_key"]),
             "source_run_id": run_id,
             "source_run_dir": str(candidate["source_run_dir"]),
+            "video_publication_evidence_dir": str(candidate["publication_evidence_dir"]),
+            "video_image_source": str(candidate.get("image_asset_source") or ""),
             "slot1_markdown_sha256": source_hash,
             "doi": article.get("doi"),
             "bundle_path": article.get("bundle_path"),
@@ -784,7 +787,11 @@ def materialize_upstream_article_package(candidate: dict[str, Any], package_root
         image_records: list[dict[str, Any]] = []
         for index, asset in enumerate(candidate.get("image_assets") or [], start=1):
             source_path = Path(asset["source_path"]).resolve()
-            if not source_path.is_file() or not source_path.is_relative_to(Path(candidate["data_root"]).resolve()):
+            asset_root = Path(asset.get("asset_root") or candidate["data_root"]).resolve()
+            if not source_path.is_file() or not source_path.is_relative_to(asset_root):
+                continue
+            expected_sha = str(asset.get("sha256") or "").casefold()
+            if expected_sha and _sha256_bytes(source_path.read_bytes()).casefold() != expected_sha:
                 continue
             image_id = f"IMG{index:02d}"
             filename = f"{image_id}{source_path.suffix.casefold()}"
