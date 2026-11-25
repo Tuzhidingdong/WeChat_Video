@@ -181,50 +181,6 @@ def _existing_article_ids(outputs_root: Path) -> set[str]:
     return seen
 
 
-def _discover_literature_packages(
-    inbox: Path,
-    outputs_root: Path,
-    target_date: date,
-    timezone_name: str,
-) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    candidates: list[dict[str, Any]] = []
-    rejected: list[dict[str, str]] = []
-    if not inbox.is_dir():
-        raise DailyPipelineError(f"Literature article inbox does not exist: {inbox}")
-    seen_ids = _existing_article_ids(outputs_root)
-    for article_json in sorted(inbox.rglob("article.json")):
-        package_dir = article_json.parent
-        try:
-            package = load_article_package(package_dir)
-            article = package["article"]
-            local_date = _published_local_date(str(article["published_at"]), timezone_name)
-            if local_date != target_date:
-                continue
-            article_id = str(article["article_id"])
-            if article_id in seen_ids:
-                rejected.append({"path": str(package_dir), "reason": "article_already_has_generated_run"})
-                continue
-            candidates.append({
-                "path": package_dir,
-                "article_id": article_id,
-                "title": str(article["title"]),
-                "published_at": str(article["published_at"]),
-                "local_date": local_date.isoformat(),
-                "markdown_sha256": str(package["markdown_sha256"]),
-                "image_count": len(package["images"]),
-            })
-        except (ArticleSourceError, DailyPipelineError) as exc:
-            rejected.append({"path": str(package_dir), "reason": str(exc)})
-    candidates.sort(
-        key=lambda item: (
-            _parse_published_at(str(item["published_at"])).timestamp(),
-            str(item["article_id"]),
-        ),
-        reverse=True,
-    )
-    return candidates, rejected
-
-
 def _usage_totals_from_tokens(tokens: dict[str, Any]) -> dict[str, int]:
     cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
     return {
