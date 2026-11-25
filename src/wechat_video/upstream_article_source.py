@@ -75,13 +75,151 @@ def _unique_string(values: list[Any], label: str) -> str:
     return next(iter(normalized))
 
 
+def _scalar_strings(value: Any):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for child in value.values():
+            yield from _scalar_strings(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _scalar_strings(child)
+
+
 def _extract_urls(value: Any, pattern: re.Pattern[str]) -> set[str]:
     found: set[str] = set()
-    for text in _strings(value):
+    for text in _scalar_strings(value):
         for match in pattern.findall(text):
             url = match.rstrip(".,);]}，。；")
             found.add(url)
     return found
+
+
+def _optional_unique(values: list[Any], label: str) -> str | None:
+    normalized = {str(value).strip() for value in values if str(value).strip()}
+    if len(normalized) > 1:
+        raise UpstreamArticleError(f"{label} is ambiguous: {sorted(normalized)!r}")
+    return next(iter(normalized), None)
+
+
+def _record_values(record: Any, *keys: str) -> list[str]:
+    values: list[str] = []
+    for key in keys:
+        values.extend(
+            str(value).strip()
+            for _, value in _values_for_key(record, key)
+            if str(value).strip()
+        )
+    return values
+
+
+def _video_evidence_identity_matches(
+    directory: Path,
+    *,
+    article_id: str,
+    appmsgid: str,
+    title: str,
+    markdown_sha256: str,
+) -> tuple[bool, dict[str, Any], dict[str, Any]]:
+    manifest_path = directory / "article_summary_manifest.json"
+    source_path = directory / "source_record.json"
+    if not manifest_path.is_file() or not source_path.is_file():
+        return False, {}, {}
+    try:
+        manifest = _read_json(manifest_path)
+        source = _read_json(source_path)
+    except UpstreamArticleError:
+        return False, {}, {}
+
+    matched_records = 0
+    for record in (manifest, source):
+        identifiers = _record_values(record, "article_id", "source_article_id")
+        appmsgids = _record_values(record, "appmsgid", "source_appmsgid")
+        titles = _record_values(record, "article_title", "title", "source_article_title")
+        hashes = _record_values(
+            record,
+            "source_article_sha256",
+            "article_markdown_sha256",
+            "source_article_markdown_sha256",
+        )
+        if identifiers and any(value != article_id for value in identifiers):
+            return False, {}, {}
+        if appmsgids and any(value != appmsgid for value in appmsgids):
+            return False, {}, {}
+        if titles and any(value != title for value in titles):
+            return False, {}, {}
+        if hashes and any(value.casefold() != markdown_sha256.casefold() for value in hashes):
+            return False, {}, {}
+        if (
+            article_id in identifiers
+            and appmsgid in appmsgids
+            and title in titles
+            and markdown_sha256.casefold() in {value.casefold() for value in hashes}
+        ):
+            matched_records += 1
+    return matched_records >= 1, manifest, source
+
+
+def _find_video_publication_evidence(
+    evidence_root: Path,
+    *,
+    article_id: str,
+    appmsgid: str,
+    title: str,
+    markdown_sha256: str,
+) -> dict[str, Any]:
+    root = evidence_root.resolve()
+    if not root.is_dir():
+        raise UpstreamArticleError(f"Video publication evidence directory does not exist: {root}")
+    matched: list[dict[str, Any]] = []
+    for verification_path in sorted(root.rglob("url_verification_evidence.json")):
+        directory = verification_path.parent
+        companions = {
+            "verification_path": verification_path,
+            "preflight_path": directory / "upload_preflight_report.json",
+            "probe_path": directory / "article_read_count_probe.json",
+        }
+        if not all(Path(path).is_file() for key, path in companions.items() if key != "verification_path"):
+            continue
+        identity_ok, manifest, source = _video_evidence_identity_matches(
+            directory,
+            article_id=article_id,
+            appmsgid=appmsgid,
+            title=title,
+            markdown_sha256=markdown_sha256,
+        )
+        if not identity_ok:
+            continue
+        try:
+            verification = _read_json(companions["verification_path"])
+            preflight = _read_json(companions["preflight_path"])
+            probe = _read_json(companions["probe_path"])
+        except UpstreamArticleError:
+            continue
+        matched.append({
+            "directory": directory,
+            "verification_path": companions["verification_path"],
+            "preflight_path": companions["preflight_path"],
+            "probe_path": companions["probe_path"],
+            "verification": verification,
+            "preflight": preflight,
+            "probe": probe,
+            "manifest": manifest,
+            "source_record": source,
+        })
+    if not matched:
+        raise UpstreamArticleError(
+            "No matching Video production evidence bundle under "
+            f"{root}; expected url_verification_evidence.json, upload_preflight_report.json, "
+            "article_read_count_probe.json, article_summary_manifest.json and source_record.json "
+            "bound to this exact article_id/appmsgid/title/Markdown SHA-256."
+        )
+    if len(matched) > 1:
+        directories = [str(item["directory"]) for item in matched]
+        raise UpstreamArticleError(
+            f"Multiple Video production evidence bundles match this article; refusing ambiguous provenance: {directories}"
+        )
+    return matched[0]
 
 
 def _normalized_text(value: str) -> str:
@@ -140,21 +278,15 @@ def _published_time(
     provenance: Any,
     probe: Any,
     *,
-    title: str,
+    metadata_url: str | None,
     expected_biz_id: str,
-) -> tuple[str, str, str, str, str]:
-    verification_text = "\n".join(_strings(verification))
-    provenance_text = "\n".join(_strings(provenance))
+    verified_at_fallback: str,
+) -> tuple[str, str, str | None, str, str, str]:
+    """Validate the recorded public URL and derive the formal instant from the paired public ct probe.
 
-    if "appmsgalbum" not in verification_text.casefold():
-        raise UpstreamArticleError("Publication evidence does not identify the official appmsgalbum page.")
-    if "data-link" not in verification_text.casefold() or "li.album__list-item" not in verification_text:
-        raise UpstreamArticleError("Publication evidence lacks li.album__list-item[data-link].")
-    if "data-link" not in provenance_text.casefold() or "appmsgalbum" not in provenance_text.casefold():
-        raise UpstreamArticleError("upload_preflight_report.url_provenance does not bind data-link to appmsgalbum.")
-    if title not in verification_text:
-        raise UpstreamArticleError("Official album evidence does not contain the exact prepared-article title.")
-
+    Evidence is stored in the matching Video production output directory, not
+    beside the upstream WeChat_control daily-run files.
+    """
     def published_article_urls(value: Any) -> set[str]:
         return {
             url for url in _extract_urls(value, _URL_RE)
@@ -162,35 +294,49 @@ def _published_time(
             and (urlparse(url).path == "/s" or urlparse(url).path.startswith("/s/"))
         }
 
-    observed_article_urls = published_article_urls(verification)
-    provenance_article_urls = published_article_urls(provenance)
-    verified_urls = observed_article_urls & provenance_article_urls
-    if len(verified_urls) != 1:
+    verification_urls = published_article_urls(verification)
+    if len(verification_urls) != 1:
         raise UpstreamArticleError(
-            "The album data-link and upload preflight provenance do not identify "
-            "exactly one identical published article URL."
+            "url_verification_evidence.json must record exactly one public mp.weixin.qq.com/s article URL."
         )
-    canonical_url = validate_canonical_article_url(next(iter(verified_urls)))
+    canonical_url = validate_canonical_article_url(next(iter(verification_urls)))
+
+    metadata_url_value = str(metadata_url or "").strip()
+    if metadata_url_value:
+        if validate_canonical_article_url(metadata_url_value) != canonical_url:
+            raise UpstreamArticleError(
+                "Video article_summary_manifest/source_record canonical_url differs from url_verification_evidence.json."
+            )
+
+    provenance_article_urls = published_article_urls(provenance)
+    if provenance_article_urls and provenance_article_urls != {canonical_url}:
+        raise UpstreamArticleError(
+            "upload_preflight_report.url_provenance identifies a different public article URL."
+        )
     probe_article_urls = published_article_urls(probe)
     if probe_article_urls and probe_article_urls != {canonical_url}:
         raise UpstreamArticleError(
-            "The public read-count probe identifies a different article URL from the verified album data-link."
+            "article_read_count_probe.json identifies a different public article URL."
         )
-    ct_binding = (
-        "article_read_count_probe_url_matches_verified_album_data_link"
-        if probe_article_urls
-        else "same_run_article_read_count_probe_scoped_by_verified_album_evidence"
-    )
-
-    album_urls = _extract_urls(verification, _ALBUM_RE) | _extract_urls(provenance, _ALBUM_RE)
-    if not album_urls:
-        raise UpstreamArticleError("The official album page URL is absent from the recorded evidence.")
-    album_url = sorted(album_urls)[0]
-    album_query = parse_qs(urlparse(album_url).query)
-    observed_biz = str((album_query.get("__biz") or [""])[0])
-    if not expected_biz_id or observed_biz != expected_biz_id:
+    if not provenance_article_urls and not metadata_url_value:
         raise UpstreamArticleError(
-            f"Official album __biz mismatch: expected {expected_biz_id!r}, observed {observed_biz!r}."
+            "The recorded article URL has no independent binding in url_provenance or the matching Video source manifest."
+        )
+
+    album_urls = _extract_urls(provenance, _ALBUM_RE) | _extract_urls(verification, _ALBUM_RE)
+    album_url = _optional_unique(sorted(album_urls), "official album page URL")
+    canonical_query = parse_qs(urlparse(canonical_url).query)
+    album_query = parse_qs(urlparse(album_url).query) if album_url else {}
+    canonical_biz = str((canonical_query.get("__biz") or [""])[0])
+    album_biz = str((album_query.get("__biz") or [""])[0])
+    observed_biz_values = {value for value in (canonical_biz, album_biz) if value}
+    if not expected_biz_id or expected_biz_id not in observed_biz_values:
+        raise UpstreamArticleError(
+            f"Neither the recorded article URL nor album URL confirms expected account __biz={expected_biz_id!r}."
+        )
+    if any(value != expected_biz_id for value in observed_biz_values):
+        raise UpstreamArticleError(
+            f"Recorded public URL/album identity contains conflicting __biz values: {sorted(observed_biz_values)!r}."
         )
 
     ct_values: list[tuple[str, int]] = []
@@ -205,42 +351,58 @@ def _published_time(
             ct_values.append((path, numeric))
     unique_ct = {value for _, value in ct_values}
     if len(unique_ct) != 1:
-        raise UpstreamArticleError("article_read_count_probe.json must contain exactly one unambiguous positive ct.")
+        raise UpstreamArticleError(
+            "The paired Video article_read_count_probe.json must contain exactly one unambiguous positive ct."
+        )
     ct = next(iter(unique_ct))
-    canonical_ct = (parse_qs(urlparse(canonical_url).query).get("ct") or [None])[0]
+    canonical_ct = (canonical_query.get("ct") or [None])[0]
     if canonical_ct is not None and str(canonical_ct) != str(ct):
         raise UpstreamArticleError("The article URL ct does not match article_read_count_probe.json ct.")
 
-    published = datetime.fromtimestamp(ct, tz=timezone.utc).astimezone(
-        timezone.utc
-    )
-    # The caller converts the absolute instant to its configured local timezone.
-    published_at = published.isoformat(timespec="seconds").replace("+00:00", "Z")
+    published_at = datetime.fromtimestamp(ct, tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     ct_paths = sorted({path for path, value in ct_values})
     ct_path = "$.ct" if "$.ct" in ct_paths else ct_paths[0]
-    album_mid = _unique_string(
-        _attribute_values(verification, "data-msgid"),
-        "official album data-msgid",
-    )
-    item_index = _unique_string(
-        _attribute_values(verification, "data-itemidx"),
-        "official album data-itemidx",
-    )
-    if item_index != "1":
-        raise UpstreamArticleError(f"Expected Slot 1 album item data-itemidx=1, observed {item_index!r}.")
 
-    field_paths = [
-        str(value) for _, _, value in _walk(provenance)
-        if isinstance(value, str) and "data-link" in value.casefold()
+    query_mid = str((canonical_query.get("mid") or album_query.get("mid") or [""])[0])
+    query_idx = str((canonical_query.get("idx") or album_query.get("idx") or [""])[0])
+    recorded_mid = _optional_unique(
+        _attribute_values(verification, "data-msgid")
+        + _record_values(verification, "data_msgid", "album_mid", "mid"),
+        "official album mid",
+    )
+    recorded_idx = _optional_unique(
+        _attribute_values(verification, "data-itemidx")
+        + _record_values(verification, "data_itemidx", "album_item_index", "itemidx", "idx"),
+        "official album item index",
+    )
+    album_mid = recorded_mid or query_mid or None
+    item_index = recorded_idx or query_idx or None
+    if query_mid and recorded_mid and query_mid != recorded_mid:
+        raise UpstreamArticleError("Recorded data-msgid does not match the article URL mid.")
+    if query_idx and recorded_idx and query_idx != recorded_idx:
+        raise UpstreamArticleError("Recorded data-itemidx does not match the article URL idx.")
+    if item_index and item_index != "1":
+        raise UpstreamArticleError(f"Expected Slot 1 article URL idx=1, observed {item_index!r}.")
+
+    verification_url_paths = [
+        path for path, key, value in _walk(verification)
+        if isinstance(value, str) and any(url in value for url in verification_urls)
     ]
-    field_path = field_paths[0] if field_paths else "li.album__list-item[data-link]"
+    field_path = verification_url_paths[0] if verification_url_paths else "url_verification_evidence.json: recorded URL"
+    verified_at_values = _record_values(provenance, "verified_at", "observed_at", "recorded_at")
+    verified_at_values += _record_values(verification, "verified_at", "observed_at", "recorded_at")
+    verified_at = _optional_unique(verified_at_values, "URL verification timestamp") or verified_at_fallback
+
     return published_at, canonical_url, album_url, ct_path, json.dumps({
         "ct": ct,
-        "ct_binding": ct_binding,
+        "ct_binding": (
+            "paired_video_output_evidence_bound_by_article_id_appmsgid_title_and_markdown_sha256"
+        ),
         "album_mid": album_mid,
         "album_item_index": item_index,
         "field_path": field_path,
-    }, ensure_ascii=False)
+        "verified_at": verified_at,
+    }, ensure_ascii=False), verified_at
 
 
 def _resolve_local_asset(raw_path: str, run_dir: Path, data_root: Path) -> Path | None:
