@@ -162,6 +162,22 @@ def test_rejects_mismatched_slot_hash_chain(tmp_path: Path) -> None:
     assert any("review_state.json slots.1.article_sha256" in item["reason"] for item in rejected)
 
 
+def test_accepts_ct_from_same_run_probe_when_probe_omits_duplicate_article_url(tmp_path: Path) -> None:
+    root = tmp_path / "data" / "daily_runs"
+    run_dir = _make_upstream_run(root)
+    probe = json.loads((run_dir / "article_read_count_probe.json").read_text(encoding="utf-8"))
+    probe.pop("url")
+    _write(run_dir / "article_read_count_probe.json", probe)
+
+    candidates, rejected = _discover(root)
+
+    assert len(candidates) == 1
+    assert rejected == []
+    assert candidates[0]["publication_time_details"]["ct_binding"] == (
+        "same_run_article_read_count_probe_scoped_by_verified_album_evidence"
+    )
+
+
 def test_rejects_publication_time_when_probe_url_does_not_match_album_data_link(tmp_path: Path) -> None:
     root = tmp_path / "data" / "daily_runs"
     run_dir = _make_upstream_run(root)
