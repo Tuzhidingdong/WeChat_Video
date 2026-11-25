@@ -165,7 +165,8 @@ def test_discovers_published_article_from_existing_daily_run_and_external_video_
     assert candidate["published_at"] == "2026-11-22T00:48:27Z"
     assert candidate["local_date"] == "2026-11-22"
     assert candidate["canonical_url"] == ARTICLE_URL
-    assert candidate["publication_time_field_path"] == "$.url"
+    assert candidate["publication_time_field_path"] == "$.ct"
+    assert candidate["publication_time_details"]["field_path"] == "$.url"
     assert candidate["publication_time_details"]["album_mid"] == "2247484414"
     assert candidate["publication_time_details"]["album_mid"] != candidate["appmsgid"]
     assert candidate["publication_time_details"]["album_item_index"] == "1"
@@ -328,6 +329,7 @@ def test_reports_missing_matching_video_evidence_bundle(tmp_path: Path) -> None:
     root = tmp_path / "WeChat_control" / "data" / "daily_runs"
     evidence_root = tmp_path / "Video" / "outputs"
     run_dir = _make_upstream_run(root)
+    evidence_root.mkdir(parents=True)
 
     candidates, rejected = _discover(root, evidence_root)
 
