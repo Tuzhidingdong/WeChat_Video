@@ -1215,6 +1215,69 @@ def _run_popularization_locked(
     return record
 
 
+def inspect_daily_literature_sources(
+    project_root: Path,
+    *,
+    published_date: str | None = None,
+) -> dict[str, Any]:
+    """Read-only discovery report; never materializes packages or starts production."""
+    project_root = project_root.resolve()
+    config = _load_config(project_root)
+    target = _target_article_date(config, published_date)
+    lit = config["literature"]
+    upstream_root = _project_path(project_root, str(lit["upstream_daily_runs_dir"]))
+    candidates, rejected = discover_upstream_literature_runs(
+        upstream_root,
+        account_key=str(lit["upstream_account_key"]),
+        account_name=str(config["upload"]["account_name"]),
+        expected_biz_id=str(lit["expected_public_account_biz_id"]),
+        target_date=target,
+        timezone_name=str(config["timezone"]),
+    )
+    seen_ids = _existing_article_ids(
+        _project_path(project_root, str(config.get("outputs_root", "outputs")))
+    )
+    visible_candidates = []
+    for candidate in candidates:
+        details = dict(candidate["publication_time_details"])
+        visible_candidates.append({
+            "article_id": candidate["article_id"],
+            "appmsgid": candidate["appmsgid"],
+            "title": candidate["title"],
+            "published_at": candidate["published_at"],
+            "local_date": candidate["local_date"],
+            "source_run_id": candidate["source_run_id"],
+            "source_run_dir": str(candidate["source_run_dir"]),
+            "slot1_markdown_sha256": candidate["markdown_sha256"],
+            "canonical_url": candidate["canonical_url"],
+            "publication_time_field_path": candidate["publication_time_field_path"],
+            "publication_time_provenance": details,
+            "verified_local_image_count": len(candidate.get("image_assets") or []),
+            "already_rendered": str(candidate["article_id"]) in seen_ids,
+        })
+    unseen = [item for item in visible_candidates if not item["already_rendered"]]
+    return {
+        "state": "SOURCE_CANDIDATES_FOUND" if unseen else "SKIPPED_NO_ELIGIBLE_ARTICLE",
+        "mode": "READ_ONLY_DISCOVERY",
+        "published_date": target.isoformat(),
+        "timezone": str(config["timezone"]),
+        "upstream_daily_runs_root": str(upstream_root),
+        "candidate_count": len(visible_candidates),
+        "eligible_candidate_count": len(unseen),
+        "candidates": visible_candidates,
+        "rejected_run_count": len(rejected),
+        "rejected_runs": rejected[:50],
+        "side_effects": {
+            "materialized_package": False,
+            "open_code_started": False,
+            "tts_started": False,
+            "manim_started": False,
+            "ffmpeg_started": False,
+            "upload_attempted": False,
+        },
+    }
+
+
 def run_daily_literature(
     project_root: Path,
     *,
