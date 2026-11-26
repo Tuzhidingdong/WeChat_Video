@@ -7,6 +7,13 @@ import sys
 from pathlib import Path
 
 from .article_summary import run_article_summary
+from .daily_pipelines import (
+    inspect_daily_literature_sources,
+    run_daily_literature,
+    run_daily_popularization,
+    run_daily_two_videos,
+)
+from .daily_readiness import inspect_daily_two_video_readiness
 from .channels_uploader import (
     UploadBlockedError,
     approve_latest_run,
@@ -21,6 +28,10 @@ from .channels_uploader import (
 from .model_setup import download_chinese_model, download_model
 from .pipeline import run_slice_a
 from .preflight import run_preflight
+from .publication_source_evidence import (
+    PublicationSourceEvidenceError,
+    record_source_evidence,
+)
 from .topic_approval import approve_fact_card
 from .tooling import describe_tools, tool_path_for_bat
 
@@ -201,6 +212,48 @@ def build_parser() -> argparse.ArgumentParser:
     article_summary.add_argument("--summary", type=Path, required=True)
     article_summary.add_argument("--output-root", type=Path, default=Path("outputs"))
 
+    inspect_literature = sub.add_parser(
+        "inspect-literature-upstream",
+        help="Read-only inspect of eligible published articles from WeChat_control daily-run artifacts; no production side effects.",
+    )
+    inspect_literature.add_argument("--project-root", type=Path, default=root)
+    inspect_literature.add_argument("--published-date", help="Optional Asia/Shanghai publication date YYYY-MM-DD.")
+
+    record_source = sub.add_parser(
+        "record-literature-source-evidence",
+        help="Atomically add a validated browser-observed publication source to the unique matching Video evidence bundle.",
+    )
+    record_source.add_argument("--project-root", type=Path, default=root)
+    record_source.add_argument("--observation", type=Path, required=True)
+
+    readiness = sub.add_parser(
+        "inspect-daily-two-video-readiness",
+        help="Read-only unified readiness report for both daily BATs; starts no production step.",
+    )
+    readiness.add_argument("--project-root", type=Path, default=root)
+    readiness.add_argument("--published-date", help="Optional Asia/Shanghai publication date YYYY-MM-DD.")
+
+    literature_daily = sub.add_parser(
+        "run-literature-daily",
+        help="Select yesterday's published literature article, render it, QA it, and save the exact output as a draft.",
+    )
+    literature_daily.add_argument("--project-root", type=Path, default=root)
+    literature_daily.add_argument("--published-date", help="Optional Asia/Shanghai publication date YYYY-MM-DD.")
+
+    popularization_daily = sub.add_parser(
+        "run-popularization-daily",
+        help="Select one unused approved Fact Card, render it, QA it, and save the exact output as a draft.",
+    )
+    popularization_daily.add_argument("--project-root", type=Path, default=root)
+    popularization_daily.add_argument("--local-date", help="Optional Asia/Shanghai job date YYYY-MM-DD.")
+
+    daily_both = sub.add_parser(
+        "run-daily-two-videos",
+        help="Run literature and popularization pipelines sequentially and report each result independently.",
+    )
+    daily_both.add_argument("--project-root", type=Path, default=root)
+    daily_both.add_argument("--published-date", help="Optional Asia/Shanghai publication date YYYY-MM-DD.")
+
     return parser
 
 
@@ -241,12 +294,78 @@ def main(argv: list[str] | None = None) -> int:
                 "video": str(run_dir / "final.mp4"),
                 "qa_report": str(run_dir / "qa_report.json"),
                 "channels_metadata": str(run_dir / "channels_draft.json"),
-                "upload_eligible": False,
+                "upload_eligible": _read_json(run_dir / "content_qa_report.json").get("upload_eligible") is True,
                 "automatic_upload": False,
                 "automatic_publication": False,
             }, ensure_ascii=False, indent=2))
             print("Local article-summary preview created. No upload or publication was attempted.")
             return 0
+        if args.command == "inspect-literature-upstream":
+            result = inspect_daily_literature_sources(
+                args.project_root,
+                published_date=args.published_date,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "record-literature-source-evidence":
+            project_root = args.project_root.resolve()
+            config = json.loads((project_root / "configs" / "daily_pipelines.json").read_text(encoding="utf-8"))
+            outputs_root = project_root / str(config.get("outputs_root") or "outputs")
+            result = record_source_evidence(
+                observation_path=args.observation,
+                evidence_root=outputs_root,
+                expected_biz_id=str(config["literature"]["expected_public_account_biz_id"]),
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "inspect-daily-two-video-readiness":
+            result = inspect_daily_two_video_readiness(
+                args.project_root,
+                published_date=args.published_date,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "run-literature-daily":
+            result = run_daily_literature(
+                args.project_root,
+                published_date=args.published_date,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            selected = result.get("selected_article") or {}
+            print(
+                f"[LITERATURE SUMMARY] window="
+                f"{result.get('window_start', 'n/a')}..{result.get('window_end', 'n/a')} "
+                f"scanned_runs={result.get('upstream_run_count', 0)} "
+                f"found={result.get('found_article_count', 0)} "
+                f"eligible={result.get('candidate_count', 0)} "
+                f"deferred={len(result.get('deferred_candidates') or [])}"
+            )
+            if selected:
+                print(
+                    f"[LITERATURE SUMMARY] selected={selected.get('article_id')} "
+                    f"published={selected.get('local_date')} title={selected.get('title')}"
+                )
+            elif result.get("reason"):
+                print(f"[LITERATURE SUMMARY] reason={result['reason']}")
+            return 0 if result.get("state") in {
+                "DRAFT_SAVED", "SKIPPED_NO_ELIGIBLE_ARTICLE", "DISABLED"
+            } else 2 if result.get("state") == "UPLOAD_UNKNOWN" else 1
+        if args.command == "run-popularization-daily":
+            result = run_daily_popularization(
+                args.project_root,
+                local_date=args.local_date,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result.get("state") in {
+                "DRAFT_SAVED", "SKIPPED_NO_APPROVED_TOPIC", "DISABLED"
+            } else 2 if result.get("state") == "UPLOAD_UNKNOWN" else 1
+        if args.command == "run-daily-two-videos":
+            result = run_daily_two_videos(
+                args.project_root,
+                published_date=args.published_date,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result.get("overall_state") in {"DRAFTS_SAVED", "COMPLETED_WITH_SKIPS"} else 2
         if args.command == "run-slice-a":
             _validate_editorial_angle(args.fact_card, args.script)
             run_dir = run_slice_a(
@@ -385,6 +504,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except UploadBlockedError as exc:
         print(f"\nCHANNELS WORKFLOW BLOCKED: {exc}", file=sys.stderr)
+        return 2
+    except PublicationSourceEvidenceError as exc:
+        print(f"\nPUBLICATION SOURCE EVIDENCE REJECTED: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:
         print(f"\nWECHAT VIDEO FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)

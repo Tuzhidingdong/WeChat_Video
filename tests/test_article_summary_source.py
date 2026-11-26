@@ -112,10 +112,14 @@ def test_published_article_package_and_summary_validate(tmp_path: Path) -> None:
     )
 
     assert validated["spoken_cjk_characters"] >= 150
-    assert metadata["extended_link"]["url"] == package["article"]["canonical_url"]
-    assert metadata["extended_link"]["article_id"] == "fixture-appmsg-001_0"
-    assert metadata["extended_link_required"] is True
-    assert metadata["extended_link_status"] == "UNVERIFIED_PLATFORM_UI"
+    assert metadata["schema_version"] == 4
+    assert metadata["source_article_id"] == "fixture-appmsg-001_0"
+    assert metadata["source_appmsgid"] == "fixture-appmsg-001"
+    assert metadata["source_cta_text"] == "更多详细解读见【成核生长】同名公众号"
+    assert metadata["extended_link_required"] is False
+    assert metadata["extended_link"] is None
+    assert metadata["extended_link_status"] == "NOT_REQUIRED_CTA_ONLY"
+    assert metadata["external_article_link_used"] is False
     assert metadata["automatic_publication"] is False
 
 
@@ -227,7 +231,7 @@ def test_core_thesis_must_reference_evidence_claims(tmp_path: Path) -> None:
         validate_article_summary(package, summary)
 
 
-def test_missing_published_url_allows_local_preview_but_never_claims_extended_link(tmp_path: Path) -> None:
+def test_missing_published_url_does_not_block_draft_metadata_or_require_extended_link(tmp_path: Path) -> None:
     article_dir, summary = _make_package(tmp_path)
     path = article_dir / "article.json"
     article = json.loads(path.read_text(encoding="utf-8"))
@@ -244,9 +248,12 @@ def test_missing_published_url_allows_local_preview_but_never_claims_extended_li
 
     assert package["article"]["canonical_url"] is None
     assert package["article"]["canonical_url_verified"] is False
+    assert metadata["source_article_id"] == "fixture-appmsg-001_0"
+    assert metadata["source_cta_text"] == "更多详细解读见【成核生长】同名公众号"
+    assert metadata["extended_link_required"] is False
     assert metadata["extended_link"] is None
-    assert metadata["extended_link_required"] is True
-    assert metadata["extended_link_status"] == "MISSING_VERIFIED_ARTICLE_URL"
+    assert metadata["extended_link_status"] == "NOT_REQUIRED_CTA_ONLY"
+    assert metadata["external_article_link_used"] is False
     assert metadata["automatic_publication"] is False
 
 

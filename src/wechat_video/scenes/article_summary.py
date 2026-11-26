@@ -303,11 +303,48 @@ class ArticleSummaryScene(Scene):
                 f"Manim scene exceeded measured audio timeline by {cursor - total_ms} ms."
             )
         tail_remaining = total_ms - cursor
-        outro_fade_ms = min(260, tail_remaining)
-        if tail_remaining > outro_fade_ms:
-            self.wait((tail_remaining - outro_fade_ms) / 1000)
-        if outro_fade_ms:
-            self.play(FadeOut(current), run_time=outro_fade_ms / 1000)
+        cta_text = str(spec.get("outro_cta_text") or "").strip()
+        if cta_text and tail_remaining >= 800:
+            cta_label = Text(
+                "更多详细解读见",
+                font=font,
+                font_size=40,
+                color=MUTED,
+            ).move_to(UP * 0.55)
+            cta_brand = Text(
+                "【成核生长】同名公众号",
+                font=font,
+                font_size=48,
+                color=TEAL,
+            )
+            _fit_width(cta_brand, 6.35)
+            cta_brand.move_to(DOWN * 0.48)
+            cta_card = RoundedRectangle(
+                width=7.1,
+                height=3.1,
+                corner_radius=0.20,
+                stroke_color=PALE,
+                stroke_width=2,
+                fill_color=CARD,
+                fill_opacity=1,
+            )
+            outro = Group(cta_card, cta_label, cta_brand)
+            self._record_layout(layout_records, "outro_cta", "outro_cta", outro, spec)
+            transition_ms = min(320, tail_remaining)
+            self.play(
+                FadeOut(current),
+                FadeIn(outro, shift=UP * 0.06),
+                run_time=transition_ms / 1000,
+            )
+            remaining_ms = tail_remaining - transition_ms
+            if remaining_ms > 0:
+                self.wait(remaining_ms / 1000)
+        else:
+            outro_fade_ms = min(260, tail_remaining)
+            if tail_remaining > outro_fade_ms:
+                self.wait((tail_remaining - outro_fade_ms) / 1000)
+            if outro_fade_ms:
+                self.play(FadeOut(current), run_time=outro_fade_ms / 1000)
         self._write_layout_report(spec_path, layout_records)
 
     def _build_beat(

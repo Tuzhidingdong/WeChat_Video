@@ -1,6 +1,6 @@
 # 「精读一分钟」文章摘要视频工作流
 
-**Status:** local preview pipeline implemented; article URL export and WeChat Channels extended-link UI remain unverified.
+**Status:** daily literature pipeline is being integrated on `feat/daily-literature-and-popularization`; video draft upload no longer depends on the WeChat extended-link feature.
 
 ## 1. Product boundary
 
@@ -8,62 +8,58 @@
 
 The pipeline consumes a sanitized, local article package exported by the publishing workflow. Its taxonomy mirrors the upstream record: editorial_slot=1, article_type=literature_translation, and editorial_pillar_id=literature_manuscript. It does not access or reuse the WeChat_control browser profile, cookies, access tokens, or private platform APIs. This keeps the Video project isolated from the WeChat_control account session and browser automation.
 
-## 2. Input package contract
+## 2. Automatic source package contract
 
-Create one directory per published article:
+The production BAT does **not** ask the user to create or copy an article package. It discovers completed Slot 1 runs from the existing local WeChat_control output at `../data/daily_runs/<date>/research_subscription/<run_id>/`.
 
-    article-package/
-      article.json
-      article.md
-      images.json
-      images/
-        IMG01.jpg
-        IMG02.png
+The Video adapter reads `slot1.md`, `slot1.manifest.json`, `prepared_articles.json`, `review_state.json`, `delivery_result.json`, and `uploaded_assets_manifest.json` from the upstream WeChat_control run. It reads `url_verification_evidence.json`, `upload_preflight_report.json`, and `article_read_count_probe.json` from the matching Video production output under `outputs`. The Video `article_summary_manifest.json` and `source_record.json` must bind that evidence directory to the exact upstream `article_id`, appmsgid, title and Markdown SHA-256; evidence from another output is never borrowed.
 
-article.json:
+Formal publication time is derived only from the positive Unix-epoch `ct` field in the paired Video `article_read_count_probe.json`, with its source path and evidence directory retained in the materialized package. For the inspected sample, `ct=1795308507` corresponds to `2026-11-22T00:48:27Z` (`2026-11-22 08:48:27` Asia/Shanghai). The upstream draft/worker timestamp, draft-save time and run date are never used as the formal publication time.
 
-    {
-      "schema_version": 1,
-      "account_name": "成核生长",
-      "editorial_slot": 1,
-      "article_type": "literature_translation",
-      "editorial_pillar_id": "literature_manuscript",
-      "publication_status": "PUBLISHED",
-      "appmsgid": "the original WeChat appmsgid",
-      "article_id": "appmsgid plus item index, e.g. appmsgid_0",
-      "title": "The exact published article title",
-      "published_at": "2026-11-21T21:10:55+08:00",
-      "canonical_url": "https://mp.weixin.qq.com/s/the-real-published-link",
-      "canonical_url_verified": true,
-      "url_provenance": {
-        "endpoint": "/the/observed/backend/route",
-        "field_path": "the.actual.response.field.path",
-        "verified_at": "2026-11-23T12:00:00+08:00",
-        "read_only": true
-      }
-    }
+For a brand-new article with no prior Video output, `record-literature-source-evidence` writes a standalone identity-bound bundle under `outputs/publication_source_evidence/<article_id>/` using only the real observation (album URL, raw href, resolved URL, DOM relation, `data-msgid`/`idx`, observed time, and a publication-time probe explicitly labelled by its real source and precision). No historical summary package is fabricated. The adapter accepts this bundle by matching article_id/appmsgid/title/Markdown SHA-256 from the observation itself, and derives caption-grounded local figure assets from the upstream Markdown plus read-only figure files when no Video output images exist.
 
-The canonical URL is optional for **local preview rendering**. When the published-article response has not yet yielded a verified URL, set canonical_url to null and canonical_url_verified to false, and omit url_provenance. The local preview can still be rendered from the real published article body. If a URL is supplied, it must be the exact HTTPS mp.weixin.qq.com/s/... link read from an observed published-article response, with canonical_url_verified=true and a complete read-only url_provenance. Never construct it from appmsgid. Never put tokens, cookies, credentials, or authenticated query parameters in the package. The endpoint field is the route only; field_path identifies the actual response property that carried the URL. A package containing a URL while canonical_url_verified is false is rejected.
+An independent source is required in addition to the verified article URL: `publication_source_evidence.json` records a real read-only browser observation of the official album page, including the album page URL, the actual link attribute and raw href, the browser-resolved article URL, `data-msgid`, `data-itemidx`, the observed DOM relation and a timezone-aware `observed_at`. `src/wechat_video/publication_source_evidence.py` validates this structure and binds it to one article by article_id/appmsgid/title/Markdown SHA-256. `record-literature-source-evidence --observation <json>` adds it atomically and never overwrites the original five evidence files. Free-text `obtained_from` prose and the verified article URL alone are not independent sources; a missing observation keeps the run fail-closed. This browser step is operator/Agent-triggered today, not an unattended scraper, and source validation is not video or draft acceptance.
 
-article.md is the complete exported article text. images.json uses this structure:
+The canonical public article URL is read from the matching Video `url_verification_evidence.json` URL and cross-checked against the Video manifest/source metadata and recorded `url_provenance` when present. The JSON need not serialize browser selector names such as `li.album__list-item` or the literal attribute name `data-link`. The account `__biz` must still match. Album `mid`/item index are taken from the observed URL query or explicit evidence fields when present; the album mid is retained separately from publishing `appmsgid`. The adapter does not open a browser, use cookies/tokens, or call private APIs.
 
-    {
-      "images": [
-        {
-          "image_id": "IMG01",
-          "file": "images/IMG01.jpg",
-          "image_aspect": 1.5,
-          "caption": "A caption found in the article",
-          "context": "The article paragraph to which this image belongs"
-        }
-      ]
-    }
+After these checks pass, Video creates a non-overwriting package in its own runtime cache:
 
-Image paths must remain inside the package directory. An image selected for a video beat must have a caption or context that can be found in the article Markdown. Only locally exported original article images are used; the renderer does not fetch third-party images.
+```
+runtime/upstream_article_packages/<appmsgid>_0/<run_id>/
+  article.json
+  article.md
+  images.json
+  images/
+```
+
+`article.md` is a byte-identical copy of upstream `slot1.md`. Only locally present, decodable original images with caption/context grounded in the article Markdown are copied; unverified CDN-only images are not downloaded or fabricated. The generated `article.json` stores account/taxonomy identity, formal publication time, canonical URL and its provenance, publication-time provenance, album identity and upstream run provenance.
+
+A missing, ambiguous or mismatched source-evidence field rejects that candidate. It does not cause the adapter to substitute the draft timestamp or manufacture a published timestamp. No eligible article produces `SKIPPED_NO_ELIGIBLE_ARTICLE`, with per-run rejection reasons.
+
+The following package schema describes the **internal generated artifact** only; it is not a manual user input requirement:
+
+```json
+{
+  "schema_version": 1,
+  "account_name": "成核生长",
+  "editorial_slot": 1,
+  "article_type": "literature_translation",
+  "editorial_pillar_id": "literature_manuscript",
+  "publication_status": "PUBLISHED",
+  "appmsgid": "100000764",
+  "article_id": "100000764_0",
+  "title": "Exact published Slot 1 article title",
+  "published_at": "2026-11-22T00:48:27Z",
+  "canonical_url": "the observed official published article URL",
+  "canonical_url_verified": true
+}
+```
+
+`images.json` contains only validated local image paths and article-grounded captions/context. The source Markdown is copied without rewriting or newline normalization so the source SHA-256 remains identical to the upstream Slot 1 artifact.
 
 ## 3. Summary script contract
 
-The model or editor creates a separate summary.json. Its source hash must match article.md. Every claim must include an exact source excerpt, and each spoken unit and visual beat must map to one or more of those claim IDs.
+The daily literature pipeline asks the planner for a versioned intermediate object (`src/wechat_video/planner_output_schema.py`, schema_version 1), not for a legacy summary.json. The program owns article_id, source SHA, image ids and a deterministic paragraph index of article.md; the planner owns scientific content and returns `source_ref.paragraph_index` for each claim. `src/wechat_video/source_paragraphs.py` extracts the exact original block, and `src/wechat_video/planner_summary_adapter.py` converts the validated planner object into the legacy summary.json schema below. `validate_article_summary()` remains the sole final gate with unchanged thresholds. For manually prepared inputs, a model or editor may still author summary.json directly in the legacy format.
 
 Content-planning instructions for the reusable authoring prompt:
 
@@ -146,15 +142,27 @@ The CLI refuses to render unless:
 
 A duplicate article ID is blocked if a prior article-summary run already exists.
 
-## 6. Extended-link status and upload safety
+## 6. Article source identity, fixed CTA and draft upload
 
-When a verified URL exists, channels_draft.json carries the exact article URL, article ID, and title in an extended_link object. If the URL is still missing, extended_link is null and the metadata status is MISSING_VERIFIED_ARTICLE_URL. In both cases this is only a local metadata payload; it does not mean the Channels Assistant has mounted the article card.
+The source article URL remains optional metadata. If a verified canonical URL is available in the source package, it is preserved in the local source record for provenance. It is **not** sent to the Channels extended-link control and is not required for draft upload. A URL must never be constructed from appmsgid.
 
-**All article-summary runs are explicitly blocked from the existing uploader.** The upload guard remains active until a live, read-only inspection identifies the actual extended-link control and a later authorized test proves that the article link is selected, saved, and read back from the resulting draft. Putting the URL in the ordinary description field is not accepted as a substitute.
+The final 1.8-second outro renders the fixed message:
 
-The current local audit found the WeChat_control research_subscription session expired. No reliable article URL field was obtained. A local preview may still be rendered from the already-published article body and its article ID; the link is marked missing. No URL adapter or field selector is claimed to be production-ready. Before a future draft-only upload, the publishing workflow must export the actual URL using a verified response field and the Channels uploader must prove the extended link is saved and read back.
+**更多详细解读见【成核生长】同名公众号**
 
-No video is uploaded, saved as a draft, or published by run-article-summary. User review of the complete MP4 is required before any future draft-only integration is enabled.
+The text is part of the video itself, not a clickable link. The 1.8 seconds are included in the measured PCM timeline and exact final-frame budget.
+
+The daily literature pipeline is allowed to upload the exact article-summary run only when:
+- `qa_report.json` reports strict PASS;
+- the source article ID in the manifest, source record and summary agree;
+- every claim excerpt is an exact excerpt from the original article Markdown;
+- every claim is linked to a speech unit and every beat is linked to a speech unit;
+- audio-timeline, subtitle-coverage, scene-layout and outro-CTA checks pass;
+- `channels_draft.json` matches the deterministic metadata derived from the original article and summary.
+
+The shared uploader uses the exact run directory and retains its existing target-account check, single-save behavior, duplicate protection and DraftListManager readback. It never clicks Publish, Send or Schedule. A successful save is reported only after exactly one new unpublished draft row is verified.
+
+Automated source-excerpt and structure checks do not replace the user's scientific review or viewing of the final MP4. The video remains an unpublished draft pending the user's final inspection and manual publication decision.
 
 
 ## Audiovisual pacing and delivery-quality contract
@@ -223,9 +231,7 @@ the reusable production path; they are not per-video editing instructions.
 - Scene core content is checked against the portrait frame and the configured
   subtitle safe band. The Manim render must produce
   `scene_layout_report.json`; a failed or missing report blocks final assembly.
-- A 900 ms outro segment is included in the measured audio clock. The final scene
-  holds through the speech ending and fades during the outro, so the fade is not
-  discarded by audio-length trimming.
+- A minimum 1,800 ms outro segment is included in the measured audio clock. The literature-reading end card remains visible through the final frame; its CTA text is rendered as video content, not a platform link.
 - The original deterministic editorial music bed is active on cover, speech and
   outro, ducked under narration, and absent from intentional inter-unit silence.
   The mix report measures cover/outro music and verifies that inter-unit gaps

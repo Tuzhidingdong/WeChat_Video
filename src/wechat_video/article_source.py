@@ -447,37 +447,37 @@ def build_article_channels_metadata(
     summary: dict[str, Any],
     job_id: str,
 ) -> dict[str, Any]:
-    """Build a draft payload that explicitly retains, but does not claim to mount, the article link."""
-    url = None
-    link_status = "MISSING_VERIFIED_ARTICLE_URL"
-    if article.get("canonical_url_verified") is True and article.get("canonical_url"):
-        url = validate_canonical_article_url(article.get("canonical_url"))
-        link_status = "UNVERIFIED_PLATFORM_UI"
+    """Build draft metadata without the unsupported WeChat extended-article link."""
     title = str(summary.get("channels_title") or "").strip()
+    thesis = str(summary.get("core_thesis") or "").strip()
+    article_title = str(article.get("title") or "").strip()
+    if not thesis or not article_title:
+        raise ArticleSourceError("Article-summary metadata requires a thesis and source article title.")
     description = (
-        f"{str(summary.get('core_thesis') or '').strip()}\n\n"
-        f"原文：{str(article.get('title') or '').strip()}\n\n"
-        "#成核生长 #精读一分钟 #科学研究"
+        f"{thesis}\n\n"
+        f"原文：{article_title}\n\n"
+        "#成核生长 #文献精读 #科学研究"
     )
     if not 6 <= len(title) <= 16 or len(description) > 1000:
         raise ArticleSourceError("Article-summary Channels metadata fails title/description length limits.")
-    extended_link = None
-    if url:
-        extended_link = {
-            "type": "wechat_article",
-            "title": str(article.get("title") or ""),
-            "article_id": str(article.get("article_id") or ""),
-            "url": url,
-        }
+    # The video CTA is rendered into the final frame. WeChat's optional
+    # extended-article link control is deliberately not used: link persistence
+    # is unsupported/unreliable for this account and is not a release gate.
+    # Any verified canonical URL remains in source_record.json only.
     return {
-        "schema_version": 2,
+        "schema_version": 4,
         "content_type": "article_summary",
         "job_id": job_id,
         "account_name": "成核生长",
         "title": title,
         "description": description,
-        "extended_link": extended_link,
-        "extended_link_required": True,
-        "extended_link_status": link_status,
+        "source_article_id": str(article.get("article_id") or ""),
+        "source_appmsgid": str(article.get("appmsgid") or ""),
+        "source_article_title": article_title,
+        "source_cta_text": "更多详细解读见【成核生长】同名公众号",
+        "extended_link_required": False,
+        "extended_link": None,
+        "extended_link_status": "NOT_REQUIRED_CTA_ONLY",
+        "external_article_link_used": False,
         "automatic_publication": False,
     }

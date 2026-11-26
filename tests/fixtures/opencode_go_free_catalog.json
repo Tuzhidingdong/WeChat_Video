@@ -1,0 +1,60 @@
+{
+  "source": "GET https://opencode.ai/inference/go/v1/models (read-only audit 2026-11-25)",
+  "note": "Fixture of zero-cost Go models only. Full catalog is fetched at runtime by operators; this file supports offline routing tests.",
+  "models": [
+    {
+      "id": "hy4-flash-free",
+      "name": "Hy4 flash Free",
+      "cost": {"input": 0, "output": 0, "cache_read": 0},
+      "context": 1048576,
+      "max_output": 65536,
+      "tools": true,
+      "structured_output": null,
+      "reasoning": true,
+      "effort": ["none", "high"],
+      "zdr": true,
+      "limited_regions": false
+    },
+    {
+      "id": "hungerg-free",
+      "name": "HungerG Free",
+      "cost": {"input": 0, "output": 0, "cache_read": 0},
+      "context": 1000000,
+      "max_output": 65536,
+      "tools": true,
+      "structured_output": null,
+      "reasoning": true,
+      "effort": null,
+      "zdr": true,
+      "limited_regions": false
+    },
+    {
+      "id": "beam-free",
+      "name": "Beam Free",
+      "cost": {"input": 0, "output": 0, "cache_read": 0},
+      "context": 1048576,
+      "max_output": 131072,
+      "tools": true,
+      "structured_output": true,
+      "reasoning": true,
+      "effort": ["low", "medium", "high", "xhigh", "max"],
+      "zdr": false,
+      "limited_regions": true,
+      "excluded_reason": "not available in China including Hong Kong and Macau"
+    },
+    {
+      "id": "iceman-contributor-free",
+      "name": "Iceman Contributor Free",
+      "cost": {"input": 0, "output": 0, "cache_read": 0},
+      "context": 262144,
+      "max_output": 131072,
+      "tools": true,
+      "structured_output": null,
+      "reasoning": true,
+      "effort": null,
+      "zdr": false,
+      "limited_regions": false,
+      "excluded_reason": "prompts used for model training"
+    }
+  ]
+}
