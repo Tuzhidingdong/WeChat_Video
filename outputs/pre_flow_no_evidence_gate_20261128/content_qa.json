@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "summary_type": "micro_visual_content_only",
+  "status": "PASS",
+  "article_id": "100000884_0",
+  "source_article_sha256": "0f3456a638798e44eef071d6710bd9644b727aab619dcb05cfe0ce5f9511b7f2",
+  "run_id": "mv-20261128202758-270af5b1",
+  "source_run_id": "20261124T145207-d1e7fee3",
+  "source_article_sha256_matched": true,
+  "claims_excerpt_verified": true,
+  "speech_units_text_complete": true,
+  "checks": [
+    {
+      "check": "article_id_matches_source",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "source_article_sha256_matches",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "article_summary_content_contract",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "speech_units_text_complete",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "claims_have_source_excerpts",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "source_run_id_binding",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "source_slot1_sha256_binding",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "no_reading_video_artifacts",
+      "status": "PASS",
+      "detail": "Edge-TTS audio / WordBoundary metadata / captions / Manim video are not generated"
+    }
+  ],
+  "generated_at": "2026-11-28T20:30:40+08:00"
+}

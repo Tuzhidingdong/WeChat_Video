@@ -1,0 +1,7 @@
+Create one 15 second 9:16 video with Omni Flash 1.2.
+One continuous microscopic shot: composite micelles laterally assemble into a single monolayer within an emulsion droplet interface.
+Keep the main subject in the upper-center and leave the lower third clean and uncluttered.
+No visible text. No typography. No captions or subtitles. No title cards. No labels or annotations. No letters, words, numbers or symbols. No logos, watermarks or UI overlays. No pseudo-text or decorative glyphs. Do not display, transcribe, translate or paraphrase any text of any language.
+Resolution: 720p. Output count: 1.
+Generate the video once in a single pass. Do not extend, loop, resume or generate additional clips.
+Instrumental music only. Generate only a gentle instrumental background score, continuous through the video. No vocals, no singing, no lyrics, no human voice, no speech, no dialogue, no narration, no chanting, no sound effects, no ambience.

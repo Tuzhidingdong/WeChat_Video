@@ -1,0 +1,152 @@
+{
+  "schema_version": 2,
+  "article_id": "100000884_0",
+  "source_article_sha256": "0f3456a638798e44eef071d6710bd9644b727aab619dcb05cfe0ce5f9511b7f2",
+  "run_id": "mv-20261128202758-270af5b1",
+  "candidates": [
+    {
+      "candidate_id": "A",
+      "subject": {
+        "text": "Composite micelles",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C1",
+          "C2"
+        ],
+        "supporting_source_excerpts": [
+          "表面活性剂-低聚物复合胶束本质上是各向同性的。"
+        ],
+        "evidence_paraphrase": "Surfactant–oligomer composite micelles are the isotropic building units."
+      },
+      "action": {
+        "text": "Laterally assemble into a single monolayer",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C2",
+          "C6"
+        ],
+        "supporting_source_excerpts": [
+          "并驱动其在乳液界面处发生横向单层组装。"
+        ],
+        "evidence_paraphrase": "The composite micelles assemble laterally into a single monolayer at the emulsion interface."
+      },
+      "environment": {
+        "text": "Emulsion droplet interface",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C2",
+          "C3"
+        ],
+        "supporting_source_excerpts": [
+          "从而被推向乳液液滴界面；"
+        ],
+        "evidence_paraphrase": "The composite micelles move toward the emulsion droplet interface."
+      },
+      "selection_rationale": "This important scientific finding is the core phenomenon, not a downstream result mistaken for it; its single action is easy to film, while the honeycomb alternative is equally filmable but less representative.",
+      "relationship_to_core_finding": "core_phenomenon",
+      "scientific_uncertainties": [
+        "The evidence does not establish real-time optical tracking of individual micelle assembly."
+      ],
+      "unsupported_visual_details": [
+        "Multilayer micelle stacks",
+        "Solid support surfaces",
+        "Visible salt crystals",
+        "Molecular micelle interiors"
+      ]
+    },
+    {
+      "candidate_id": "C",
+      "subject": {
+        "text": "Polydopamine-coated tin electrode",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C5"
+        ],
+        "supporting_source_excerpts": [
+          "研究团队将其作为纳米离子分流器涂覆于Sn金属负极表面，构筑了Sn@2DMeso-PDA电极。",
+          "Manipulating Monomicelle Monolayer Assembly via Salt Effect Toward Tailorable Mesoporous Polydopamine Superstructures for Aqueous Batteries"
+        ],
+        "evidence_paraphrase": "Single-layer honeycomb polydopamine nanosheets coat the tin metal negative electrode."
+      },
+      "action": {
+        "text": "Accumulates a dense, smooth tin deposit",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C7"
+        ],
+        "supporting_source_excerpts": [
+          "原位光学显微镜显示，裸Sn在30 min后即出现明显枝晶，而Sn@2DMeso-PDA始终保持致密平滑的沉积形貌（图4f）。"
+        ],
+        "evidence_paraphrase": "Tin accumulates as a dense, smooth deposit on the coated electrode."
+      },
+      "environment": {
+        "text": "Electrode surface during tin electroplating",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C7"
+        ],
+        "supporting_source_excerpts": [
+          "f，在5 mA cm−2下Sn电镀的原位光学显微镜图像"
+        ],
+        "evidence_paraphrase": "In situ optical microscopy views the electrode surface during tin electroplating."
+      },
+      "selection_rationale": "This important scientific finding is a downstream electrode observation, not the central assembly phenomenon or a result mistaken for it; its deposition action is equally filmable, but micelle assembly is more representative.",
+      "relationship_to_core_finding": "downstream_result",
+      "scientific_uncertainties": [
+        "Smooth deposition alone does not resolve the molecular ion-transport mechanism."
+      ],
+      "unsupported_visual_details": [
+        "Visible individual tin ions",
+        "Colored ion-flux trails",
+        "Hydrogen bubbles",
+        "Dendrites on the coated electrode"
+      ]
+    },
+    {
+      "candidate_id": "B",
+      "subject": {
+        "text": "Honeycomb mesoporous polydopamine nanosheet",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C3"
+        ],
+        "supporting_source_excerpts": [
+          "得到具有蜂窝状介孔的单层介孔PDA纳米片。"
+        ],
+        "evidence_paraphrase": "The resulting polydopamine nanosheet is a single-layer honeycomb mesoporous sheet."
+      },
+      "action": {
+        "text": "Shows tightly packed open spherical channels",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C3"
+        ],
+        "supporting_source_excerpts": [
+          "表面紧密排列着球形开放通道（图1b）。"
+        ],
+        "evidence_paraphrase": "Spherical open channels are tightly packed across the nanosheet surface."
+      },
+      "environment": {
+        "text": "Two-dimensional nanosheet surface",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C3"
+        ],
+        "supporting_source_excerpts": [
+          "所得纳米片呈现均匀的二维形貌"
+        ],
+        "evidence_paraphrase": "The nanosheet presents a uniform two-dimensional surface."
+      },
+      "selection_rationale": "This important scientific finding is a downstream structural result, not the central phenomenon or a result mistaken for it; its static morphology is equally filmable, but micelle assembly supplies the more representative continuous action.",
+      "relationship_to_core_finding": "downstream_result",
+      "scientific_uncertainties": [],
+      "unsupported_visual_details": [
+        "Closed compound-eye pores",
+        "Cylindrical channels",
+        "Extra stacked nanosheet layers"
+      ]
+    }
+  ],
+  "selected_candidate_id": "A",
+  "selection_summary": "Micelle monolayer assembly offers the clearest continuous microscopic action while directly representing the article's central finding."
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "content_type": "article_summary",
+  "summary_type": "micro_visual_content_only",
+  "article_id": "100000884_0",
+  "article_title": "罗巍晁栋梁团队发文Adv. Mater.：盐效应反常诱导单胶束单层组装筑牢无枝晶界面",
+  "source_article_sha256": "0f3456a638798e44eef071d6710bd9644b727aab619dcb05cfe0ce5f9511b7f2",
+  "summary_sha256": "3e8b1205ed638f5a3dae31036c486d2726697f04951562ca1a372b08a3f65b39",
+  "spoken_cjk_characters": 208,
+  "claim_count": 8,
+  "speech_unit_count": 7,
+  "beat_count": 7,
+  "run_id": "mv-20261128202758-270af5b1",
+  "source_run_id": "20261124T145207-d1e7fee3",
+  "source_slot1_path": "E:\\Agent\\WeChat\\data\\daily_runs\\2026-11-24\\research_subscription\\20261124T145207-d1e7fee3\\slot1.md",
+  "source_slot1_sha256": "0f3456a638798e44eef071d6710bd9644b727aab619dcb05cfe0ce5f9511b7f2",
+  "planner_session_id": null,
+  "audio_state": "not_generated",
+  "word_boundary_state": "not_generated",
+  "reading_video_state": "not_generated",
+  "generated_at": "2026-11-28T20:30:40+08:00"
+}
