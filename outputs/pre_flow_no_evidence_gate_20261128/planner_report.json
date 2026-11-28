@@ -1,0 +1,31 @@
+{
+  "agent": "micro-visual-content-planner",
+  "model": "opencode-go/hungerg-free",
+  "project_root": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\opencode\\micro-visual-phase1",
+  "attachments": [
+    "C:\\Users\\Administrator\\AppData\\Local\\Temp\\opencode\\micro-visual-phase1\\runtime\\upstream_article_packages\\100000884_0\\20261124T145207-d1e7fee3\\article.json",
+    "C:\\Users\\Administrator\\AppData\\Local\\Temp\\opencode\\micro-visual-phase1\\runtime\\upstream_article_packages\\100000884_0\\20261124T145207-d1e7fee3\\article.md",
+    "C:\\Users\\Administrator\\AppData\\Local\\Temp\\opencode\\micro-visual-phase1\\runtime\\upstream_article_packages\\100000884_0\\20261124T145207-d1e7fee3\\images.json"
+  ],
+  "usage": {
+    "available": true,
+    "complete": true,
+    "session_ids": [
+      "ses_ddddf8fa9ffe8HqvbP5eHlzrZn"
+    ],
+    "step_count": 1,
+    "tokens": {
+      "input": 10519,
+      "output": 18701,
+      "reasoning": 0,
+      "cache_read": 192,
+      "cache_write": 0,
+      "total": 29220,
+      "total_including_cache_io": 29412
+    },
+    "cost": 0.0,
+    "cost_currency": "USD",
+    "cost_available": true,
+    "source": "OpenCode --format json step_finish events"
+  }
+}
