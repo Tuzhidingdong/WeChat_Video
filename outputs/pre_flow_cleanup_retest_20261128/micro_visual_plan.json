@@ -1,0 +1,90 @@
+{
+  "job_id": "20261128_100000884_0_micro_visual_cleanup_20261128_205646",
+  "draft_title": "各向同性软胶束易堆成多层，团队用氯化钾让它们在乳液界面铺展成单层。",
+  "visual_prompt": "Create one 15 second 9:16 video with Omni Flash 1.2.\nOne continuous microscopic shot: tin deposits on mesoporous polydopamine coating remain dense and smooth during electroplating within a tin electrode surface in aqueous electrolyte.\nKeep the main subject in the upper-center and leave the lower third clean and uncluttered.\nNo visible text. No typography. No captions or subtitles. No title cards. No labels or annotations. No letters, words, numbers or symbols. No logos, watermarks or UI overlays. No pseudo-text or decorative glyphs. Do not display, transcribe, translate or paraphrase any text of any language.\nResolution: 720p. Output count: 1.\nGenerate the video once in a single pass. Do not extend, loop, resume or generate additional clips.\nInstrumental music only. Generate only a gentle instrumental background score, continuous through the video. No vocals, no singing, no lyrics, no human voice, no speech, no dialogue, no narration, no chanting, no sound effects, no ambience.",
+  "evidence_metadata": {
+    "article_id": "100000884_0",
+    "source_article_sha256": "0f3456a638798e44eef071d6710bd9644b727aab619dcb05cfe0ce5f9511b7f2",
+    "claim_ids": [
+      "C1",
+      "C2"
+    ],
+    "source_excerpt_references": [
+      {
+        "claim_id": "C1",
+        "source_excerpt": "受石墨烯等二维材料启发，将复合胶束组装为二维超结构被视为突破上述瓶颈的有效途径。但与原子、离子或分子等具有本征各向异性的构筑单元不同，表面活性剂-低聚物复合胶束本质上是各向同性的。传统界面组装策略虽然借助固-液界面限域实现了二维排列，却难以克服单个复合胶束固有的热力学不稳定性：胶束往往在界面处发生体相聚集，形成多层介孔结构，而非真正的单层结构。更棘手的是，现有技术通常只能在一个合成体系中得到单一类型的介观结构，难以在微观孔道形貌与宏观超结构之间实现同步调控。"
+      },
+      {
+        "claim_id": "C2",
+        "source_excerpt": "针对上述挑战，研究团队提出了一种盐效应调控的单胶束组装策略。其核心思想是将氯化钾（KCl）引入由Pluronic F127、1,3,5-三甲苯（TMB）、乙醇和多巴胺（DA）组成的乳液体系中，利用Debye屏蔽与盐析效应的协同作用，稳定复合单胶束、降低其亲水性，并驱动其在乳液界面处发生横向单层组装。"
+      }
+    ],
+    "source_excerpt": "受石墨烯等二维材料启发，将复合胶束组装为二维超结构被视为突破上述瓶颈的有效途径。但与原子、离子或分子等具有本征各向异性的构筑单元不同，表面活性剂-低聚物复合胶束本质上是各向同性的。传统界面组装策略虽然借助固-液界面限域实现了二维排列，却难以克服单个复合胶束固有的热力学不稳定性：胶束往往在界面处发生体相聚集，形成多层介孔结构，而非真正的单层结构。更棘手的是，现有技术通常只能在一个合成体系中得到单一类型的介观结构，难以在微观孔道形貌与宏观超结构之间实现同步调控。",
+    "selected_text_source": "speech_units[0].spoken_text",
+    "selected_sentence_sha256": "f0765275b8a46219e9afce191ad7b3e961cee45becd00956045f9bf7836e95ce",
+    "selected_title_sha256": "f0765275b8a46219e9afce191ad7b3e961cee45becd00956045f9bf7836e95ce"
+  },
+  "prompt_builder_sha256": "b3a046d9f602c98a7f2545bf4e560aae4335c6ff7b920d6beac37efd670cc4cc",
+  "visual_prompt_sha256": "4db725d6bd1d3e943e8e0ced6e1c9bf891f3803dd446f0441ca340bb771351a9",
+  "scene_recipe_sha256": "6530b949b1ed94660f3579ba71b65b395cc5e3a92827311b270197c05bdada58",
+  "article_source": {
+    "upstream_acquisition": {
+      "state": "LOCAL_DAILY_RUNS_ONLY",
+      "acquisition_mode": "reused_local",
+      "run_id": "20261124T145207-d1e7fee3",
+      "source_root": "E:\\Agent\\WeChat\\data\\daily_runs\\2026-11-24\\research_subscription\\20261124T145207-d1e7fee3",
+      "slot1_path": "E:\\Agent\\WeChat\\data\\daily_runs\\2026-11-24\\research_subscription\\20261124T145207-d1e7fee3\\slot1.md",
+      "slot1_sha256": "0f3456a638798e44eef071d6710bd9644b727aab619dcb05cfe0ce5f9511b7f2"
+    },
+    "selected_article": {
+      "run_id": "20261124T145207-d1e7fee3",
+      "source_root": "E:\\Agent\\WeChat\\data\\daily_runs\\2026-11-24\\research_subscription\\20261124T145207-d1e7fee3",
+      "source_run_dir": "E:\\Agent\\WeChat\\data\\daily_runs\\2026-11-24\\research_subscription\\20261124T145207-d1e7fee3",
+      "slot1_path": "E:\\Agent\\WeChat\\data\\daily_runs\\2026-11-24\\research_subscription\\20261124T145207-d1e7fee3\\slot1.md",
+      "slot1_sha256": "0f3456a638798e44eef071d6710bd9644b727aab619dcb05cfe0ce5f9511b7f2",
+      "article_id": "100000884_0",
+      "title": "罗巍晁栋梁团队发文Adv. Mater.：盐效应反常诱导单胶束单层组装筑牢无枝晶界面",
+      "local_date": "2026-11-25",
+      "published_at": "2026-11-25T00:13:00Z",
+      "canonical_url": "https://mp.weixin.qq.com/s?__biz=MzIyMjY1ODkwMA==&mid=2247484544&idx=1&sn=a94bf69aea09b1246ad02aaa7c9a6e84&chksm=e82b6cbbdf5ce5ad180e39ca6deb6bb50f1e3fb6d3c2e93d21eae9b2748f52dd3aef0f97ea14&scene=178&cur_album_id=4776718530358493186&search_click_id=#rd",
+      "source_article_sha256": "0f3456a638798e44eef071d6710bd9644b727aab619dcb05cfe0ce5f9511b7f2"
+    },
+    "planner_summary_path": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\opencode\\micro-visual-phase1\\runtime\\micro_visual_article\\20261128_100000884_0_micro_visual_cleanup_20261128_205646\\planner\\summary.json",
+    "summary_run_dir": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\opencode\\micro-visual-phase1\\outputs\\mv9\\20261128_210304_628380_100000884_0_micro_visual_content_summary",
+    "discovery": {
+      "window_start": "2026-11-22",
+      "window_end": "2026-11-28",
+      "upstream_root": "E:\\Agent\\WeChat\\data\\daily_runs",
+      "publication_evidence_root": "E:\\Agent\\WeChat\\Video\\outputs",
+      "found_article_count": 2,
+      "eligible_article_count": 2,
+      "rejected_count": 18,
+      "candidates": [
+        {
+          "article_id": "100000884_0",
+          "title": "罗巍晁栋梁团队发文Adv. Mater.：盐效应反常诱导单胶束单层组装筑牢无枝晶界面",
+          "local_date": "2026-11-25",
+          "source_run_dir": "E:\\Agent\\WeChat\\data\\daily_runs\\2026-11-24\\research_subscription\\20261124T145207-d1e7fee3",
+          "canonical_url": "https://mp.weixin.qq.com/s?__biz=MzIyMjY1ODkwMA==&mid=2247484544&idx=1&sn=a94bf69aea09b1246ad02aaa7c9a6e84&chksm=e82b6cbbdf5ce5ad180e39ca6deb6bb50f1e3fb6d3c2e93d21eae9b2748f52dd3aef0f97ea14&scene=178&cur_album_id=4776718530358493186&search_click_id=#rd",
+          "already_processed": false
+        },
+        {
+          "article_id": "100000764_0",
+          "title": "俄亥俄州立大学团队最新发表APL：失配位错剪切应力模板化锁定反铁磁畴",
+          "local_date": "2026-11-22",
+          "source_run_dir": "E:\\Agent\\WeChat\\data\\daily_runs\\2026-11-21\\research_subscription\\20261121T152703-e33de76e",
+          "canonical_url": "https://mp.weixin.qq.com/s?__biz=MzIyMjY1ODkwMA==&mid=2247484414&idx=1&sn=d5b5890356ad145f664dc14b0c97befd&chksm=e82b6bc5df5ce2d3d05ae1e75f0bbc3ded501a5afdb75ae43fcfccad93b2b5117887c419f3fc#rd",
+          "already_processed": false
+        }
+      ]
+    }
+  },
+  "uploader_identity": null,
+  "config": {
+    "model": "Omni Flash 1.2",
+    "duration_seconds": 15,
+    "aspect_ratio": "9:16",
+    "resolution": "720p",
+    "output_count": 1
+  }
+}

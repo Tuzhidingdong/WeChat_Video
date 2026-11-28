@@ -1,0 +1,111 @@
+{
+  "schema_version": 2,
+  "article_id": "100000884_0",
+  "source_article_sha256": "0f3456a638798e44eef071d6710bd9644b727aab619dcb05cfe0ce5f9511b7f2",
+  "run_id": "mv-20261128205646-927b777d",
+  "candidates": [
+    {
+      "candidate_id": "A",
+      "subject": {
+        "text": "Composite surfactant micelles",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C2",
+          "C3"
+        ],
+        "supporting_source_excerpts": [
+          "两亲性F127与DA首先在TMB/H$_2$O/EtOH体系中形成F127/TMB/DA复合单胶束和乳液液滴"
+        ],
+        "evidence_paraphrase": "F127/TMB/DA composite surfactant micelles form within the emulsion."
+      },
+      "action": {
+        "text": "spread laterally into a monolayer at the droplet surface",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C2",
+          "C6"
+        ],
+        "supporting_source_excerpts": [
+          "单胶束在乳液界面的横向铺展",
+          "驱动其在乳液界面处发生横向单层组装。"
+        ],
+        "evidence_paraphrase": "Composite micelles spread laterally into a monolayer at the emulsion droplet surface."
+      },
+      "environment": {
+        "text": "Trimethylbenzene and water emulsion with ethanol and potassium chloride",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C2",
+          "C3"
+        ],
+        "supporting_source_excerpts": [
+          "两亲性F127与DA首先在TMB/H$_2$O/EtOH体系中形成F127/TMB/DA复合单胶束和乳液液滴；引入KCl后，复合单胶束的稳定性提升、亲水性降低，从而被推向乳液液滴界面；"
+        ],
+        "evidence_paraphrase": "The emulsion contains trimethylbenzene and water, with ethanol and potassium chloride."
+      },
+      "selection_rationale": "This is the important central monolayer-assembly finding, not a downstream result, but its micelle action is less directly documented and filmable than the downstream optical observation.",
+      "relationship_to_core_finding": "core_phenomenon",
+      "scientific_uncertainties": [
+        "Individual composite micelles are not directly resolved in the reported microscopy.",
+        "The lateral assembly pathway is proposed from combined evidence."
+      ],
+      "unsupported_visual_details": [
+        "Visible salt crystals",
+        "Internal molecular models within micelles",
+        "Additional stacked layers during monolayer assembly"
+      ]
+    },
+    {
+      "candidate_id": "B",
+      "subject": {
+        "text": "Tin deposits on mesoporous polydopamine coating",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C3",
+          "C7"
+        ],
+        "supporting_source_excerpts": [
+          "为验证单层蜂窝状介孔PDA纳米片在能量存储中的应用潜力，研究团队将其作为纳米离子分流器涂覆于Sn金属负极表面，构筑了Sn@2DMeso-PDA电极。"
+        ],
+        "evidence_paraphrase": "Tin deposits sit on a mesoporous polydopamine coating over the tin electrode."
+      },
+      "action": {
+        "text": "remain dense and smooth during electroplating",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C7"
+        ],
+        "supporting_source_excerpts": [
+          "原位光学显微镜显示，裸Sn在30 min后即出现明显枝晶，而Sn@2DMeso-PDA始终保持致密平滑的沉积形貌（图4f）。"
+        ],
+        "evidence_paraphrase": "The tin deposits remain dense and smooth while tin is electroplated."
+      },
+      "environment": {
+        "text": "Tin electrode surface in aqueous electrolyte",
+        "kind": "scientific",
+        "supporting_claim_ids": [
+          "C7",
+          "C9"
+        ],
+        "supporting_source_excerpts": [
+          "该涂层厚度约3 µm，显著改善了电极的电解液亲和力，接触角由裸Sn的102.3°降至31.2°。",
+          "更将材料结构优势转化为水系锡金属电池中优异的界面稳定性与循环寿命。"
+        ],
+        "evidence_paraphrase": "Tin deposition occurs at a tin electrode surface in aqueous electrolyte."
+      },
+      "selection_rationale": "This is an important experimental observation of a downstream result, not a downstream result mistaken for the central phenomenon, and it is more optically filmable than the more representative micelle-assembly candidate.",
+      "relationship_to_core_finding": "downstream_result",
+      "scientific_uncertainties": [
+        "Optical microscopy resolves deposit morphology, not individual ion transport.",
+        "Uniform deposition is reported under the tested electroplating setup."
+      ],
+      "unsupported_visual_details": [
+        "Visible hydroxyl or amino group models",
+        "Dendrites on the coated deposit",
+        "Unsupported colors or surface textures"
+      ]
+    }
+  ],
+  "selected_candidate_id": "B",
+  "selection_summary": "Select coated-tin deposition because in situ optical microscopy directly records dense, smooth growth in a simple aqueous setting, despite its downstream relationship to the central assembly finding."
+}
