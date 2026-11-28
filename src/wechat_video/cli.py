@@ -36,6 +36,7 @@ from .micro_visual_pipeline import (
     DRAFT_SAVED, STOPPED_BEFORE_FLOW_SUBMIT, run_literature_micro_visual,
 )
 from .micro_visual_status import classify_micro_visual_result
+from .micro_visual_unified import run_unified
 from .model_setup import download_chinese_model, download_model
 from .pipeline import run_slice_a
 from .preflight import run_preflight
@@ -290,6 +291,13 @@ def build_parser() -> argparse.ArgumentParser:
     finalize_draft.add_argument("--project-root", type=Path, default=root)
     finalize_draft.add_argument("--job-id", required=True)
 
+    unified = sub.add_parser(
+        "run-micro-visual-unified",
+        help="Automatically resume a safe unfinished job or run the full Micro Visual pipeline.",
+    )
+    unified.add_argument("--project-root", type=Path, default=root)
+    unified.add_argument("--state-file", type=Path, default=None)
+
     return parser
 
 
@@ -402,6 +410,75 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0 if result.get("overall_state") in {"DRAFTS_SAVED", "COMPLETED_WITH_SKIPS"} else 2
+        if args.command == "run-micro-visual-unified":
+            project_root = args.project_root.resolve()
+            state_path = Path(args.state_file).resolve() if args.state_file is not None else None
+            run_id = f"mv-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
+            if state_path is not None:
+                try:
+                    state_path.parent.mkdir(parents=True, exist_ok=True)
+                    cu._write_json_atomic(state_path, {
+                        "run_id": run_id, "state": "RUNNING", "success": False,
+                        "message": "统一入口已启动，正在判断续作或新建。", "exit_code": None,
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+            lifecycle = None
+            before_sessions: dict[str, dict[str, object]] = {}
+            try:
+                flow_cfg = load_flow_config(project_root)
+                override = flow_cfg.get("_uploader_config_override") or {}
+                uploader_session = Path(
+                    str(override.get("session_file") or (project_root / "runtime/edge_session.json"))
+                ).resolve()
+                lifecycle = BrowserLifecycle(project_root, {
+                    "flow": Path(flow_cfg["_flow_session_file"]).resolve(),
+                    "uploader": uploader_session,
+                })
+                before_sessions = lifecycle.snapshot()
+            except Exception:  # noqa: BLE001
+                lifecycle = None
+            result = None
+            failure = None
+            try:
+                result = run_unified(project_root)
+            except Exception as exc:  # noqa: BLE001 - classification/resume failure must be terminal
+                failure = f"{type(exc).__name__}: {exc}"
+                result = {
+                    "state": "FAILED", "automatic_publication": False,
+                    "reason": failure, "unified_mode": "error",
+                }
+            finally:
+                if lifecycle is not None:
+                    lifecycle.close_owned(before_sessions)
+            if failure is not None:
+                print(f"WECHAT VIDEO FAILED: {failure}")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            status = classify_micro_visual_result(result)
+            message = status["message"]
+            if failure is not None:
+                message = f"{message} 原因：{failure}"
+            if isinstance(result, dict) and result.get("unified_mode"):
+                message = (
+                    f"[统一入口:{result['unified_mode']}] "
+                    + (f"job={result.get('unified_job_id')} " if result.get("unified_job_id") else "")
+                    + message
+                )
+            if state_path is not None:
+                try:
+                    cu._write_json_atomic(state_path, {
+                        "run_id": run_id, "state": status["state"], "success": status["success"],
+                        "message": message, "exit_code": status["exit_code"],
+                        "unified_mode": (result or {}).get("unified_mode"),
+                        "unified_job_id": (result or {}).get("unified_job_id"),
+                        "verified_draft": (result or {}).get("verified_draft"),
+                        "draft_title": (result or {}).get("draft_title"),
+                        "browser_cleanup": getattr(lifecycle, "results", []),
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+            print(f"[MICRO VISUAL STATE] {message}")
+            return int(status["exit_code"])
         if args.command == "finalize-micro-visual-draft":
             result = finalize_existing_draft(args.project_root.resolve(), args.job_id)
             print(json.dumps(result, ensure_ascii=False, indent=2))

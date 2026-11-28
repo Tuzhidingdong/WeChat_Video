@@ -130,8 +130,29 @@ def test_prompt_sha_mismatch_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyP
 def test_prior_flow_submission_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _job(tmp_path, ledger=True)
     monkeypatch.setattr(cont, "load_flow_config", lambda _r: {})
-    with pytest.raises(cont.ContinuationError, match="already submitted Flow"):
+    with pytest.raises(cont.ContinuationError, match="generation event is missing"):
         cont.continue_micro_visual_run(tmp_path, JOB, deps=_deps(tmp_path))
+
+
+def test_submitted_without_video_resumes_download_without_new_generate(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    d = _job(tmp_path)
+    (d / "flow_generation_event.json").write_text(json.dumps({
+        "flow_prompt_sha256": prompt_sha256(PROMPT.strip()),
+        "flow_submission_timestamp": "2026-11-28T22:00:00",
+        "flow_model": "Omni Flash 1.2", "flow_duration": 15,
+        "flow_generation_status": "SUBMITTED",
+    }), encoding="utf-8")
+    monkeypatch.setattr(cont, "load_flow_config", lambda _r: {
+        "model": "Omni Flash 1.2", "duration_seconds": 15, "aspect_ratio": "9:16",
+        "resolution": "720p", "output_count": 1, "result_locate_timeout_seconds": 10,
+    })
+    monkeypatch.setattr(cont, "validate_video", lambda _p, _c: {"status": "PASS", "sha256": "c" * 64})
+    deps = _deps(tmp_path)
+    deps["submit"] = lambda *_a, **_k: pytest.fail("Generate must not be submitted twice")
+    result = cont.continue_micro_visual_run(tmp_path, JOB, deps=deps)
+    assert result["state"] == "DRAFT_SAVED"
+    assert (d / "final.mp4").is_file()
 
 
 def test_happy_path_reaches_draft_saved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

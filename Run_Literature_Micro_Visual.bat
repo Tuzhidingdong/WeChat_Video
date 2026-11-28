@@ -21,14 +21,14 @@ for /f "usebackq delims=" %%P in (`".venv\Scripts\python.exe" -X utf8 -m wechat_
 if defined LOCAL_TOOL_PATH set "PATH=%LOCAL_TOOL_PATH%;%PATH%"
 
 echo.
-echo [LITERATURE MICRO VISUAL] Prepare content, optionally submit one Flow video,
+echo [LITERATURE MICRO VISUAL] Auto-resume an unfinished job or run a full new job,
 echo then save one unpublished Channels draft. Publication is prohibited.
 echo Account: 成核生长
 
 set "STATE_FILE=%PROJECT_ROOT%runtime\micro_visual_last_status.json"
 if exist "%STATE_FILE%" del /q "%STATE_FILE%" >nul 2>&1
 
-".venv\Scripts\python.exe" -X utf8 -m wechat_video.cli run-literature-micro-visual --state-file "%STATE_FILE%"
+".venv\Scripts\python.exe" -X utf8 -m wechat_video.cli run-micro-visual-unified --state-file "%STATE_FILE%"
 set "RC=%ERRORLEVEL%"
 
 set "MSG="

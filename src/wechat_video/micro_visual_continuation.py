@@ -138,11 +138,20 @@ def continue_micro_visual_run(
     for key in ("run_id", "article_id", "source_article_sha256", "source_run_id"):
         if not binding.get(key):
             raise ContinuationError(f"missing identity field: {key}")
+    event_path = run_dir / "flow_generation_event.json"
     for record in _read_ledger(root):
-        if str(record.get("job_id")) == job_id and (
-                record.get("flow_submitted") is True
-                or str(record.get("draft_state")) == DRAFT_SAVED):
-            raise ContinuationError("this job already submitted Flow or saved a draft")
+        if str(record.get("job_id")) != job_id:
+            continue
+        if str(record.get("draft_state")) == DRAFT_SAVED:
+            raise ContinuationError("this job already has a verified draft; refusing to upload again")
+        if record.get("flow_submitted") is True:
+            # A submitted Flow job is resumable ONLY when its generation event is
+            # present and bound to this exact prompt. Never re-submit Generate.
+            if not event_path.is_file():
+                raise ContinuationError("flow submitted but generation event is missing")
+            event = json.loads(event_path.read_text(encoding="utf-8"))
+            if prompt_sha256(prompt) != str(event.get("flow_prompt_sha256") or ""):
+                raise ContinuationError("flow generation event prompt SHA mismatch")
 
     config = load_flow_config(root)
     overrides = deps or {}
@@ -177,19 +186,46 @@ def continue_micro_visual_run(
 
     flow_event_file = run_dir / "flow_generation_event.json"
     final_path = run_dir / "final.mp4"
-    resumed = flow_event_file.is_file() and final_path.is_file()
+    resumed = flow_event_file.is_file()
     flow_identity: dict[str, Any] | None = None
     submission: dict[str, Any] | None = None
     downloaded: dict[str, Any] | None = None
-    if resumed:
+    if flow_event_file.is_file():
+        # A Flow submission already happened: NEVER submit Generate again.
         event = json.loads(flow_event_file.read_text(encoding="utf-8"))
         if prompt_sha256(prompt) != str(event.get("flow_prompt_sha256") or ""):
             raise ContinuationError("existing Flow event prompt SHA mismatch")
         flow_identity = event
-        submission = {"flow_job_id": event.get("flow_generation_id"),
-                      "flow_credit_usage": event.get("flow_credit_usage"),
-                      "resumed_after_successful_submission": True}
-        downloaded = {"path": str(final_path), "sha256": cu._sha256(final_path)}
+        submission = {
+            "flow_job_id": event.get("flow_generation_id"),
+            "flow_credit_usage": event.get("flow_credit_usage"),
+            "resumed_existing_submission": True,
+        }
+        if final_path.is_file():
+            downloaded = {"path": str(final_path), "sha256": cu._sha256(final_path)}
+        else:
+            try:
+                session, websocket = ensure_session(root, config)
+                with browser(websocket, config) as controller:
+                    located = locate(
+                        controller.page, config,
+                        timeout_seconds=float(config.get("result_locate_timeout_seconds", 300)),
+                        expected_prompt=prompt,
+                    )
+                    if located.get("state") != "RESULT_LOCATED":
+                        raise ContinuationError("existing Flow submission result not located")
+                    job_dir = prepare_dir(root, config, job_id)
+                    capture = capture_cls(controller.page, job_dir)
+                    capture.install()
+                    downloaded = download(controller.page, capture, located, config)
+            except Exception as exc:  # noqa: BLE001 - submission already spent credits
+                _append_ledger(root, {
+                    "job_id": job_id, "draft_state": "FLOW_SUBMISSION_UNKNOWN",
+                    "flow_submitted": True,
+                    "error": str(exc),
+                    "created_at": datetime.now().isoformat(timespec="seconds"),
+                })
+                return _result("FLOW_SUBMISSION_UNKNOWN", job_id=job_id, reason=str(exc))
     else:
         session, websocket = ensure_session(root, config)
         try:
