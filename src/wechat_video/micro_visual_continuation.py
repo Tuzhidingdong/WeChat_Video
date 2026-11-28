@@ -138,11 +138,20 @@ def continue_micro_visual_run(
     for key in ("run_id", "article_id", "source_article_sha256", "source_run_id"):
         if not binding.get(key):
             raise ContinuationError(f"missing identity field: {key}")
+    event_path = run_dir / "flow_generation_event.json"
     for record in _read_ledger(root):
-        if str(record.get("job_id")) == job_id and (
-                record.get("flow_submitted") is True
-                or str(record.get("draft_state")) == DRAFT_SAVED):
-            raise ContinuationError("this job already submitted Flow or saved a draft")
+        if str(record.get("job_id")) != job_id:
+            continue
+        if str(record.get("draft_state")) == DRAFT_SAVED:
+            raise ContinuationError("this job already has a verified draft; refusing to upload again")
+        if record.get("flow_submitted") is True:
+            # A submitted Flow job is resumable ONLY when its generation event is
+            # present and bound to this exact prompt. Never re-submit Generate.
+            if not event_path.is_file():
+                raise ContinuationError("flow submitted but generation event is missing")
+            event = json.loads(event_path.read_text(encoding="utf-8"))
+            if prompt_sha256(prompt) != str(event.get("flow_prompt_sha256") or ""):
+                raise ContinuationError("flow generation event prompt SHA mismatch")
 
     config = load_flow_config(root)
     overrides = deps or {}

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import uuid
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -14,12 +16,21 @@ from .micro_visual_pipeline import run_literature_micro_visual
 
 LEDGER_PATH = "runtime/micro_visual_jobs.jsonl"
 JOB_MARKER = "micro_visual_plan.json"
-UNFINISHED_STATES = {
+# States where a real job directory exists and downstream work can safely resume.
+RESUMABLE_STATES = {
     "STOPPED_BEFORE_FLOW_SUBMIT", "FAILED", "FLOW_SUBMISSION_UNKNOWN",
-    "BLOCKED_FLOW_DOWNLOAD", "BLOCKED_UPLOADER_IDENTITY",
-    "BLOCKED_ARTICLE_SOURCE", "SKIPPED_NO_ELIGIBLE_SUMMARY",
-    "SKIPPED_NO_VISUALLY_SUITABLE_SENTENCE", "FAILED_DRAFT_SAVE",
-    "FAILED_VIDEO_VALIDATION", "UPLOAD_UNKNOWN",
+    "BLOCKED_FLOW_DOWNLOAD", "FAILED_DRAFT_SAVE", "FAILED_VIDEO_VALIDATION",
+}
+# Real jobs that need a human/platform condition cleared; never auto-restarted.
+MANUAL_BLOCK_STATES = {
+    "BLOCKED_UPLOADER_IDENTITY", "BLOCKED_FLOW_15S_UNAVAILABLE",
+    "BLOCKED_FLOW_QUOTA", "BLOCKED_BROWSER_PROFILE",
+    "BLOCKED_DRAFT_UPLOAD_ADAPTER", "UPLOAD_UNKNOWN",
+}
+# Ledger-only records from stages that never created a job directory.
+PRE_JOB_STATES = {
+    "CONFIG_FAILURE", "BLOCKED_ARTICLE_SOURCE", "SKIPPED_NO_NEW_ARTICLE",
+    "SKIPPED_NO_ELIGIBLE_SUMMARY", "SKIPPED_NO_VISUALLY_SUITABLE_SENTENCE",
 }
 
 
@@ -76,12 +87,18 @@ def classify_jobs(root: Path) -> Decision:
         raise UnifiedDecisionError("; ".join(corrupted))
     problems: list[str] = []
     resumable: list[str] = []
+    blocked: list[str] = []
     completed: list[str] = []
     for job_id in sorted(set(ledger) | set(dirs)):
         record = ledger.get(job_id)
         job_dir = dirs.get(job_id)
         if job_dir is None:
-            if record and str(record.get("draft_state")) == "DRAFT_SAVED":
+            state = str((record or {}).get("draft_state") or "")
+            if state in PRE_JOB_STATES:
+                # No job directory was ever created: this is a ledger-only
+                # failure, not an unfinished job. It must not block a new run.
+                continue
+            if state == "DRAFT_SAVED":
                 problems.append(f"{job_id}: DRAFT_SAVED ledger has no job directory")
             else:
                 problems.append(f"{job_id}: ledger record has no job directory")
@@ -101,21 +118,27 @@ def classify_jobs(root: Path) -> Decision:
                 problems.append(f"{job_id}: DRAFT_SAVED without verified_draft")
                 continue
             completed.append(job_id)
-        elif record.get("flow_submitted") is True:
-            if not (job_dir / "flow_generation_event.json").is_file():
+        elif state in MANUAL_BLOCK_STATES:
+            blocked.append(job_id)
+        elif record.get("flow_submitted") is True or state in RESUMABLE_STATES:
+            if record.get("flow_submitted") is True and not (job_dir / "flow_generation_event.json").is_file():
                 problems.append(f"{job_id}: flow_submitted=true without generation event")
                 continue
-            resumable.append(job_id)
-        elif state in UNFINISHED_STATES:
             resumable.append(job_id)
         else:
             problems.append(f"{job_id}: unknown state {state!r}")
     if problems:
         raise UnifiedDecisionError("; ".join(problems))
-    if len(resumable) > 1:
+    if len(resumable) > 1 or len(blocked) > 1 or (resumable and blocked):
         raise UnifiedDecisionError(
-            "multiple unfinished jobs; refusing to pick one: " + ", ".join(resumable)
+            "unclear which job to continue; resumable=" + ",".join(resumable)
+            + " blocked=" + ",".join(blocked)
         )
+    if blocked:
+        job_id = blocked[0]
+        return Decision("blocked", job_id,
+                        f"job {job_id} needs manual clearance before continuation",
+                        {"job_id": job_id, "state": str(ledger[job_id].get("draft_state") or "")})
     if resumable:
         job_id = resumable[0]
         return Decision("resume", job_id, "one safe unfinished job found", {
@@ -136,13 +159,26 @@ def run_unified(
     root = project_root.resolve()
     decision = classify(root)
     overrides = dict(deps or {})
+    generated_run_id: str | None = None
+    if decision.action == "blocked":
+        return {
+            "state": "FAILED", "automatic_publication": False,
+            "reason": decision.reason,
+            "unified_mode": "blocked", "unified_reason": decision.reason,
+            "unified_job_id": decision.job_id,
+        }
     if decision.action == "resume":
-        result = overrides.get("resume", continue_micro_visual_run)(root, decision.job_id)
+        resume_override = overrides.get("resume")
+        if resume_override is not None:
+            result = resume_override(root, decision.job_id)
+        else:
+            result = continue_micro_visual_run(root, decision.job_id, deps=overrides)
     elif decision.action == "complete":
         result = overrides.get("finalize", finalize_existing_draft)(root, decision.job_id)
     else:
         # Explicit full-production mode: keep the frozen config file untouched,
         # but do not stop at Flow for this run.
+        generated_run_id = f"mv-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
         mode_deps = dict(overrides)
         base_load = mode_deps.get("load_config") or load_flow_config
 
@@ -152,9 +188,14 @@ def run_unified(
             return cfg
 
         mode_deps["load_config"] = full_load
-        result = overrides.get("new_run", run_literature_micro_visual)(root, deps=mode_deps)
+        result = overrides.get("new_run", run_literature_micro_visual)(
+            root, deps=mode_deps, run_id=generated_run_id
+        )
     result = dict(result or {})
     result["unified_mode"] = decision.action
     result["unified_reason"] = decision.reason
-    result["unified_job_id"] = decision.job_id
+    result["unified_job_id"] = (
+        result.get("job_id") or decision.job_id
+    ) if decision.action != "new" else result.get("job_id")
+    result["unified_run_id"] = result.get("run_id") or generated_run_id
     return result

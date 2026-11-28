@@ -130,7 +130,7 @@ def test_prompt_sha_mismatch_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyP
 def test_prior_flow_submission_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _job(tmp_path, ledger=True)
     monkeypatch.setattr(cont, "load_flow_config", lambda _r: {})
-    with pytest.raises(cont.ContinuationError, match="already submitted Flow"):
+    with pytest.raises(cont.ContinuationError, match="generation event is missing"):
         cont.continue_micro_visual_run(tmp_path, JOB, deps=_deps(tmp_path))
 
 

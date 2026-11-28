@@ -439,14 +439,25 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:  # noqa: BLE001
                 lifecycle = None
             result = None
+            failure = None
             try:
                 result = run_unified(project_root)
+            except Exception as exc:  # noqa: BLE001 - classification/resume failure must be terminal
+                failure = f"{type(exc).__name__}: {exc}"
+                result = {
+                    "state": "FAILED", "automatic_publication": False,
+                    "reason": failure, "unified_mode": "error",
+                }
             finally:
                 if lifecycle is not None:
                     lifecycle.close_owned(before_sessions)
+            if failure is not None:
+                print(f"WECHAT VIDEO FAILED: {failure}")
             print(json.dumps(result, ensure_ascii=False, indent=2))
             status = classify_micro_visual_result(result)
             message = status["message"]
+            if failure is not None:
+                message = f"{message} 原因：{failure}"
             if isinstance(result, dict) and result.get("unified_mode"):
                 message = (
                     f"[统一入口:{result['unified_mode']}] "
