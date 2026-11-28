@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import uuid
+
 import argparse
 import getpass
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from .article_summary import run_article_summary
@@ -14,6 +17,7 @@ from .daily_pipelines import (
     run_daily_two_videos,
 )
 from .daily_readiness import inspect_daily_two_video_readiness
+from . import channels_uploader as cu
 from .channels_uploader import (
     UploadBlockedError,
     approve_latest_run,
@@ -25,6 +29,13 @@ from .channels_uploader import (
     upload_latest_approved_run,
     upload_run_to_channels,
 )
+from .micro_visual_browser import load_flow_config
+from .micro_visual_continuation import continue_micro_visual_run, finalize_existing_draft
+from .micro_visual_browser_lifecycle import BrowserLifecycle
+from .micro_visual_pipeline import (
+    DRAFT_SAVED, STOPPED_BEFORE_FLOW_SUBMIT, run_literature_micro_visual,
+)
+from .micro_visual_status import classify_micro_visual_result
 from .model_setup import download_chinese_model, download_model
 from .pipeline import run_slice_a
 from .preflight import run_preflight
@@ -254,6 +265,31 @@ def build_parser() -> argparse.ArgumentParser:
     daily_both.add_argument("--project-root", type=Path, default=root)
     daily_both.add_argument("--published-date", help="Optional Asia/Shanghai publication date YYYY-MM-DD.")
 
+    micro_visual = sub.add_parser(
+        "run-literature-micro-visual",
+        help="Create one 15s Flow video from an existing summary and save a verified draft.",
+    )
+    micro_visual.add_argument("--project-root", type=Path, default=root)
+    micro_visual.add_argument("--published-date", help="Optional Asia/Shanghai publication date YYYY-MM-DD.")
+    micro_visual.add_argument("--state-file", type=Path, default=None,
+                              help="Write the business status JSON used by the BAT for user-visible text.")
+
+    continuation = sub.add_parser(
+        "continue-micro-visual",
+        help="Continue ONE frozen Micro Visual job from Flow submission to a verified draft.",
+    )
+    continuation.add_argument("--project-root", type=Path, default=root)
+    continuation.add_argument("--job-id", required=True,
+                              help="Existing job directory name under outputs/.")
+    continuation.add_argument("--state-file", type=Path, default=None)
+
+    finalize_draft = sub.add_parser(
+        "finalize-micro-visual-draft",
+        help="Finalize an already-saved Micro Visual draft without uploading again.",
+    )
+    finalize_draft.add_argument("--project-root", type=Path, default=root)
+    finalize_draft.add_argument("--job-id", required=True)
+
     return parser
 
 
@@ -366,6 +402,121 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0 if result.get("overall_state") in {"DRAFTS_SAVED", "COMPLETED_WITH_SKIPS"} else 2
+        if args.command == "finalize-micro-visual-draft":
+            result = finalize_existing_draft(args.project_root.resolve(), args.job_id)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            status = classify_micro_visual_result(result)
+            print(f"[MICRO VISUAL STATE] {status['message']}")
+            return int(status["exit_code"])
+        if args.command == "continue-micro-visual":
+            project_root = args.project_root.resolve()
+            state_path = Path(args.state_file).resolve() if args.state_file is not None else None
+            run_id = f"mv-cont-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
+            if state_path is not None:
+                try:
+                    state_path.parent.mkdir(parents=True, exist_ok=True)
+                    cu._write_json_atomic(state_path, {
+                        "run_id": run_id, "state": "RUNNING", "success": False,
+                        "message": "本次续作已启动，业务结果尚未确定。", "exit_code": None,
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+            lifecycle = None
+            before_sessions: dict[str, dict[str, object]] = {}
+            try:
+                flow_cfg = load_flow_config(project_root)
+                override = flow_cfg.get("_uploader_config_override") or {}
+                uploader_session = Path(
+                    str(override.get("session_file") or (project_root / "runtime/edge_session.json"))
+                ).resolve()
+                lifecycle = BrowserLifecycle(project_root, {
+                    "flow": Path(flow_cfg["_flow_session_file"]).resolve(),
+                    "uploader": uploader_session,
+                })
+                before_sessions = lifecycle.snapshot()
+            except Exception:  # noqa: BLE001
+                lifecycle = None
+            result = None
+            try:
+                result = continue_micro_visual_run(
+                    project_root, args.job_id
+                )
+            finally:
+                if lifecycle is not None:
+                    lifecycle.close_owned(before_sessions)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            status = classify_micro_visual_result(result)
+            if state_path is not None:
+                try:
+                    cu._write_json_atomic(state_path, {
+                        "run_id": run_id, "state": status["state"], "success": status["success"],
+                        "message": status["message"], "exit_code": status["exit_code"],
+                        "verified_draft": (result or {}).get("verified_draft"),
+                        "draft_title": (result or {}).get("draft_title"),
+                        "browser_cleanup": getattr(lifecycle, "results", []),
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+            print(f"[MICRO VISUAL STATE] {status['message']}")
+            return int(status["exit_code"])
+        if args.command == "run-literature-micro-visual":
+            project_root = args.project_root.resolve()
+            state_path = Path(args.state_file).resolve() if args.state_file is not None else None
+            run_id = f"mv-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
+            if state_path is not None:
+                try:
+                    state_path.parent.mkdir(parents=True, exist_ok=True)
+                    cu._write_json_atomic(state_path, {
+                        "run_id": run_id,
+                        "state": "RUNNING",
+                        "success": False,
+                        "message": "本次运行已启动，业务结果尚未确定。",
+                        "exit_code": None,
+                    })
+                except Exception:  # noqa: BLE001 - never mask the business result
+                    pass
+            lifecycle = None
+            before_sessions: dict[str, dict[str, object]] = {}
+            try:
+                flow_cfg = load_flow_config(project_root)
+                override = flow_cfg.get("_uploader_config_override") or {}
+                uploader_session = Path(
+                    str(override.get("session_file") or (project_root / "runtime/edge_session.json"))
+                ).resolve()
+                lifecycle = BrowserLifecycle(project_root, {
+                    "flow": Path(flow_cfg["_flow_session_file"]).resolve(),
+                    "uploader": uploader_session,
+                })
+                before_sessions = lifecycle.snapshot()
+            except Exception:  # noqa: BLE001 - cleanup is best-effort, never masks business result
+                lifecycle = None
+            result = None
+            try:
+                result = run_literature_micro_visual(
+                    args.project_root, published_date=args.published_date,
+                    run_id=run_id,
+                )
+            finally:
+                if lifecycle is not None:
+                    lifecycle.close_owned(before_sessions)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            status = classify_micro_visual_result(result)
+            if state_path is not None:
+                try:
+                    cu._write_json_atomic(state_path, {
+                        "run_id": run_id,
+                        "state": status["state"],
+                        "success": status["success"],
+                        "message": status["message"],
+                        "exit_code": status["exit_code"],
+                        "verified_draft": (result or {}).get("verified_draft"),
+                        "draft_title": (result or {}).get("draft_title"),
+                        "browser_cleanup": getattr(lifecycle, "results", []),
+                    })
+                except Exception:  # noqa: BLE001 - never mask the business result
+                    pass
+            print(f"[MICRO VISUAL STATE] {status['message']}")
+            return int(status["exit_code"])
         if args.command == "run-slice-a":
             _validate_editorial_angle(args.fact_card, args.script)
             run_dir = run_slice_a(
