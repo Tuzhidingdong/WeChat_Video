@@ -1,0 +1,12 @@
+{
+  "run_id": "mv-20261128205646-927b777d",
+  "article_id": "100000884_0",
+  "source_article_sha256": "0f3456a638798e44eef071d6710bd9644b727aab619dcb05cfe0ce5f9511b7f2",
+  "source_run_id": "20261124T145207-d1e7fee3",
+  "summary_run_dir": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\opencode\\micro-visual-phase1\\outputs\\mv9\\20261128_210304_628380_100000884_0_micro_visual_content_summary",
+  "summary_sha256": "73561b7573943be6272f15720a2e3ef8ff32fba463f9e3d2a7592da27944d6ec",
+  "visual_theme_sha256": "5d38e14180af66571e79dbb694596bf5cb5f51eb1599fb1d1498816bcf2ac58e",
+  "flow_prompt_sha256": "4db725d6bd1d3e943e8e0ced6e1c9bf891f3803dd446f0441ca340bb771351a9",
+  "prompt_builder_sha256": "b3a046d9f602c98a7f2545bf4e560aae4335c6ff7b920d6beac37efd670cc4cc",
+  "article_specific_theme": true
+}

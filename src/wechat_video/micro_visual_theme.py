@@ -6,6 +6,7 @@ integrity (parseable JSON, required fields, non-empty English text) is checked.
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -153,9 +154,26 @@ def extract_visual_theme(
         prompt=_single_line_prompt(prompt),
         attachments=[Path(summary_path), Path(article_dir) / "article.md"],
     )
+    # Persist the real model response at the moment it is received, before any
+    # normalization, so acceptance can recover it without a second LLM call.
+    metadata = dict(raw.get("_planner_run_metadata") or {})
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cu._write_json_atomic(output_dir / "visual_theme_raw.json", raw)
+    (output_dir / "visual_theme_raw.txt").write_text(
+        json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    cu._write_json_atomic(output_dir / "stage_a_session.json", {
+        "agent": metadata.get("agent") or THEME_AGENT,
+        "model": metadata.get("model"),
+        "session_ids": (metadata.get("usage") or {}).get("session_ids") or [],
+        "attachments": [str(Path(summary_path).resolve()),
+                        str((Path(article_dir) / "article.md").resolve())],
+        "article_id": ctx.get("article_id"),
+        "source_article_sha256": ctx.get("source_article_sha256"),
+        "run_id": ctx.get("run_id"),
+    })
     raw.pop("_planner_run_metadata", None)
     validate_theme(raw, **ctx)
-    output_dir.mkdir(parents=True, exist_ok=True)
     cu._write_json_atomic(output_dir / "visual_theme.json", raw)
     return raw
 

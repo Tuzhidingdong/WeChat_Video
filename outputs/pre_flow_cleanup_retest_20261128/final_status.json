@@ -1,0 +1,23 @@
+{
+  "run_id": "mv-20261128205646-927b777d",
+  "state": "STOPPED_BEFORE_FLOW_SUBMIT",
+  "success": false,
+  "message": "内容准备完成，已按配置停止在 Flow 提交前；尚未生成视频、上传视频或保存草稿。",
+  "exit_code": 0,
+  "verified_draft": null,
+  "draft_title": null,
+  "browser_cleanup": [
+    {
+      "label": "flow",
+      "pid": 15192,
+      "closed": false,
+      "reason": "reused_or_unchanged_session"
+    },
+    {
+      "label": "uploader",
+      "pid": 22516,
+      "closed": false,
+      "reason": "reused_or_unchanged_session"
+    }
+  ]
+}

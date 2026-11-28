@@ -1,0 +1,34 @@
+{
+  "started_at": "2026-11-28T20:56:46",
+  "config_sha256_before": "09b31814be4b25ef9b02c376177110c921118fc230358ae93159f2a139452e9c",
+  "temporary_suffix": "cleanup_20261128_205646",
+  "stop_before_flow_submit_unchanged": true,
+  "bat_exit_code": 0,
+  "error": null,
+  "config_sha256_after": "09b31814be4b25ef9b02c376177110c921118fc230358ae93159f2a139452e9c",
+  "config_restored_ok": true,
+  "final_state": {
+    "run_id": "mv-20261128205646-927b777d",
+    "state": "STOPPED_BEFORE_FLOW_SUBMIT",
+    "success": false,
+    "message": "内容准备完成，已按配置停止在 Flow 提交前；尚未生成视频、上传视频或保存草稿。",
+    "exit_code": 0,
+    "verified_draft": null,
+    "draft_title": null,
+    "browser_cleanup": [
+      {
+        "label": "flow",
+        "pid": 15192,
+        "closed": false,
+        "reason": "reused_or_unchanged_session"
+      },
+      {
+        "label": "uploader",
+        "pid": 22516,
+        "closed": false,
+        "reason": "reused_or_unchanged_session"
+      }
+    ]
+  },
+  "finished_at": "2026-11-28T21:04:44"
+}

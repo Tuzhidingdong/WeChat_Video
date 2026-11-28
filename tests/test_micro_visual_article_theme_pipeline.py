@@ -193,6 +193,7 @@ def test_final_flow_prompt_uses_stage_b_theme_not_fixed_template(tmp_path: Path)
         (tmp_path / "outputs" / result["job_id"] / "visual_theme_binding.json").read_text(encoding="utf-8")
     )
     assert binding["run_id"] == RUN_ID
+    assert binding["source_run_id"] == "20261124T145207-d1e7fee3"
     assert binding["article_specific_theme"] is True
     assert binding["visual_theme_sha256"]
     # Article-specific evidence stays traceable to real claims.
